@@ -43,8 +43,7 @@ const EntriesContainer = styled.div`
   margin-top: 1rem;
   text-align: left;
   max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
+  margin: 0 auto;
 `;
 
 const EntryCard = styled.div`
@@ -208,7 +207,7 @@ const TradingJournal = () => {
     if (user) {
       fetchEntries();
     }
-  }, [user]);
+  }, [user, date]);
 
   const fetchEntries = async () => {
     const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
@@ -280,11 +279,7 @@ const TradingJournal = () => {
   };
 
   const toggleEntry = (entryId) => {
-    if (expandedEntry === entryId) {
-      setExpandedEntry(null);
-    } else {
-      setExpandedEntry(entryId);
-    }
+    setExpandedEntry(expandedEntry === entryId ? null : entryId);
   };
 
   const tileContent = ({ date, view }) => {
@@ -418,7 +413,9 @@ const TradingJournal = () => {
               {expandedEntry === entry.id && (
                 <>
                   {Object.keys(entry).map((key) => (
-                    key !== 'userId' && key !== 'comments' && key !== 'image' && <EntryField key={key}>{`${key.replace(/([A-Z])/g, ' $1').toUpperCase()}: ${entry[key]}`}</EntryField>
+                    key !== 'userId' && key !== 'comments' && key !== 'image' && (
+                      <EntryField key={key}>{`${key.replace(/([A-Z])/g, ' $1').toUpperCase()}: ${entry[key]}`}</EntryField>
+                    )
                   ))}
                   <DeleteButton onClick={() => handleDeleteEntry(entry.id)}>Delete Entry</DeleteButton>
                 </>
