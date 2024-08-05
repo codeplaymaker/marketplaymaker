@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import Hero from './Hero';
 import LoadingScreen from './LoadingScreen';
-import TelegramChat from './TelegramChat'; // Ensure this import is correct
 
 const MainContainer = styled.div`
   font-family: 'Open Sans', sans-serif;
@@ -28,11 +27,6 @@ const Heading = styled.h1`
   color: #fff; /* Light color for headings */
 `;
 
-const SubHeading = styled.h2`
-  font-size: 1.5rem;
-  margin-bottom: 3rem;
-  color: #ddd; /* Slightly lighter color for subheadings */
-`;
 
 const CardContainer = styled.div`
   display: flex;

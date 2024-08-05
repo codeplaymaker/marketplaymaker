@@ -7,7 +7,7 @@ import { db, auth, storage } from '../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
 const Section = styled.section`
