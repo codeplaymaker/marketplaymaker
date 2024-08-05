@@ -27,7 +27,6 @@ const Heading = styled.h1`
   color: #fff; /* Light color for headings */
 `;
 
-
 const CardContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
@@ -185,7 +184,7 @@ const HomePage = () => {
 
   const handleCardClick = (path) => {
     if (user) {
-      navigate('/dashboard');
+      navigate(path);
     } else {
       navigate('/signup');
     }
