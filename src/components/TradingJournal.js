@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
@@ -203,18 +203,19 @@ const TradingJournal = () => {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  useEffect(() => {
+  // Define fetchEntries using useCallback to ensure stable reference
+  const fetchEntries = useCallback(async () => {
     if (user) {
-      fetchEntries();
+      const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      const fetchedEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEntries(fetchedEntries);
     }
-  }, [user, date]);
+  }, [user]);
 
-  const fetchEntries = async () => {
-    const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
-    const querySnapshot = await getDocs(q);
-    const fetchedEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setEntries(fetchedEntries);
-  };
+  useEffect(() => {
+    fetchEntries();
+  }, [fetchEntries, date]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -235,22 +236,20 @@ const TradingJournal = () => {
       const uploadTask = uploadBytesResumable(storageRef, imageFile);
 
       await new Promise((resolve, reject) => {
-        uploadTask.on(
-          'state_changed',
-          null,
-          (error) => {
-            console.error(error);
-            reject(error);
-          },
-          async () => {
-            imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+        uploadTask.on('state_changed', null, reject, () => {
+          getDownloadURL(uploadTask.snapshot.ref).then(url => {
+            imageUrl = url;
             resolve();
-          }
-        );
+          });
+        });
       });
     }
 
-    await addDoc(collection(db, 'tradingJournal'), { ...journalEntry, userId: user.uid, image: imageUrl });
+    const newEntry = { ...journalEntry, image: imageUrl };
+    await addDoc(collection(db, 'tradingJournal'), {
+      ...newEntry,
+      userId: user.uid
+    });
     setJournalEntry({
       pair: '',
       direction: '',
@@ -273,28 +272,13 @@ const TradingJournal = () => {
     fetchEntries();
   };
 
-  const handleDeleteEntry = async (entryId) => {
-    await deleteDoc(doc(db, 'tradingJournal', entryId));
+  const handleDeleteEntry = async (id) => {
+    await deleteDoc(doc(db, 'tradingJournal', id));
     fetchEntries();
   };
 
-  const toggleEntry = (entryId) => {
-    setExpandedEntry(expandedEntry === entryId ? null : entryId);
-  };
-
-  const tileContent = ({ date, view }) => {
-    if (view === 'month') {
-      const dayEntries = entries.filter(
-        entry => new Date(entry.date).toDateString() === date.toDateString()
-      );
-      if (dayEntries.length) {
-        const totalPnl = dayEntries.reduce((acc, entry) => {
-          const pnlValue = parseFloat(stripCurrencySymbol(entry.pnl));
-          return acc + (isNaN(pnlValue) ? 0 : pnlValue);
-        }, 0);
-        return <span>📈 PnL: {totalPnl.toFixed(2)}</span>;
-      }
-    }
+  const toggleEntry = (id) => {
+    setExpandedEntry(expandedEntry === id ? null : id);
   };
 
   const calculateStats = () => {
@@ -353,6 +337,17 @@ const TradingJournal = () => {
   };
 
   const stats = calculateStats();
+
+  // Define tileContent function to display content on each calendar tile
+  const tileContent = ({ date, view }) => {
+    return (
+      <div>
+        {entries.some(entry => new Date(entry.date).toDateString() === date.toDateString()) && (
+          <div>Trade</div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Section>
