@@ -109,7 +109,7 @@ const Hamburger = styled.div`
 `;
 
 const MobileMenu = styled.div`
-  display: none;
+  display: ${props => (props.open ? 'flex' : 'none')};
   flex-direction: column;
   background-color: #000;
   position: absolute;
@@ -118,9 +118,10 @@ const MobileMenu = styled.div`
   width: 100%;
   padding: 1rem;
   gap: 1rem;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 
-  @media (max-width: 768px) {
-    display: flex;
+  @media (min-width: 769px) {
+    display: none;
   }
 `;
 
@@ -182,12 +183,12 @@ const Navbar = () => {
           </>
         )}
       </NavLinks>
-      <Hamburger onClick={toggleMenu}>
+      <Hamburger onClick={toggleMenu} aria-expanded={isOpen} aria-controls="mobile-menu">
         <span />
         <span />
         <span />
       </Hamburger>
-      <MobileMenu open={isOpen}>
+      <MobileMenu id="mobile-menu" open={isOpen}>
         <NavLink>
           <Link to="/" onClick={() => setIsOpen(false)}>Home</Link>
         </NavLink>
