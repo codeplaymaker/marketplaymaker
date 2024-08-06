@@ -11,25 +11,29 @@ const Overlay = styled.div`
   display: flex;
   justify-content: center;
   align-items: center;
+  z-index: 1000; /* Ensure it overlays above other content */
 `;
 
 const Modal = styled.div`
   background: #fff;
-  padding: 2rem;
+  padding: 1rem;
   border-radius: 8px;
   width: 90%;
   max-width: 800px;
+  max-height: 90vh; /* Ensure the modal fits within the viewport */
+  overflow-y: auto; /* Allow scrolling if content overflows */
   position: relative;
 `;
 
 const CloseButton = styled.button`
   position: absolute;
-  top: 1rem;
-  right: 1rem;
+  top: 0.1rem;
+  right: 0.1rem;
   background: none;
   border: none;
   font-size: 1.5rem;
   cursor: pointer;
+  z-index: 1001; /* Ensure it overlays above the modal content */
 `;
 
 const TradingViewModal = ({ stockSymbol, onClose }) => {
