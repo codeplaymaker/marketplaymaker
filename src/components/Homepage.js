@@ -200,21 +200,21 @@ const HomePage = () => {
       <Section>
         <Heading>Explore Our Features</Heading>
         <CardContainer>
-          <div onClick={() => handleCardClick('/playbooks')} style={{ position: 'relative' }}>
+          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
             <Card>
               <Badge>💎</Badge>
               <Emoji>📚</Emoji>
               <CardTitle>Playbooks</CardTitle>
             </Card>
           </div>
-          <div onClick={() => handleCardClick('/plays')} style={{ position: 'relative' }}>
+          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
             <Card>
               <Badge>💎</Badge>
               <Emoji>🎮</Emoji>
               <CardTitle>Plays</CardTitle>
             </Card>
           </div>
-          <div onClick={() => handleCardClick('/stats')} style={{ position: 'relative' }}>
+          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
             <Card>
               <Badge>💎</Badge>
               <Emoji>🔍</Emoji>

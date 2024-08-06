@@ -34,9 +34,15 @@ const Button = styled.button`
   }
 `;
 
+const ErrorMessage = styled.p`
+  color: red;
+  margin-top: 1rem;
+`;
+
 const SignUp = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -50,11 +56,16 @@ const SignUp = () => {
 
   const handleSignUp = async (e) => {
     e.preventDefault();
+    setError(''); // Clear any previous errors
     try {
       await createUserWithEmailAndPassword(auth, email, password);
       navigate('/dashboard');
     } catch (error) {
-      console.error('Error signing up:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        setError("You're already signed up, please log in.");
+      } else {
+        setError('Error signing up: ' + error.message);
+      }
     }
   };
 
@@ -75,6 +86,7 @@ const SignUp = () => {
           onChange={(e) => setPassword(e.target.value)}
         />
         <Button type="submit">Sign Up</Button>
+        {error && <ErrorMessage>{error}</ErrorMessage>}
       </Form>
     </Section>
   );

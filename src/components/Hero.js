@@ -31,7 +31,7 @@ const HeroContent = styled.div`
 `;
 
 const HeroHeading = styled.h1`
-  font-size: 4rem; /* Increased font size for emphasis */
+  font-size: 3rem; /* Increased font size for emphasis */
   margin-bottom: 1rem;
   color: #d3d3d3; /* Light grey for a softer look */
   font-family: 'Inter', sans-serif; /* Ensure 'Inter' font is imported */

@@ -53,12 +53,33 @@ const Login = () => {
       await signInWithEmailAndPassword(auth, email, password);
       navigate('/dashboard');
     } catch (error) {
-      if (error.code === 'auth/user-not-found') {
-        setError('Email not recognized. Please sign up.');
-      } else if (error.code === 'auth/wrong-password') {
-        setError('Incorrect password. Please try again.');
-      } else {
-        setError('An error occurred. Please try again later.');
+      // Log the full error object to inspect its structure
+      console.error('Login error:', error);
+      console.error('Error code:', error.code); // Log the error code
+
+      // Handle error based on error code
+      switch (error.code) {
+        case 'auth/user-not-found':
+          setError('Email not recognized. Please sign up.');
+          break;
+        case 'auth/wrong-password':
+          setError('Incorrect password. Please try again.');
+          break;
+        case 'auth/invalid-email':
+          setError('Invalid email format. Please check and try again.');
+          break;
+        case 'auth/user-disabled':
+          setError('This user has been disabled. Please contact support.');
+          break;
+        case 'auth/invalid-credential':
+          setError('Invalid credentials. Please check and try again.');
+          break;
+        case 'auth/too-many-requests':
+          setError('Too many failed login attempts. Please try again later.');
+          break;
+        default:
+          setError('An error occurred. Please try again later.');
+          break;
       }
     }
   };
