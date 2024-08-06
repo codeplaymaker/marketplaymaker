@@ -19,21 +19,36 @@ const Modal = styled.div`
   padding: 1rem;
   border-radius: 8px;
   width: 90%;
-  max-width: 800px;
-  max-height: 90vh; /* Ensure the modal fits within the viewport */
+  max-width: 75vw; /* Ensure modal doesn't exceed viewport width */
+  max-height: 75vh; /* Ensure modal fits within the viewport */
   overflow-y: auto; /* Allow scrolling if content overflows */
   position: relative;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); /* Optional: add shadow for better visibility */
+
+  /* Responsive styles */
+  @media (max-width: 768px) {
+    width: 95%;
+    max-width: 95vw;
+    max-height: 80vh;
+  }
+
+  @media (max-width: 480px) {
+    width: 98%;
+    max-width: 98vw;
+    max-height: 70vh;
+  }
 `;
 
 const CloseButton = styled.button`
   position: absolute;
-  top: 0.1rem;
-  right: 0.1rem;
+  top: 0.2rem;
+  right: 0.2rem;
   background: none;
   border: none;
   font-size: 1.5rem;
   cursor: pointer;
   z-index: 1001; /* Ensure it overlays above the modal content */
+  color: #333; /* Optional: set color for better visibility */
 `;
 
 const TradingViewModal = ({ stockSymbol, onClose }) => {
@@ -41,7 +56,7 @@ const TradingViewModal = ({ stockSymbol, onClose }) => {
     new window.TradingView.widget({
       container_id: 'tradingview_widget',
       width: '100%',
-      height: '500px',
+      height: '100%', // Adjust to ensure responsiveness
       symbol: stockSymbol,
       interval: 'D',
       timezone: 'Etc/UTC',
@@ -56,8 +71,8 @@ const TradingViewModal = ({ stockSymbol, onClose }) => {
       save_image: false,
       studies: [],
       show_popup_button: true,
-      popup_width: '1000',
-      popup_height: '650',
+      popup_width: '100%',
+      popup_height: '100%',
     });
   }, [stockSymbol]);
 
@@ -65,7 +80,7 @@ const TradingViewModal = ({ stockSymbol, onClose }) => {
     <Overlay>
       <Modal>
         <CloseButton onClick={onClose}>&times;</CloseButton>
-        <div id="tradingview_widget"></div>
+        <div id="tradingview_widget" style={{ height: '100%', width: '100%' }}></div>
       </Modal>
     </Overlay>
   );
