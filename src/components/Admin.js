@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import ImageUpload from './ImageUpload';
 
@@ -46,7 +46,7 @@ const TextArea = styled.textarea`
 
 const Button = styled.button`
   padding: 0.75rem 2rem;
-  background-color: #000; /* Black background */
+  background-color: #000;
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -56,7 +56,7 @@ const Button = styled.button`
   transition: background-color 0.3s;
 
   &:hover {
-    background-color: #333; /* Darker black on hover */
+    background-color: #333;
   }
 `;
 
@@ -122,8 +122,19 @@ const Admin = () => {
     image: '',
     stockSymbol: ''
   });
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentId, setCurrentId] = useState(null);
+  const [isEditingElement, setIsEditingElement] = useState(false);
+  const [currentElementId, setCurrentElementId] = useState(null);
+
+  const [blogData, setBlogData] = useState([]);
+  const [newBlog, setNewBlog] = useState({
+    title: '',
+    date: '',
+    author: '',
+    description: '',
+    image: ''
+  });
+  const [isEditingBlog, setIsEditingBlog] = useState(false);
+  const [currentBlogId, setCurrentBlogId] = useState(null);
 
   const fetchDashboardData = async () => {
     const querySnapshot = await getDocs(collection(db, 'dashboard'));
@@ -138,53 +149,64 @@ const Admin = () => {
     fetchDashboardData();
   }, []);
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e, setState, state) => {
     const { name, value } = e.target;
-    setNewElement({ ...newElement, [name]: value });
+    setState({ ...state, [name]: value });
   };
 
-  const handleImageUpload = (url) => {
-    setNewElement({ ...newElement, image: url });
+  const handleImageUpload = (url, setState, state) => {
+    setState({ ...state, image: url });
   };
 
   const handleAddOrUpdateElement = async (e) => {
     e.preventDefault();
-    if (isEditing) {
-      await updateDoc(doc(db, 'dashboard', currentId), newElement);
-      setIsEditing(false);
-      setCurrentId(null);
-    } else {
-      await addDoc(collection(db, 'dashboard'), newElement);
+    try {
+      if (isEditingElement) {
+        const docRef = doc(db, 'dashboard', currentElementId);
+        const docSnapshot = await getDoc(docRef);
+        if (docSnapshot.exists()) {
+          await updateDoc(docRef, newElement);
+        } else {
+          console.error('Document does not exist:', currentElementId);
+        }
+        setIsEditingElement(false);
+        setCurrentElementId(null);
+      } else {
+        await addDoc(collection(db, 'dashboard'), newElement);
+      }
+      setNewElement({
+        title: '',
+        date: '',
+        content: '',
+        image: '',
+        stockSymbol: ''
+      });
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error adding or updating document:', error);
     }
-    setNewElement({
-      title: '',
-      date: '',
-      content: '',
-      image: '',
-      stockSymbol: ''
-    });
-    fetchDashboardData();
   };
 
   const handleEditElement = (item) => {
     setNewElement(item);
-    setIsEditing(true);
-    setCurrentId(item.id);
+    setIsEditingElement(true);
+    setCurrentElementId(item.id);
   };
 
   const handleDeleteElement = async (id) => {
-    await deleteDoc(doc(db, 'dashboard', id));
-    fetchDashboardData();
+    try {
+      const docRef = doc(db, 'dashboard', id);
+      const docSnapshot = await getDoc(docRef);
+      if (docSnapshot.exists()) {
+        await deleteDoc(docRef);
+      } else {
+        console.error('Document does not exist:', id);
+      }
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error deleting document:', error);
+    }
   };
-
-  const [blogData, setBlogData] = useState([]);
-  const [newBlog, setNewBlog] = useState({
-    title: '',
-    date: '',
-    author: '',
-    description: '',
-    image: ''
-  });
 
   const fetchBlogData = async () => {
     const querySnapshot = await getDocs(collection(db, 'blogPosts'));
@@ -199,43 +221,54 @@ const Admin = () => {
     fetchBlogData();
   }, []);
 
-  const handleBlogInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewBlog({ ...newBlog, [name]: value });
-  };
-
-  const handleBlogImageUpload = (url) => {
-    setNewBlog({ ...newBlog, image: url });
-  };
-
   const handleAddOrUpdateBlog = async (e) => {
     e.preventDefault();
-    if (isEditing) {
-      await updateDoc(doc(db, 'blogPosts', currentId), newBlog);
-      setIsEditing(false);
-      setCurrentId(null);
-    } else {
-      await addDoc(collection(db, 'blogPosts'), newBlog);
+    try {
+      if (isEditingBlog) {
+        const docRef = doc(db, 'blogPosts', currentBlogId);
+        const docSnapshot = await getDoc(docRef);
+        if (docSnapshot.exists()) {
+          await updateDoc(docRef, newBlog);
+        } else {
+          console.error('Document does not exist:', currentBlogId);
+        }
+        setIsEditingBlog(false);
+        setCurrentBlogId(null);
+      } else {
+        await addDoc(collection(db, 'blogPosts'), newBlog);
+      }
+      setNewBlog({
+        title: '',
+        date: '',
+        author: '',
+        description: '',
+        image: ''
+      });
+      fetchBlogData();
+    } catch (error) {
+      console.error('Error adding or updating document:', error);
     }
-    setNewBlog({
-      title: '',
-      date: '',
-      author: '',
-      description: '',
-      image: ''
-    });
-    fetchBlogData();
   };
 
   const handleEditBlog = (item) => {
     setNewBlog(item);
-    setIsEditing(true);
-    setCurrentId(item.id);
+    setIsEditingBlog(true);
+    setCurrentBlogId(item.id);
   };
 
   const handleDeleteBlog = async (id) => {
-    await deleteDoc(doc(db, 'blogPosts', id));
-    fetchBlogData();
+    try {
+      const docRef = doc(db, 'blogPosts', id);
+      const docSnapshot = await getDoc(docRef);
+      if (docSnapshot.exists()) {
+        await deleteDoc(docRef);
+      } else {
+        console.error('Document does not exist:', id);
+      }
+      fetchBlogData();
+    } catch (error) {
+      console.error('Error deleting document:', error);
+    }
   };
 
   return (
@@ -248,29 +281,29 @@ const Admin = () => {
           name="title"
           placeholder="Title"
           value={newElement.title}
-          onChange={handleInputChange}
+          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
         />
         <Input
           type="date"
           name="date"
           value={newElement.date}
-          onChange={handleInputChange}
+          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
         />
         <TextArea
           name="content"
           placeholder="Content"
           value={newElement.content}
-          onChange={handleInputChange}
+          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
         />
         <Input
           type="text"
           name="stockSymbol"
           placeholder="Stock Symbol"
           value={newElement.stockSymbol}
-          onChange={handleInputChange}
+          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
         />
-        <ImageUpload onUpload={handleImageUpload} />
-        <Button type="submit">{isEditing ? 'Update Element' : 'Add Element'}</Button>
+        <ImageUpload onUpload={(url) => handleImageUpload(url, setNewElement, newElement)} />
+        <Button type="submit">{isEditingElement ? 'Update Element' : 'Add Element'}</Button>
       </Form>
 
       <Heading>Current Elements</Heading>
@@ -295,29 +328,29 @@ const Admin = () => {
           name="title"
           placeholder="Title"
           value={newBlog.title}
-          onChange={handleBlogInputChange}
+          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
         />
         <Input
           type="date"
           name="date"
           value={newBlog.date}
-          onChange={handleBlogInputChange}
+          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
         />
         <Input
           type="text"
           name="author"
           placeholder="Author"
           value={newBlog.author}
-          onChange={handleBlogInputChange}
+          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
         />
         <TextArea
           name="description"
           placeholder="Description"
           value={newBlog.description}
-          onChange={handleBlogInputChange}
+          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
         />
-        <ImageUpload onUpload={handleBlogImageUpload} />
-        <Button type="submit">{isEditing ? 'Update Blog' : 'Add Blog'}</Button>
+        <ImageUpload onUpload={(url) => handleImageUpload(url, setNewBlog, newBlog)} />
+        <Button type="submit">{isEditingBlog ? 'Update Blog' : 'Add Blog'}</Button>
       </Form>
 
       <Heading>Current Blog Posts</Heading>

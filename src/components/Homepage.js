@@ -4,11 +4,15 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import Hero from './Hero';
 import LoadingScreen from './LoadingScreen';
+import { HelmetProvider, Helmet } from 'react-helmet-async'; // Import for SEO management
 
 const MainContainer = styled.div`
   font-family: 'Open Sans', sans-serif;
   color: #fff;
   background-color: #000; /* Space Black background for the whole page */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh; /* Ensure container covers full height */
 `;
 
 const Section = styled.section`
@@ -95,8 +99,9 @@ const Badge = styled.div`
 `;
 
 const CallToAction = styled.div`
-  margin-top: 3rem;
+  margin-top: auto; /* Pushes the CTA button to the bottom */
   text-align: center;
+  padding: 2rem;
 `;
 
 const CTAButton = styled.button`
@@ -109,6 +114,7 @@ const CTAButton = styled.button`
   cursor: pointer;
   transition: background-color 0.3s, transform 0.3s;
   margin: 0 auto;
+  display: block;
 
   &:hover {
     background-color: #e33e2d;
@@ -195,78 +201,94 @@ const HomePage = () => {
   }
 
   return (
-    <MainContainer>
-      <Hero />
-      <Section>
-        <Heading>Explore Our Features</Heading>
-        <CardContainer>
-          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-            <Card>
-              <Badge>💎</Badge>
-              <Emoji>📚</Emoji>
-              <CardTitle>Playbooks</CardTitle>
-            </Card>
-          </div>
-          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-            <Card>
-              <Badge>💎</Badge>
-              <Emoji>🎮</Emoji>
-              <CardTitle>Plays</CardTitle>
-            </Card>
-          </div>
-          <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-            <Card>
-              <Badge>💎</Badge>
-              <Emoji>🔍</Emoji>
-              <CardTitle>Stats</CardTitle>
-            </Card>
-          </div>
-        </CardContainer>
-      </Section>
+    <HelmetProvider>
+      <Helmet>
+        <title>marketplaymaker</title>
+        <meta name="description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
+        <meta name="robots" content="index, follow" />
+        <meta property="og:title" content="Home - marketplaymaker"/>
+        <meta property="og:description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
+        <meta property="og:image" content="URL_TO_IMAGE" />
+        <meta property="og:url" content="YOUR_PAGE_URL" />
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:title" content="Home - marketplaymaker" />
+        <meta property="twitter:description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
+        <meta property="twitter:image" content="URL_TO_IMAGE" />
+      </Helmet>
 
-      <BenefitsSection>
-        <Heading>Why Choose Us?</Heading>
-        <CardContainer>
-          <BenefitCard>
-            <Emoji>🚀</Emoji>
-            <CardTitle>Expert Insights</CardTitle>
-            <p>Gain access to expert insights and strategies to maximize your investments.</p>
-          </BenefitCard>
-          <BenefitCard>
-            <Emoji>📈</Emoji>
-            <CardTitle>Real-Time Data</CardTitle>
-            <p>Stay updated with real-time market data and analytics.</p>
-          </BenefitCard>
-          <BenefitCard>
-            <Emoji>🤝</Emoji>
-            <CardTitle>Community Support</CardTitle>
-            <p>Join a community of like-minded investors and get support and advice.</p>
-          </BenefitCard>
-        </CardContainer>
-      </BenefitsSection>
+      <MainContainer>
+        <Hero />
+        <Section>
+          <Heading>Explore Our Features</Heading>
+          <CardContainer>
+            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
+              <Card>
+                <Badge>💎</Badge>
+                <Emoji>📚</Emoji>
+                <CardTitle>Playbooks</CardTitle>
+              </Card>
+            </div>
+            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
+              <Card>
+                <Badge>💎</Badge>
+                <Emoji>🎮</Emoji>
+                <CardTitle>Plays</CardTitle>
+              </Card>
+            </div>
+            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
+              <Card>
+                <Badge>💎</Badge>
+                <Emoji>🔍</Emoji>
+                <CardTitle>Stats</CardTitle>
+              </Card>
+            </div>
+          </CardContainer>
+        </Section>
 
-      <TestimonialsSection>
-        <Heading>What Our Users Say</Heading>
-        <CardContainer>
-          <TestimonialBubble>
-            <TestimonialText>"MarketPlaymaker has completely transformed my investment strategy. The insights are invaluable!"</TestimonialText>
-            <TestimonialAuthor>— Jane Doe</TestimonialAuthor>
-          </TestimonialBubble>
-          <TestimonialBubble>
-            <TestimonialText>"I love the community aspect of MarketPlaymaker. I've learned so much from other members."</TestimonialText>
-            <TestimonialAuthor>— John Smith</TestimonialAuthor>
-          </TestimonialBubble>
-          <TestimonialBubble>
-            <TestimonialText>"The real-time data and analytics have given me a significant edge in the market."</TestimonialText>
-            <TestimonialAuthor>— Emily Johnson</TestimonialAuthor>
-          </TestimonialBubble>
-        </CardContainer>
-      </TestimonialsSection>
+        <BenefitsSection>
+          <Heading>Why Choose Us?</Heading>
+          <CardContainer>
+            <BenefitCard>
+              <Emoji>🚀</Emoji>
+              <CardTitle>Expert Insights</CardTitle>
+              <p>Gain access to expert insights and strategies to maximize your investments.</p>
+            </BenefitCard>
+            <BenefitCard>
+              <Emoji>📈</Emoji>
+              <CardTitle>Real-Time Data</CardTitle>
+              <p>Stay updated with real-time market data and analytics.</p>
+            </BenefitCard>
+            <BenefitCard>
+              <Emoji>🤝</Emoji>
+              <CardTitle>Community Support</CardTitle>
+              <p>Join a community of like-minded investors and get support and advice.</p>
+            </BenefitCard>
+          </CardContainer>
+        </BenefitsSection>
 
-      <CallToAction>
-        <CTAButton onClick={() => navigate('/signup')}>Get Started Now</CTAButton>
-      </CallToAction>
-    </MainContainer>
+        <TestimonialsSection>
+          <Heading>What Our Users Say</Heading>
+          <CardContainer>
+            <TestimonialBubble>
+              <TestimonialText>"MarketPlaymaker has completely transformed my investment strategy. The insights are invaluable!"</TestimonialText>
+              <TestimonialAuthor>— Jane Doe</TestimonialAuthor>
+            </TestimonialBubble>
+            <TestimonialBubble>
+              <TestimonialText>"I love the community aspect of MarketPlaymaker. I've learned so much from other members."</TestimonialText>
+              <TestimonialAuthor>— John Smith</TestimonialAuthor>
+            </TestimonialBubble>
+            <TestimonialBubble>
+              <TestimonialText>"The real-time data and analytics have given me a significant edge in the market."</TestimonialText>
+              <TestimonialAuthor>— Emily Johnson</TestimonialAuthor>
+            </TestimonialBubble>
+          </CardContainer>
+        </TestimonialsSection>
+
+        <CallToAction>
+          <CTAButton onClick={() => navigate('/signup')}>Get Started Now</CTAButton>
+        </CallToAction>
+      </MainContainer>
+    </HelmetProvider>
   );
 };
 

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
+import { HelmetProvider, Helmet } from 'react-helmet-async';
+import { LazyLoadImage } from 'react-lazy-load-image-component'; // For lazy loading images
 
 const Section = styled.section`
   padding: 4rem 2rem;
@@ -40,11 +42,11 @@ const BlogCard = styled.div`
   }
 `;
 
-const BlogImage = styled.img`
+const BlogImage = styled(LazyLoadImage)`
   width: 100%;
   height: auto;
   max-height: 200px;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 8px;
   margin-bottom: 1rem;
 `;
@@ -119,7 +121,7 @@ const CloseButton = styled.button`
   }
 `;
 
-const ModalImage = styled.img`
+const ModalImage = styled(LazyLoadImage)`
   width: 100%;
   height: auto;
   max-height: 500px;
@@ -131,6 +133,7 @@ const ModalImage = styled.img`
 const Blog = () => {
   const [blogs, setBlogs] = useState([]);
   const [selectedBlog, setSelectedBlog] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchBlogPosts = async () => {
@@ -143,6 +146,8 @@ const Blog = () => {
         setBlogs(blogPosts);
       } catch (error) {
         console.error('Error fetching blog posts:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -162,34 +167,55 @@ const Blog = () => {
   };
 
   return (
-    <Section>
-      <Heading>Blog</Heading>
-      <BlogContainer>
-        {blogs.map((post) => (
-          <BlogCard key={post.id} onClick={() => handleBlogClick(post)}>
-            <BlogImage src={post.image} alt={post.title} />
-            <BlogTitle>{post.title}</BlogTitle>
-            <BlogDate>{new Date(post.date).toLocaleDateString()}</BlogDate>
-            <BlogAuthor>{post.author}</BlogAuthor>
-            <BlogDescription>{truncateText(post.description, 100)}</BlogDescription>
-            <ReadMoreLink>Keep reading</ReadMoreLink>
-          </BlogCard>
-        ))}
-      </BlogContainer>
+    <HelmetProvider>
+      <Helmet>
+        <title>Blog - marketplaymaker</title>
+        <meta name="description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
+        <meta name="robots" content="index, follow" />
+        <meta property="og:title" content="Blog - marketplaymaker"/>
+        <meta property="og:description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
+        <meta property="og:image" content={selectedBlog ? selectedBlog.image : ''} />
+        <meta property="og:url" content={window.location.href} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Blog - marketplaymaker" />
+        <meta name="twitter:description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
+        <meta name="twitter:image" content={selectedBlog ? selectedBlog.image : ''} />
+        {/* Add more meta tags as needed */}
+      </Helmet>
 
-      {selectedBlog && (
-        <Modal show={!!selectedBlog}>
-          <ModalContent>
-            <CloseButton onClick={handleCloseModal}>Close</CloseButton>
-            <ModalImage src={selectedBlog.image} alt={selectedBlog.title} />
-            <BlogTitle>{selectedBlog.title}</BlogTitle>
-            <BlogDate>{new Date(selectedBlog.date).toLocaleDateString()}</BlogDate>
-            <BlogAuthor>{selectedBlog.author}</BlogAuthor>
-            <BlogDescription>{selectedBlog.description}</BlogDescription>
-          </ModalContent>
-        </Modal>
-      )}
-    </Section>
+      <Section>
+        <Heading>Blog</Heading>
+        {loading ? (
+          <p>Loading blog posts...</p>
+        ) : (
+          <BlogContainer>
+            {blogs.map((post) => (
+              <BlogCard key={post.id} onClick={() => handleBlogClick(post)}>
+                <BlogImage src={post.image} alt={post.title} />
+                <BlogTitle>{post.title}</BlogTitle>
+                <BlogDate>{new Date(post.date).toLocaleDateString()}</BlogDate>
+                <BlogAuthor>{post.author}</BlogAuthor>
+                <BlogDescription>{truncateText(post.description, 100)}</BlogDescription>
+                <ReadMoreLink>Keep reading</ReadMoreLink>
+              </BlogCard>
+            ))}
+          </BlogContainer>
+        )}
+
+        {selectedBlog && (
+          <Modal show={!!selectedBlog}>
+            <ModalContent>
+              <CloseButton onClick={handleCloseModal}>Close</CloseButton>
+              <ModalImage src={selectedBlog.image} alt={selectedBlog.title} />
+              <BlogTitle>{selectedBlog.title}</BlogTitle>
+              <BlogDate>{new Date(selectedBlog.date).toLocaleDateString()}</BlogDate>
+              <BlogAuthor>{selectedBlog.author}</BlogAuthor>
+              <BlogDescription>{selectedBlog.description}</BlogDescription>
+            </ModalContent>
+          </Modal>
+        )}
+      </Section>
+    </HelmetProvider>
   );
 };
 

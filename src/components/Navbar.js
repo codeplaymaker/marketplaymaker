@@ -152,11 +152,9 @@ const Navbar = () => {
         <NavLink>
           <Link to="/">Home</Link>
         </NavLink>
-        {user && (
-          <NavLink>
-            <Link to="/blog">Blog</Link>
-          </NavLink>
-        )}
+        <NavLink>
+          <Link to="/blog">Blog</Link>
+        </NavLink>
         {user ? (
           <>
             <NavLink>
@@ -192,11 +190,9 @@ const Navbar = () => {
         <NavLink>
           <Link to="/" onClick={() => setIsOpen(false)}>Home</Link>
         </NavLink>
-        {user && (
-          <NavLink>
-            <Link to="/blog" onClick={() => setIsOpen(false)}>Blog</Link>
-          </NavLink>
-        )}
+        <NavLink>
+          <Link to="/blog" onClick={() => setIsOpen(false)}>Blog</Link>
+        </NavLink>
         {user ? (
           <>
             <NavLink>

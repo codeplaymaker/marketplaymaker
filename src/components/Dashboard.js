@@ -3,10 +3,10 @@ import styled from 'styled-components';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import TradingViewModal from './TradingViewModal';
-import ImagePopup from './ImagePopup'; // Import the ImagePopup component
+import ImagePopup from './ImagePopup';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faDesktop } from '@fortawesome/free-solid-svg-icons';
-import LoadingScreen from './LoadingScreen'; // Import the LoadingScreen component
+import LoadingScreen from './LoadingScreen';
 
 const Section = styled.section`
   padding: 4rem 2rem;
@@ -152,8 +152,10 @@ const Dashboard = () => {
   }, []);
 
   const handleButtonClick = (stockSymbol) => {
-    setSelectedStock(stockSymbol);
-    setIsModalOpen(true);
+    if (stockSymbol) {
+      setSelectedStock(stockSymbol);
+      setIsModalOpen(true);
+    }
   };
 
   const handleCloseModal = () => {
@@ -189,14 +191,16 @@ const Dashboard = () => {
               {item.image && <CardImage src={item.image} alt={item.title} />}
             </ImageContainer>
             <CardContent>{item.content}</CardContent>
-            <IconButton onClick={() => handleButtonClick(item.stockSymbol)}>
-              <FontAwesomeIcon icon={faDesktop} size="lg" />
-              <span>Chart</span>
-            </IconButton>
+            {item.stockSymbol && (
+              <IconButton onClick={() => handleButtonClick(item.stockSymbol)}>
+                <FontAwesomeIcon icon={faDesktop} size="lg" />
+                <span>Chart</span>
+              </IconButton>
+            )}
           </Card>
         ))}
       </CardContainer>
-      {isModalOpen && (
+      {isModalOpen && selectedStock && (
         <TradingViewModal
           stockSymbol={selectedStock}
           onClose={handleCloseModal}
