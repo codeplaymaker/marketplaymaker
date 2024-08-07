@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { HelmetProvider, Helmet } from 'react-helmet-async';
-import { LazyLoadImage } from 'react-lazy-load-image-component'; // For lazy loading images
+import { LazyLoadImage } from 'react-lazy-load-image-component';
 
 const Section = styled.section`
   padding: 4rem 2rem;
@@ -39,6 +39,11 @@ const BlogCard = styled.div`
 
   &:hover {
     transform: translateY(-5px);
+  }
+
+  @media (max-width: 600px) {
+    width: 100%;
+    max-width: 400px;
   }
 `;
 
@@ -96,15 +101,23 @@ const Modal = styled.div`
   background-color: rgba(0, 0, 0, 0.8);
   padding: 2rem;
   z-index: 1000;
+  overflow-y: auto; /* Allow scrolling if content overflows */
 `;
 
 const ModalContent = styled.div`
   background-color: #fff;
   padding: 2rem;
   border-radius: 8px;
-  max-width: 800px;
-  margin: 5% auto;
+  max-width: 90%;
+  max-height: 90%;
+  margin: auto;
   text-align: left;
+  overflow-y: auto; /* Allow scrolling within the modal if needed */
+
+  @media (max-width: 600px) {
+    max-width: 100%;
+    margin: 0;
+  }
 `;
 
 const CloseButton = styled.button`
@@ -180,7 +193,6 @@ const Blog = () => {
         <meta name="twitter:title" content="Blog - marketplaymaker" />
         <meta name="twitter:description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
         <meta name="twitter:image" content={selectedBlog ? selectedBlog.image : ''} />
-        {/* Add more meta tags as needed */}
       </Helmet>
 
       <Section>
