@@ -179,7 +179,7 @@ const Dashboard = () => {
 
   return (
     <Section>
-      <Heading>📚🎮🔎</Heading>
+      <Heading>🚀</Heading>
       <CardContainer>
         {data.map((item) => (
           <Card key={item.id}>

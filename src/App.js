@@ -8,8 +8,9 @@ import Dashboard from './components/Dashboard';
 import Admin from './components/Admin';
 import TradingJournal from './components/TradingJournal';
 import ProtectedRoute from './components/ProtectedRoute';
-import { AuthProvider } from './hooks/useAuth'; // Ensure path is correct
+import { AuthProvider } from './hooks/useAuth';
 import Blog from './components/Blog';
+import TradePlanComponent from './components/TradePlanComponent'; // Import TradePlanComponent
 
 function App() {
   return (
@@ -42,6 +43,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <TradingJournal />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trade-plan"
+            element={
+              <ProtectedRoute>
+                <TradePlanComponent />
               </ProtectedRoute>
             }
           />

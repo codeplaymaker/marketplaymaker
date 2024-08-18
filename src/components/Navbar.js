@@ -19,7 +19,7 @@ const Nav = styled.nav`
 `;
 
 const LogoImage = styled.img`
-  width: 50px; /* Adjust the size as needed */
+  width: 50px;
   height: auto;
   transition: transform 0.3s;
   &:hover {
@@ -31,7 +31,7 @@ const NavLinks = styled.ul`
   list-style: none;
   display: flex;
   gap: 2rem;
-  align-items: center; /* Ensure alignment with the button */
+  align-items: center;
 
   @media (max-width: 768px) {
     display: none;
@@ -40,13 +40,14 @@ const NavLinks = styled.ul`
 
 const NavLink = styled.li`
   position: relative;
+
   a {
     color: #fff;
     text-decoration: none;
     font-size: 1rem;
     transition: color 0.3s, transform 0.3s;
-
-    &:hover {
+    
+    &.active, &:hover {
       color: #ff4136;
       transform: scale(1.1);
     }
@@ -64,7 +65,7 @@ const NavLink = styled.li`
     left: 0;
   }
 
-  &:hover:after {
+  a.active:after {
     width: 100%;
   }
 `;
@@ -133,7 +134,7 @@ const Navbar = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      navigate('/login'); // Redirect to login page after logout
+      navigate('/login');
     } catch (error) {
       console.error('Error logging out:', error);
     }
@@ -150,22 +151,27 @@ const Navbar = () => {
       </Link>
       <NavLinks>
         <NavLink>
-          <Link to="/">Home</Link>
+          <Link to="/" className={({ isActive }) => (isActive ? 'active' : '')}>Home</Link>
         </NavLink>
         <NavLink>
-          <Link to="/blog">Blog</Link>
+          <Link to="/blog" className={({ isActive }) => (isActive ? 'active' : '')}>Blog</Link>
         </NavLink>
+        {user && (
+          <NavLink>
+            <Link to="/trade-plan" className={({ isActive }) => (isActive ? 'active' : '')}>Trade Plan</Link>
+          </NavLink>
+        )}
         {user ? (
           <>
             <NavLink>
-              <Link to="/trading-journal">Trading Journal</Link>
+              <Link to="/trading-journal" className={({ isActive }) => (isActive ? 'active' : '')}>Trading Journal</Link>
             </NavLink>
             <NavLink>
-              <Link to="/dashboard">Dashboard</Link>
+              <Link to="/dashboard" className={({ isActive }) => (isActive ? 'active' : '')}>Dashboard</Link>
             </NavLink>
             {user.isAdmin && (
               <NavLink>
-                <Link to="/admin">Admin</Link>
+                <Link to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>Admin</Link>
               </NavLink>
             )}
             <Button onClick={handleLogout}>Logout</Button>
@@ -173,10 +179,10 @@ const Navbar = () => {
         ) : (
           <>
             <NavLink>
-              <Link to="/login">Login</Link>
+              <Link to="/login" className={({ isActive }) => (isActive ? 'active' : '')}>Login</Link>
             </NavLink>
             <NavLink>
-              <Link to="/signup">Sign-up</Link>
+              <Link to="/signup" className={({ isActive }) => (isActive ? 'active' : '')}>Sign-up</Link>
             </NavLink>
           </>
         )}
@@ -193,6 +199,11 @@ const Navbar = () => {
         <NavLink>
           <Link to="/blog" onClick={() => setIsOpen(false)}>Blog</Link>
         </NavLink>
+        {user && (
+          <NavLink>
+            <Link to="/trade-plan" onClick={() => setIsOpen(false)}>Trade Plan</Link>
+          </NavLink>
+        )}
         {user ? (
           <>
             <NavLink>

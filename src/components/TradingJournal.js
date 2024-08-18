@@ -2,14 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import { collection, getDocs, addDoc, query, where, doc, deleteDoc } from 'firebase/firestore';
-import { db, auth, storage } from '../firebase';
+import { collection, getDocs, addDoc, query, where, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
+// Styled components
 const Section = styled.section`
   padding: 2rem;
   text-align: center;
@@ -118,6 +118,8 @@ const Button = styled.button`
   border: none;
   cursor: pointer;
   margin-top: 0.5rem;
+  margin-right: 15px;
+  margin-left: 15px;
   font-size: 0.8rem;
   border-radius: 4px;
   &:hover {
@@ -132,6 +134,7 @@ const DeleteButton = styled.button`
   border: none;
   cursor: pointer;
   margin-top: 0.5rem;
+  margin-left: 15px;
   font-size: 0.8rem;
   border-radius: 4px;
   &:hover {
@@ -139,32 +142,51 @@ const DeleteButton = styled.button`
   }
 `;
 
-const ImagePreview = styled.img`
-  max-width: 100%;
-  height: auto;
-  margin-top: 0.5rem;
-  border-radius: 8px;
-  border: 2px solid #000;
-`;
-
-const ImageUploadLabel = styled.label`
-  display: block;
-  padding: 0.5rem;
-  background-color: #000;
-  color: #fff;
-  text-align: center;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-top: 0.5rem;
+const EditButton = styled(Button)`
+margin-left: 15px;
+margin-right: 15px;
+  background-color: #000; // Set the background color to black
   &:hover {
-    background-color: #333;
+    background-color: #333; // Darker black for hover effect
   }
 `;
 
-const HiddenFileInput = styled.input`
-  display: none;
+
+// Modal styling
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
 `;
 
+const ModalContent = styled.div`
+  background: #fff;
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  position: relative;
+`;
+
+const ModalCloseButton = styled.button`
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+`;
+
+// Utility functions
 const stripCurrencySymbol = (value) => value.replace(/[^0-9.-]+/g, '');
 
 const formatDate = (date) => {
@@ -177,6 +199,23 @@ const formatDate = (date) => {
   const year = d.getFullYear();
   return `${year}-${month}-${day}`;
 };
+
+const FIELD_ORDER = [
+  'pair',
+  'direction',
+  'date',
+  'outcome',
+  'pnl',
+  'gain',
+  'risk',
+  'rrr',
+  'entryTf',
+  'entryWindow',
+  'day',
+  'model',
+  'killzone',
+  'timeInTrade'
+];
 
 const TradingJournal = () => {
   const [user] = useAuthState(auth);
@@ -196,20 +235,21 @@ const TradingJournal = () => {
     day: '',
     model: '',
     killzone: '',
-    timeInTrade: '',
-    image: ''
+    timeInTrade: ''
   });
-  const [expandedEntry, setExpandedEntry] = useState(null);
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [modalEntry, setModalEntry] = useState(null); // State for modal
 
-  // Define fetchEntries using useCallback to ensure stable reference
   const fetchEntries = useCallback(async () => {
     if (user) {
-      const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      const fetchedEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setEntries(fetchedEntries);
+      try {
+        const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
+        const querySnapshot = await getDocs(q);
+        const fetchedEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setEntries(fetchedEntries);
+      } catch (error) {
+        console.error("Error fetching entries: ", error);
+      }
     }
   }, [user]);
 
@@ -222,63 +262,62 @@ const TradingJournal = () => {
     setJournalEntry({ ...journalEntry, [name]: value });
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    let imageUrl = '';
-    if (imageFile) {
-      const storageRef = ref(storage, `images/${imageFile.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, imageFile);
-
-      await new Promise((resolve, reject) => {
-        uploadTask.on('state_changed', null, reject, () => {
-          getDownloadURL(uploadTask.snapshot.ref).then(url => {
-            imageUrl = url;
-            resolve();
-          });
+    try {
+      if (editMode) {
+        const entryRef = doc(db, 'tradingJournal', journalEntry.id);
+        await updateDoc(entryRef, { ...journalEntry });
+        setEditMode(false);
+      } else {
+        await addDoc(collection(db, 'tradingJournal'), {
+          ...journalEntry,
+          userId: user.uid
         });
+      }
+      setJournalEntry({
+        pair: '',
+        direction: '',
+        date: '',
+        outcome: '',
+        pnl: '',
+        gain: '',
+        risk: '',
+        rrr: '',
+        entryTf: '',
+        entryWindow: '',
+        day: '',
+        model: '',
+        killzone: '',
+        timeInTrade: ''
       });
+      fetchEntries();
+    } catch (error) {
+      console.error("Error submitting entry: ", error);
     }
+  };
 
-    const newEntry = { ...journalEntry, image: imageUrl };
-    await addDoc(collection(db, 'tradingJournal'), {
-      ...newEntry,
-      userId: user.uid
-    });
-    setJournalEntry({
-      pair: '',
-      direction: '',
-      date: '',
-      outcome: '',
-      pnl: '',
-      gain: '',
-      risk: '',
-      rrr: '',
-      entryTf: '',
-      entryWindow: '',
-      day: '',
-      model: '',
-      killzone: '',
-      timeInTrade: '',
-      image: ''
-    });
-    setImageFile(null);
-    setImagePreview(null);
-    fetchEntries();
+  const handleEditEntry = (entry) => {
+    setJournalEntry(entry);
+    setEditMode(true);
   };
 
   const handleDeleteEntry = async (id) => {
-    await deleteDoc(doc(db, 'tradingJournal', id));
-    fetchEntries();
+    try {
+      await deleteDoc(doc(db, 'tradingJournal', id));
+      fetchEntries();
+    } catch (error) {
+      console.error("Error deleting entry: ", error);
+    }
   };
 
-  const toggleEntry = (id) => {
-    setExpandedEntry(expandedEntry === id ? null : id);
+
+  const showModal = (entry) => {
+    setModalEntry(entry);
+  };
+
+  const closeModal = () => {
+    setModalEntry(null);
   };
 
   const calculateStats = () => {
@@ -289,7 +328,7 @@ const TradingJournal = () => {
         avgWin: 0,
         avgLoss: 0,
         winRate: 0,
-        dailyPnl: [{ date: formatDate(new Date()), pnl: 0 }]
+        dailyPnl: [{ date: formatDate(new Date()), pnl: 0, entries: [] }]
       };
     }
 
@@ -311,12 +350,11 @@ const TradingJournal = () => {
           losingTrades++;
           totalLossPnl += pnlValue;
         }
-
         const entryDate = formatDate(entry.date);
         if (!dailyPnl[entryDate]) {
-          dailyPnl[entryDate] = 0;
+          dailyPnl[entryDate] = [];
         }
-        dailyPnl[entryDate] += pnlValue;
+        dailyPnl[entryDate].push(pnlValue);
       }
     });
 
@@ -324,7 +362,7 @@ const TradingJournal = () => {
     const winRate = totalTrades === 0 ? 0 : (winningTrades / totalTrades) * 100;
     const avgWin = winningTrades === 0 ? 0 : totalWinPnl / winningTrades;
     const avgLoss = losingTrades === 0 ? 0 : totalLossPnl / losingTrades;
-    const profitFactor = totalLossPnl === 0 ? 0 : totalWinPnl / Math.abs(totalLossPnl);
+    const profitFactor = totalLossPnl === 0 ? (totalWinPnl > 0 ? Infinity : 0) : totalWinPnl / Math.abs(totalLossPnl);
 
     return {
       totalPnl,
@@ -332,18 +370,29 @@ const TradingJournal = () => {
       avgWin,
       avgLoss,
       winRate,
-      dailyPnl: Object.keys(dailyPnl).map(date => ({ date, pnl: dailyPnl[date] }))
+      dailyPnl: Object.keys(dailyPnl).map(date => ({
+        date,
+        pnl: dailyPnl[date].reduce((acc, val) => acc + val, 0),
+        entries: dailyPnl[date]
+      }))
     };
   };
 
   const stats = calculateStats();
 
-  // Define tileContent function to display content on each calendar tile
-  const tileContent = ({ date, view }) => {
+  const tileContent = ({ date }) => {
+    const formattedDate = formatDate(date);
+    const entriesOnDate = stats.dailyPnl.find(entry => entry.date === formattedDate);
     return (
       <div>
-        {entries.some(entry => new Date(entry.date).toDateString() === date.toDateString()) && (
-          <div>Trade</div>
+        {entriesOnDate?.entries.length > 0 ? (
+          entriesOnDate.entries.map((pnl, index) => (
+            <div key={index}>
+              {`$${pnl.toFixed(2)}`}
+            </div>
+          ))
+        ) : (
+          <div></div>
         )}
       </div>
     );
@@ -359,7 +408,7 @@ const TradingJournal = () => {
         </StatCard>
         <StatCard>
           <h3>Profit Factor</h3>
-          <p>{stats.profitFactor.toFixed(2)}</p>
+          <p>{stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}</p>
         </StatCard>
         <StatCard>
           <h3>Average Winning Trade</h3>
@@ -381,7 +430,19 @@ const TradingJournal = () => {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" />
             <YAxis />
-            <Tooltip />
+            <Tooltip
+              content={({ payload }) => {
+                if (payload && payload.length) {
+                  return (
+                    <div className="custom-tooltip">
+                      <p>{`Date: ${payload[0].payload.date}`}</p>
+                      <p>{`PnL: $${payload[0].payload.pnl.toFixed(2)}`}</p>
+                    </div>
+                  );
+                }
+                return null;
+              }}
+            />
             <Legend />
             <Line type="monotone" dataKey="pnl" stroke="#8884d8" activeDot={{ r: 8 }} />
           </LineChart>
@@ -399,43 +460,48 @@ const TradingJournal = () => {
           .map((entry, index) => (
             <EntryCard key={entry.id}>
               <EntryField># {index + 1}</EntryField>
-              <EntryField>Pair: {entry.pair}</EntryField>
-              <EntryField>PNL: ${entry.pnl}</EntryField>
-              {entry.image && <ImagePreview src={entry.image} alt="entry" />}
-              <Button onClick={() => toggleEntry(entry.id)}>
-                {expandedEntry === entry.id ? 'Hide Details' : 'Show Details'}
+              <EntryField>{`Pair: ${entry.pair}`}</EntryField>
+              <EntryField>{`P&L: ${entry.pnl}`}</EntryField>
+              <Button onClick={() => showModal(entry)}>
+                Show Details
               </Button>
-              {expandedEntry === entry.id && (
-                <>
-                  {Object.keys(entry).map((key) => (
-                    key !== 'userId' && key !== 'comments' && key !== 'image' && (
-                      <EntryField key={key}>{`${key.replace(/([A-Z])/g, ' $1').toUpperCase()}: ${entry[key]}`}</EntryField>
-                    )
-                  ))}
-                  <DeleteButton onClick={() => handleDeleteEntry(entry.id)}>Delete Entry</DeleteButton>
-                </>
-              )}
+              <EditButton onClick={() => handleEditEntry(entry)}>Edit Entry</EditButton>
+              <DeleteButton onClick={() => handleDeleteEntry(entry.id)}>Delete Entry</DeleteButton>
             </EntryCard>
           ))}
       </EntriesContainer>
       <Form onSubmit={handleSubmit}>
-        {Object.keys(journalEntry).map((key) => (
-          key !== 'image' && (
+        {FIELD_ORDER.map((field) => (
+          field !== 'id' && field !== 'userId' && (
             <Input
-              key={key}
-              type={key === 'date' ? 'date' : 'text'}
-              name={key}
-              placeholder={key.replace(/([A-Z])/g, ' $1').toUpperCase()}
-              value={journalEntry[key]}
+              key={field}
+              type={field === 'date' ? 'date' : 'text'}
+              name={field}
+              placeholder={field.replace(/([A-Z])/g, ' $1').toUpperCase()}
+              value={journalEntry[field]}
               onChange={handleChange}
             />
           )
         ))}
-        <ImageUploadLabel htmlFor="file-input">Upload Image</ImageUploadLabel>
-        {imagePreview && <ImagePreview src={imagePreview} alt="preview" />}
-        <HiddenFileInput id="file-input" type="file" onChange={handleImageChange} />
-        <Button type="submit">Add Entry</Button>
+        <Button type="submit">{editMode ? 'Update Entry' : 'Add Entry'}</Button>
       </Form>
+
+      {/* Modal for showing details */}
+      {modalEntry && (
+        <ModalOverlay>
+          <ModalContent>
+            <ModalCloseButton onClick={closeModal}>×</ModalCloseButton>
+            <h3>Entry Details</h3>
+            {FIELD_ORDER.map((field) => (
+              field !== 'id' && field !== 'userId' && (
+                <EntryField key={field}>
+                  <strong>{field.replace(/([A-Z])/g, ' $1').toUpperCase()}:</strong> {modalEntry[field]}
+                </EntryField>
+              )
+            ))}
+          </ModalContent>
+        </ModalOverlay>
+      )}
     </Section>
   );
 };
