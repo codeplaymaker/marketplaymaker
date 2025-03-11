@@ -28,7 +28,7 @@ const StyledCalendar = styled(Calendar)`
     padding: 0.5rem 0.25rem;
     border-radius: 8px;
     &:hover {
-      background-color: #f0f0f0;
+      background-color:rgb(255, 255, 255);
     }
   }
 

@@ -133,47 +133,47 @@ const BenefitCard = styled(Card)`
   text-align: left;
 `;
 
-const TestimonialsSection = styled(Section)`
-  background-color: #000; /* Space Black background for testimonials section */
-`;
+// const TestimonialsSection = styled(Section)`
+//   background-color: #000; /* Space Black background for testimonials section */
+// `;
 
-const TestimonialBubble = styled.div`
-  position: relative;
-  background: #222; /* Dark background for testimonials */
-  border: 1px solid #444; /* Dark border */
-  border-radius: 15px;
-  padding: 1.5rem;
-  width: 300px;
-  box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
-  text-align: left;
-  overflow: hidden;
-  margin: 1rem;
-  &:before {
-    content: '';
-    position: absolute;
-    bottom: -20px;
-    left: 20px;
-    width: 0;
-    height: 0;
-    border-left: 20px solid transparent;
-    border-right: 20px solid transparent;
-    border-top: 20px solid #222;
-    transform: translateY(10px);
-  }
-`;
+// const TestimonialBubble = styled.div`
+//   position: relative;
+//   background: #222; /* Dark background for testimonials */
+//   border: 1px solid #444; /* Dark border */
+//   border-radius: 15px;
+//   padding: 1.5rem;
+//   width: 300px;
+//   box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
+//   text-align: left;
+//   overflow: hidden;
+//   margin: 1rem;
+//   &:before {
+//     content: '';
+//     position: absolute;
+//     bottom: -20px;
+//     left: 20px;
+//     width: 0;
+//     height: 0;
+//     border-left: 20px solid transparent;
+//     border-right: 20px solid transparent;
+//     border-top: 20px solid #222;
+//     transform: translateY(10px);
+//   }
+// `;
 
-const TestimonialText = styled.p`
-  font-size: 1rem;
-  color: #ddd; /* Light color for testimonial text */
-  margin: 0;
-`;
+// const TestimonialText = styled.p`
+//   font-size: 1rem;
+//   color: #ddd; /* Light color for testimonial text */
+//   margin: 0;
+// `;
 
-const TestimonialAuthor = styled.p`
-  font-size: 1rem;
-  font-weight: bold;
-  margin-top: 1rem;
-  color: #fff; /* Light color for author name */
-`;
+// const TestimonialAuthor = styled.p`
+//   font-size: 1rem;
+//   font-weight: bold;
+//   margin-top: 1rem;
+//   color: #fff; /* Light color for author name */
+// `;
 
 const HomePage = () => {
   const { user } = useAuth();
@@ -265,7 +265,7 @@ const HomePage = () => {
             </BenefitCard>
           </CardContainer>
         </BenefitsSection>
-
+{/* 
         <TestimonialsSection>
           <Heading>What Our Users Say</Heading>
           <CardContainer>
@@ -282,7 +282,7 @@ const HomePage = () => {
               <TestimonialAuthor>— Emily Johnson</TestimonialAuthor>
             </TestimonialBubble>
           </CardContainer>
-        </TestimonialsSection>
+        </TestimonialsSection> */}
 
         <CallToAction>
           <CTAButton onClick={() => navigate('/signup')}>Get Started Now</CTAButton>

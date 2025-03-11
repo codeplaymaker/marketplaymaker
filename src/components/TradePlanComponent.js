@@ -71,48 +71,48 @@ const Button = styled.button`
 `;
 
 const AddTaskButton = styled(Button)`
-  background-color: #000; /* Black color for the button */
+  background-color: #000;
   margin-top: 10px;
 
   &:hover {
-    background-color: #333; /* Darker shade for hover */
+    background-color: #333;
   }
 `;
 
 const SavePlanButton = styled(Button)`
-  background-color: #000; /* Black color for the button */
+  background-color: #000;
   margin-top: 10px;
 
   &:hover {
-    background-color: #333; /* Darker shade for hover */
+    background-color: #333;
   }
 `;
 
 const ResetButton = styled(Button)`
-  background-color: #ffc107; /* Yellow color for the button */
+  background-color: #000;
   margin-top: 10px;
 
   &:hover {
-    background-color: #e0a800; /* Darker yellow for hover */
+    background-color: #333;
   }
 `;
 
 const DeletePlanButton = styled(Button)`
-  background-color: #ff4136; /* Red color for the button */
+  background-color: #ff4136;
   margin-left: 10px;
-  margin-top: 5px; /* Added top margin for better spacing */
+  margin-top: 5px;
 
   &:hover {
-    background-color: #ff1100; /* Darker red for hover */
+    background-color: #ff1100;
   }
 `;
 
 const TaskDeleteButton = styled(Button)`
-  background-color: #ff4136; /* Red color for the button */
+  background-color: #ff4136;
   font-size: 12px;
 
   &:hover {
-    background-color: #ff1100; /* Darker red for hover */
+    background-color: #ff1100;
   }
 `;
 
@@ -123,13 +123,11 @@ const TradePlanComponent = () => {
   const [savedPlans, setSavedPlans] = useState([]);
   const [selectedPlan, setSelectedPlan] = useState(null);
 
-  // Load saved plans from local storage
   useEffect(() => {
     const plans = JSON.parse(localStorage.getItem('tradePlans')) || [];
     setSavedPlans(plans);
   }, []);
 
-  // Save plans to local storage
   useEffect(() => {
     if (savedPlans.length > 0) {
       localStorage.setItem('tradePlans', JSON.stringify(savedPlans));
@@ -140,6 +138,8 @@ const TradePlanComponent = () => {
     if (newTask.trim() !== '') {
       setTasks([...tasks, { text: newTask, completed: false }]);
       setNewTask('');
+    } else {
+      alert('Task name cannot be empty.');
     }
   };
 
@@ -156,12 +156,19 @@ const TradePlanComponent = () => {
   };
 
   const savePlan = () => {
-    if (planName.trim() !== '') {
-      const newPlan = { name: planName, tasks };
-      setSavedPlans([...savedPlans, newPlan]);
-      setPlanName('');
-      setTasks([]);
+    if (planName.trim() === '') {
+      alert('Plan name cannot be empty.');
+      return;
     }
+    const planExists = savedPlans.some(plan => plan.name === planName.trim());
+    if (planExists) {
+      alert('A plan with this name already exists.');
+      return;
+    }
+    const newPlan = { name: planName, tasks };
+    setSavedPlans([...savedPlans, newPlan]);
+    setPlanName('');
+    setTasks([]);
   };
 
   const loadPlan = (plan) => {
@@ -170,10 +177,12 @@ const TradePlanComponent = () => {
   };
 
   const deletePlan = (index) => {
+    const confirmed = window.confirm('Are you sure you want to delete this plan?');
+    if (!confirmed) return;
+
     const updatedPlans = savedPlans.filter((_, i) => i !== index);
     setSavedPlans(updatedPlans);
 
-    // Remove the deleted plan from local storage
     localStorage.setItem('tradePlans', JSON.stringify(updatedPlans));
 
     if (selectedPlan && selectedPlan === savedPlans[index]) {

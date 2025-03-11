@@ -157,9 +157,14 @@ const Navbar = () => {
           <Link to="/blog" className={({ isActive }) => (isActive ? 'active' : '')}>Blog</Link>
         </NavLink>
         {user && (
-          <NavLink>
-            <Link to="/trade-plan" className={({ isActive }) => (isActive ? 'active' : '')}>Trade Plan</Link>
-          </NavLink>
+          <>
+            <NavLink>
+              <Link to="/trade-plan" className={({ isActive }) => (isActive ? 'active' : '')}>Trade Plan</Link>
+            </NavLink>
+            <NavLink>
+              <Link to="/connect-api" className={({ isActive }) => (isActive ? 'active' : '')}>ConnectAPI</Link>
+            </NavLink>
+          </>
         )}
         {user ? (
           <>
@@ -200,9 +205,14 @@ const Navbar = () => {
           <Link to="/blog" onClick={() => setIsOpen(false)}>Blog</Link>
         </NavLink>
         {user && (
-          <NavLink>
-            <Link to="/trade-plan" onClick={() => setIsOpen(false)}>Trade Plan</Link>
-          </NavLink>
+          <>
+            <NavLink>
+              <Link to="/trade-plan" onClick={() => setIsOpen(false)}>Trade Plan</Link>
+            </NavLink>
+            <NavLink>
+              <Link to="/connect-api" onClick={() => setIsOpen(false)}>ConnectAPI</Link>
+            </NavLink>
+          </>
         )}
         {user ? (
           <>
