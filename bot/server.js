@@ -1166,6 +1166,16 @@ async function fireWebhookAlerts(edges) {
   }
 }
 
+// ─── Debug: Build info endpoint ──────────────────────────────────────
+app.get('/api/debug/build', (req, res) => {
+  const buildPath = path.join(__dirname, '..', 'build');
+  const exists = fs.existsSync(buildPath);
+  const indexExists = exists && fs.existsSync(path.join(buildPath, 'index.html'));
+  let files = [];
+  if (exists) { try { files = fs.readdirSync(buildPath); } catch {} }
+  res.json({ buildPath, exists, indexExists, files, cwd: process.cwd(), dirname: __dirname });
+});
+
 // ─── Production: Serve React Frontend ────────────────────────────────
 const buildPath = path.join(__dirname, '..', 'build');
 if (fs.existsSync(buildPath)) {
@@ -1177,6 +1187,11 @@ if (fs.existsSync(buildPath)) {
     }
   });
   log.info('SERVER', `Serving React build from ${buildPath}`);
+} else {
+  log.warn('SERVER', `No React build found at ${buildPath} — frontend will not be served`);
+  app.get('/', (req, res) => {
+    res.json({ error: 'Frontend not built', buildPath, hint: 'Run npm run build in project root', dirname: __dirname });
+  });
 }
 
 // ─── Start Server ────────────────────────────────────────────────────
