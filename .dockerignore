@@ -3,9 +3,10 @@ node_modules
 bot/node_modules
 bot/logs/*.json
 bot/.env
-.env
-.env.*
+build
 coverage
 *.md
 .vscode
 .husky
+*.py
+bot/test-*
