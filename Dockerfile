@@ -12,7 +12,9 @@ COPY public/ ./public/
 COPY craco.config.js postcss.config.js tailwind.config.js ./
 ENV SKIP_PREFLIGHT_CHECK=true
 ENV FAST_REFRESH=false
-RUN npm run build
+ENV GENERATE_SOURCEMAP=false
+ENV CI=false
+RUN npm run build && ls -la build/
 
 # Production image
 FROM node:20-alpine
@@ -23,8 +25,8 @@ WORKDIR /app
 COPY --from=builder /app/build ./build
 
 # Install bot dependencies
-COPY bot/package.json bot/package-lock.json ./bot/
-RUN cd bot && npm ci --omit=dev
+COPY bot/package.json ./bot/
+RUN cd bot && npm install --omit=dev
 
 # Copy bot source
 COPY bot/ ./bot/
