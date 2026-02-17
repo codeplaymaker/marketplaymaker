@@ -1175,7 +1175,12 @@ app.get('/api/debug/build', (req, res) => {
     path.join(process.cwd(), '..', 'build'),
   ];
   const found = candidates.find(p => fs.existsSync(path.join(p, 'index.html')));
-  res.json({ candidates, found: found || null, cwd: process.cwd(), dirname: __dirname });
+  // List files in key directories for debugging
+  let rootFiles = [], cwdFiles = [], parentFiles = [];
+  try { rootFiles = fs.readdirSync('/app').slice(0, 30); } catch(e) { rootFiles = [e.message]; }
+  try { cwdFiles = fs.readdirSync(process.cwd()).slice(0, 30); } catch(e) { cwdFiles = [e.message]; }
+  try { parentFiles = fs.readdirSync(path.join(__dirname, '..')).slice(0, 30); } catch(e) { parentFiles = [e.message]; }
+  res.json({ candidates, found: found || null, cwd: process.cwd(), dirname: __dirname, rootFiles, cwdFiles, parentFiles });
 });
 
 // ─── Production: Serve React Frontend ────────────────────────────────
