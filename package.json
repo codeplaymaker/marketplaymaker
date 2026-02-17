@@ -42,8 +42,10 @@
   },
   "scripts": {
     "prepare": "husky install",
-    "start": "craco start",
-    "build": "craco build",
+    "start": "node bot/server.js",
+    "dev": "craco start",
+    "build": "CI=false GENERATE_SOURCEMAP=false react-scripts build && cd bot && npm install --omit=dev",
+    "build:local": "craco build",
     "test": "craco test",
     "eject": "react-scripts eject",
     "lint": "eslint 'src/**/*.{js,jsx,ts,tsx}'",
