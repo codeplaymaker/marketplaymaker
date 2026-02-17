@@ -44,11 +44,17 @@ const MAX_HISTORY = 2000;
 const DEDUP_WINDOW_MS = 180000;         // 3 min — don't re-record same opp
 const RESOLUTION_CHECK_MS = 60000;      // Check resolutions every 60 seconds
 const MAX_RESOLUTION_BATCH = 15;        // Max API calls per resolution check cycle (rate limit friendly)
+const DEFAULT_PAPER_BANKROLL = 1000;    // $1000 starting simulated bankroll
 
 let paperTrades = [];
 let resolvedTrades = [];
 let signalSnapshots = {};
 let resolutionCheckInterval = null;
+
+// ─── Simulated Bankroll ──────────────────────────────────────────────
+let simBankroll = DEFAULT_PAPER_BANKROLL;
+let simBankrollHistory = [];    // { timestamp, bankroll, event }
+let simBusted = false;          // Circuit breaker: true if bankroll hit $0
 
 // ─── Strategy Learning State ─────────────────────────────────────────
 // Tracks per-strategy performance and auto-adjusts thresholds
@@ -70,7 +76,10 @@ function load() {
       paperTrades = data.paperTrades || [];
       resolvedTrades = data.resolvedTrades || [];
       signalSnapshots = data.signalSnapshots || {};
-      log.info('PAPER_TRADER', `Loaded ${paperTrades.length} paper trades, ${resolvedTrades.length} resolved`);
+      simBankroll = data.simBankroll ?? DEFAULT_PAPER_BANKROLL;
+      simBankrollHistory = data.simBankrollHistory || [];
+      simBusted = data.simBusted || false;
+      log.info('PAPER_TRADER', `Loaded ${paperTrades.length} paper trades, ${resolvedTrades.length} resolved, bankroll $${simBankroll}`);
     }
   } catch (err) {
     log.warn('PAPER_TRADER', `Failed to load trades: ${err.message}`);
@@ -94,6 +103,9 @@ function save() {
       paperTrades: paperTrades.slice(-MAX_HISTORY),
       resolvedTrades: resolvedTrades.slice(-MAX_HISTORY),
       signalSnapshots,
+      simBankroll,
+      simBankrollHistory: simBankrollHistory.slice(-500),
+      simBusted,
       savedAt: new Date().toISOString(),
     }, null, 2));
   } catch (err) {
@@ -119,6 +131,11 @@ function saveLearningState() {
  * Only records the top N to avoid flooding with low-quality noise.
  */
 function recordScanResults(opportunities, maxRecord = 20) {
+  if (simBusted) {
+    log.warn('PAPER_TRADER', 'Bankroll busted — skipping paper trade recording. Reset to continue.');
+    return 0;
+  }
+
   const now = Date.now();
   let recorded = 0;
 
@@ -135,6 +152,15 @@ function recordScanResults(opportunities, maxRecord = 20) {
     );
     if (existing) continue;
 
+    // Position size: use Kelly-based size relative to simulated bankroll, or a sensible default
+    const rawKellySize = opp.positionSize || 0;
+    const posSize = rawKellySize > 0 ? Math.min(rawKellySize, simBankroll * 0.05) : Math.min(10, simBankroll * 0.02);
+    const rawEntryPrice = opp.side === 'NO' ? (opp.noPrice || (1 - (opp.yesPrice || 0.5))) : (opp.price || opp.yesPrice || 0.5);
+    // Simulate slippage: larger positions relative to liquidity get worse fills
+    const liquidity = opp.liquidity || 50000;
+    const slippagePct = fees.estimateSlippage(posSize, liquidity);
+    const entryPrice = Math.min(0.99, rawEntryPrice * (1 + slippagePct)); // Slippage worsens entry
+
     const trade = {
       id: `PT-${now}-${recorded}`,
       key,
@@ -142,14 +168,17 @@ function recordScanResults(opportunities, maxRecord = 20) {
       market: opp.market || opp.question || 'Unknown',
       strategy: opp.strategy,
       side: opp.side || 'YES',
-      entryPrice: opp.side === 'NO' ? (opp.noPrice || (1 - (opp.yesPrice || 0.5))) : (opp.price || opp.yesPrice || 0.5),
+      entryPrice: r2(entryPrice),
+      rawEntryPrice: r2(rawEntryPrice),
+      slippage: r2(slippagePct),
       score: opp.score || 0,
       confidence: opp.confidence || 'UNKNOWN',
       edge: opp.edge || opp.netEdge || 0,
-      kellySize: opp.positionSize || 0,
+      kellySize: r2(posSize),
       riskLevel: opp.riskLevel || 'UNKNOWN',
       persistence: opp.persistence || null,
       modelData: extractModelData(opp),
+      source: 'BOT',
       recordedAt: new Date().toISOString(),
       resolved: false,
       outcome: null,
@@ -182,6 +211,75 @@ function recordScanResults(opportunities, maxRecord = 20) {
   }
 
   return recorded;
+}
+
+// ─── Manual Trade Input ──────────────────────────────────────────────
+/**
+ * Place a manual paper trade. Separate from bot-generated trades.
+ * Manual trades are tracked for P&L but do NOT feed the bot's learning loop.
+ *
+ * @param {Object} params - { conditionId, market, side, amount, entryPrice }
+ * @returns {Object} - The created paper trade
+ */
+function placeManualTrade({ conditionId, market, side, amount, entryPrice }) {
+  if (simBusted) {
+    throw new Error('Paper bankroll busted ($0). Reset paper trades to continue.');
+  }
+  if (!conditionId || !side || !amount || !entryPrice) {
+    throw new Error('Missing required fields: conditionId, side, amount, entryPrice');
+  }
+  if (amount <= 0) throw new Error('Amount must be positive');
+  if (amount > simBankroll) throw new Error(`Amount $${amount} exceeds paper bankroll $${simBankroll}`);
+  if (entryPrice <= 0 || entryPrice >= 1) throw new Error('Entry price must be between 0 and 1');
+
+  side = side.toUpperCase();
+  if (side !== 'YES' && side !== 'NO') throw new Error('Side must be YES or NO');
+
+  // Simulate slippage for manual trades too
+  const slippagePct = fees.estimateSlippage(amount, 50000);
+  const adjustedPrice = Math.min(0.99, entryPrice * (1 + slippagePct));
+
+  const trade = {
+    id: `MT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    key: `${conditionId}:MANUAL:${side}`,
+    conditionId,
+    market: market || 'Manual Trade',
+    strategy: 'MANUAL',
+    side,
+    entryPrice: r2(adjustedPrice),
+    rawEntryPrice: r2(entryPrice),
+    slippage: r2(slippagePct),
+    score: null,
+    confidence: 'USER',
+    edge: null,
+    kellySize: r2(amount),
+    riskLevel: 'USER',
+    persistence: null,
+    modelData: {},
+    source: 'MANUAL',
+    recordedAt: new Date().toISOString(),
+    resolved: false,
+    outcome: null,
+    pnl: null,
+  };
+
+  paperTrades.push(trade);
+
+  // Snapshot for resolution tracking
+  signalSnapshots[conditionId] = signalSnapshots[conditionId] || {
+    strategy: 'MANUAL',
+    side,
+    score: null,
+    confidence: 'USER',
+    signals: {},
+    entryPrice: trade.entryPrice,
+    recordedAt: trade.recordedAt,
+  };
+
+  save();
+  log.info('PAPER_TRADER', `Manual trade: ${side} "${market?.slice(0, 50)}" $${amount} @ ${r2(adjustedPrice)} (slip ${r2(slippagePct * 100)}%)`);
+
+  return trade;
 }
 
 /**
@@ -278,11 +376,29 @@ function resolveMarket(conditionId, outcome) {
     };
     trade.resolvedAt = new Date().toISOString();
 
+    // ─── Update simulated bankroll ───
+    simBankroll = r2(simBankroll + netPnL);
+    simBankrollHistory.push({
+      timestamp: trade.resolvedAt,
+      bankroll: simBankroll,
+      event: `${won ? 'WIN' : 'LOSS'} $${r2(netPnL)} on ${trade.market?.slice(0, 40)}`,
+      tradeId: trade.id,
+    });
+
+    // Circuit breaker: stop if bankroll hits $0 or below
+    if (simBankroll <= 0) {
+      simBankroll = 0;
+      simBusted = true;
+      log.warn('PAPER_TRADER', '💀 Simulated bankroll busted! Reset to continue paper trading.');
+    }
+
     resolvedTrades.push({ ...trade });
     results.push(trade);
 
-    // ─── Feed learning state ───
-    recordLearningOutcome(trade, won, netPnL);
+    // ─── Feed learning state (skip manual trades to avoid polluting bot learning) ───
+    if (trade.source !== 'MANUAL') {
+      recordLearningOutcome(trade, won, netPnL);
+    }
 
     log.info('PAPER_TRADER', `Resolved: "${trade.market}" → ${outcome} | ${won ? 'WIN' : 'LOSS'} $${r2(netPnL)} (${trade.strategy})`);
   }
@@ -370,16 +486,25 @@ async function checkResolutions() {
       const market = await cl.getMarketById(conditionId);
       if (!market) continue;
 
-      // Market must be closed with a deterministic outcome
+      // Check actual resolution status first, then fall back to price
       if (!market.closed && !market.resolved) continue;
 
-      const outcomePrices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
-      const yesPrice = parseFloat(outcomePrices[0] || 0.5);
-
       let outcome = null;
-      if (yesPrice >= 0.95) outcome = 'YES';
-      else if (yesPrice <= 0.05) outcome = 'NO';
-      else continue; // Not fully resolved yet
+
+      // Best: use the actual resolved flag + payout data
+      if (market.resolved && market.resolution) {
+        outcome = market.resolution.toUpperCase();
+      }
+
+      // Fallback: check if payout prices are deterministic
+      if (!outcome) {
+        const outcomePrices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
+        const yesPrice = parseFloat(outcomePrices[0] || 0.5);
+        if (yesPrice >= 0.95) outcome = 'YES';
+        else if (yesPrice <= 0.05) outcome = 'NO';
+      }
+
+      if (!outcome) continue; // Not fully resolved yet
 
       // Resolve all paper trades for this market
       const result = resolveMarket(conditionId, outcome);
@@ -776,6 +901,15 @@ function getPerformance() {
     byStrategy,
     byConfidence,
     pnlCurve,
+    // Simulated bankroll
+    simBankroll,
+    simBusted,
+    simBankrollHistory: simBankrollHistory.slice(-50),
+    startingBankroll: DEFAULT_PAPER_BANKROLL,
+    bankrollReturn: r2(((simBankroll - DEFAULT_PAPER_BANKROLL) / DEFAULT_PAPER_BANKROLL) * 100),
+    // Manual vs bot breakdown
+    manualTrades: resolvedTrades.filter(t => t.source === 'MANUAL').length,
+    botTrades: resolvedTrades.filter(t => t.source !== 'MANUAL').length,
     // Self-learning status
     learningVersion: learningState.learningVersion,
     learnedThresholds: learningState.scoreThresholds,
@@ -807,6 +941,10 @@ function getStats() {
     signalSnapshots: Object.keys(signalSnapshots).length,
     learningVersion: learningState.learningVersion,
     autoResolutionActive: !!resolutionCheckInterval,
+    simBankroll,
+    simBusted,
+    manualTrades: paperTrades.filter(t => t.source === 'MANUAL').length,
+    botTrades: paperTrades.filter(t => t.source !== 'MANUAL').length,
   };
 }
 
@@ -814,6 +952,9 @@ function reset() {
   paperTrades = [];
   resolvedTrades = [];
   signalSnapshots = {};
+  simBankroll = DEFAULT_PAPER_BANKROLL;
+  simBankrollHistory = [];
+  simBusted = false;
   learningState = {
     strategyPerformance: {},
     signalAccuracy: {},
@@ -825,6 +966,7 @@ function reset() {
   };
   save();
   saveLearningState();
+  log.info('PAPER_TRADER', `Reset complete. Bankroll restored to $${DEFAULT_PAPER_BANKROLL}`);
 }
 
 function r2(n) { return Math.round(n * 100) / 100; }
@@ -834,6 +976,7 @@ load();
 
 module.exports = {
   recordScanResults,
+  placeManualTrade,
   resolveMarket,
   checkResolutions,
   startResolutionChecker,
@@ -848,4 +991,11 @@ module.exports = {
   reset,
   load,
   save,
+  getSimBankroll: () => simBankroll,
+  setSimBankroll: (amount) => {
+    simBankroll = amount;
+    simBusted = amount <= 0;
+    simBankrollHistory.push({ timestamp: new Date().toISOString(), bankroll: amount, event: 'Manual bankroll update' });
+    save();
+  },
 };

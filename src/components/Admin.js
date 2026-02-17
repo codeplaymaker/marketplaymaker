@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -27,21 +27,46 @@ const Form = styled.form`
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 `;
 
+const FormGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+`;
+
+const Label = styled.label`
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+  color: #555;
+`;
+
 const Input = styled.input`
   padding: 0.75rem;
   width: 100%;
-  max-width: 400px;
   border: 1px solid #ddd;
   border-radius: 8px;
+
+  &:focus {
+    border-color: #000;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+  }
 `;
 
 const TextArea = styled.textarea`
   padding: 0.75rem;
   width: 100%;
-  max-width: 400px;
   border: 1px solid #ddd;
   border-radius: 8px;
   resize: vertical;
+  min-height: 100px;
+
+  &:focus {
+    border-color: #000;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+  }
 `;
 
 const Button = styled.button`
@@ -55,9 +80,30 @@ const Button = styled.button`
   font-size: 1rem;
   transition: background-color 0.3s;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background-color: #333;
   }
+
+  &:disabled {
+    background-color: #999;
+    cursor: not-allowed;
+  }
+`;
+
+const DeleteButton = styled(Button)`
+  background-color: #c00;
+
+  &:hover:not(:disabled) {
+    background-color: #900;
+  }
+`;
+
+const ConfirmBar = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
 `;
 
 const ElementsContainer = styled.div`
@@ -113,6 +159,18 @@ const ElementStockSymbol = styled.p`
   margin-bottom: 1rem;
 `;
 
+const ErrorMessage = styled.p`
+  color: #c00;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+`;
+
+const SuccessMessage = styled.p`
+  color: #090;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+`;
+
 const Admin = () => {
   const [data, setData] = useState([]);
   const [newElement, setNewElement] = useState({
@@ -136,18 +194,41 @@ const Admin = () => {
   const [isEditingBlog, setIsEditingBlog] = useState(false);
   const [currentBlogId, setCurrentBlogId] = useState(null);
 
-  const fetchDashboardData = async () => {
-    const querySnapshot = await getDocs(collection(db, 'dashboard'));
-    const dashboardData = [];
-    querySnapshot.forEach((doc) => {
-      dashboardData.push({ id: doc.id, ...doc.data() });
-    });
-    setData(dashboardData);
-  };
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'dashboard'));
+      const dashboardData = [];
+      querySnapshot.forEach((d) => {
+        dashboardData.push({ id: d.id, ...d.data() });
+      });
+      setData(dashboardData);
+    } catch (err) {
+      setError('Failed to load dashboard data.');
+    }
+  }, []);
+
+  const fetchBlogData = useCallback(async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'blogPosts'));
+      const blogPosts = [];
+      querySnapshot.forEach((d) => {
+        blogPosts.push({ id: d.id, ...d.data() });
+      });
+      setBlogData(blogPosts);
+    } catch (err) {
+      setError('Failed to load blog data.');
+    }
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+    fetchBlogData();
+  }, [fetchDashboardData, fetchBlogData]);
 
   const handleInputChange = (e, setState, state) => {
     const { name, value } = e.target;
@@ -158,32 +239,37 @@ const Admin = () => {
     setState({ ...state, image: url });
   };
 
+  const showSuccess = (msg) => {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
   const handleAddOrUpdateElement = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
+    setError(null);
     try {
       if (isEditingElement) {
         const docRef = doc(db, 'dashboard', currentElementId);
         const docSnapshot = await getDoc(docRef);
         if (docSnapshot.exists()) {
           await updateDoc(docRef, newElement);
+          showSuccess('Element updated successfully.');
         } else {
-          console.error('Document does not exist:', currentElementId);
+          setError('Document does not exist.');
         }
         setIsEditingElement(false);
         setCurrentElementId(null);
       } else {
         await addDoc(collection(db, 'dashboard'), newElement);
+        showSuccess('Element added successfully.');
       }
-      setNewElement({
-        title: '',
-        date: '',
-        content: '',
-        image: '',
-        stockSymbol: ''
-      });
+      setNewElement({ title: '', date: '', content: '', image: '', stockSymbol: '' });
       fetchDashboardData();
-    } catch (error) {
-      console.error('Error adding or updating document:', error);
+    } catch (err) {
+      setError('Error saving element. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -191,6 +277,7 @@ const Admin = () => {
     setNewElement(item);
     setIsEditingElement(true);
     setCurrentElementId(item.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDeleteElement = async (id) => {
@@ -199,54 +286,41 @@ const Admin = () => {
       const docSnapshot = await getDoc(docRef);
       if (docSnapshot.exists()) {
         await deleteDoc(docRef);
-      } else {
-        console.error('Document does not exist:', id);
+        showSuccess('Element deleted.');
       }
+      setDeleteConfirm(null);
       fetchDashboardData();
-    } catch (error) {
-      console.error('Error deleting document:', error);
+    } catch (err) {
+      setError('Error deleting element.');
     }
   };
 
-  const fetchBlogData = async () => {
-    const querySnapshot = await getDocs(collection(db, 'blogPosts'));
-    const blogPosts = [];
-    querySnapshot.forEach((doc) => {
-      blogPosts.push({ id: doc.id, ...doc.data() });
-    });
-    setBlogData(blogPosts);
-  };
-
-  useEffect(() => {
-    fetchBlogData();
-  }, []);
-
   const handleAddOrUpdateBlog = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
+    setError(null);
     try {
       if (isEditingBlog) {
         const docRef = doc(db, 'blogPosts', currentBlogId);
         const docSnapshot = await getDoc(docRef);
         if (docSnapshot.exists()) {
           await updateDoc(docRef, newBlog);
+          showSuccess('Blog post updated successfully.');
         } else {
-          console.error('Document does not exist:', currentBlogId);
+          setError('Document does not exist.');
         }
         setIsEditingBlog(false);
         setCurrentBlogId(null);
       } else {
         await addDoc(collection(db, 'blogPosts'), newBlog);
+        showSuccess('Blog post added successfully.');
       }
-      setNewBlog({
-        title: '',
-        date: '',
-        author: '',
-        description: '',
-        image: ''
-      });
+      setNewBlog({ title: '', date: '', author: '', description: '', image: '' });
       fetchBlogData();
-    } catch (error) {
-      console.error('Error adding or updating document:', error);
+    } catch (err) {
+      setError('Error saving blog post. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -254,6 +328,7 @@ const Admin = () => {
     setNewBlog(item);
     setIsEditingBlog(true);
     setCurrentBlogId(item.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDeleteBlog = async (id) => {
@@ -262,108 +337,110 @@ const Admin = () => {
       const docSnapshot = await getDoc(docRef);
       if (docSnapshot.exists()) {
         await deleteDoc(docRef);
-      } else {
-        console.error('Document does not exist:', id);
+        showSuccess('Blog post deleted.');
       }
+      setDeleteConfirm(null);
       fetchBlogData();
-    } catch (error) {
-      console.error('Error deleting document:', error);
+    } catch (err) {
+      setError('Error deleting blog post.');
     }
   };
 
   return (
     <Section>
       <Heading>Admin Page</Heading>
+      {error && <ErrorMessage role="alert">{error}</ErrorMessage>}
+      {success && <SuccessMessage role="status">{success}</SuccessMessage>}
 
-      <Form onSubmit={handleAddOrUpdateElement}>
-        <Input
-          type="text"
-          name="title"
-          placeholder="Title"
-          value={newElement.title}
-          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
-        />
-        <Input
-          type="date"
-          name="date"
-          value={newElement.date}
-          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
-        />
-        <TextArea
-          name="content"
-          placeholder="Content"
-          value={newElement.content}
-          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
-        />
-        <Input
-          type="text"
-          name="stockSymbol"
-          placeholder="Stock Symbol"
-          value={newElement.stockSymbol}
-          onChange={(e) => handleInputChange(e, setNewElement, newElement)}
-        />
+      <Form onSubmit={handleAddOrUpdateElement} aria-label="Dashboard element form">
+        <FormGroup>
+          <Label htmlFor="el-title">Title</Label>
+          <Input id="el-title" type="text" name="title" value={newElement.title} onChange={(e) => handleInputChange(e, setNewElement, newElement)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="el-date">Date</Label>
+          <Input id="el-date" type="date" name="date" value={newElement.date} onChange={(e) => handleInputChange(e, setNewElement, newElement)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="el-content">Content</Label>
+          <TextArea id="el-content" name="content" value={newElement.content} onChange={(e) => handleInputChange(e, setNewElement, newElement)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="el-stock">Stock Symbol</Label>
+          <Input id="el-stock" type="text" name="stockSymbol" value={newElement.stockSymbol} onChange={(e) => handleInputChange(e, setNewElement, newElement)} />
+        </FormGroup>
         <ImageUpload onUpload={(url) => handleImageUpload(url, setNewElement, newElement)} />
-        <Button type="submit">{isEditingElement ? 'Update Element' : 'Add Element'}</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'Saving...' : isEditingElement ? 'Update Element' : 'Add Element'}
+        </Button>
       </Form>
 
       <Heading>Current Elements</Heading>
       <ElementsContainer>
         {data.map((item) => (
           <ElementCard key={item.id}>
-            <CardImage src={item.image} alt={item.title} />
+            {item.image && <CardImage src={item.image} alt={item.title || 'Dashboard element'} />}
             <ElementTitle>{item.title}</ElementTitle>
             <ElementDate>{item.date}</ElementDate>
             <ElementContent>{item.content}</ElementContent>
-            <ElementStockSymbol>{item.stockSymbol}</ElementStockSymbol>
+            {item.stockSymbol && <ElementStockSymbol>{item.stockSymbol}</ElementStockSymbol>}
             <Button onClick={() => handleEditElement(item)}>Edit</Button>
-            <Button onClick={() => handleDeleteElement(item.id)}>Delete</Button>
+            {deleteConfirm === item.id ? (
+              <ConfirmBar>
+                <span style={{ color: '#c00' }}>Delete this?</span>
+                <DeleteButton onClick={() => handleDeleteElement(item.id)} style={{ marginTop: 0, padding: '0.4rem 1rem', fontSize: '0.85rem' }}>Yes</DeleteButton>
+                <Button onClick={() => setDeleteConfirm(null)} style={{ marginTop: 0, padding: '0.4rem 1rem', fontSize: '0.85rem' }}>No</Button>
+              </ConfirmBar>
+            ) : (
+              <DeleteButton onClick={() => setDeleteConfirm(item.id)}>Delete</DeleteButton>
+            )}
           </ElementCard>
         ))}
       </ElementsContainer>
 
       <Heading>Blog Management</Heading>
-      <Form onSubmit={handleAddOrUpdateBlog}>
-        <Input
-          type="text"
-          name="title"
-          placeholder="Title"
-          value={newBlog.title}
-          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
-        />
-        <Input
-          type="date"
-          name="date"
-          value={newBlog.date}
-          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
-        />
-        <Input
-          type="text"
-          name="author"
-          placeholder="Author"
-          value={newBlog.author}
-          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
-        />
-        <TextArea
-          name="description"
-          placeholder="Description"
-          value={newBlog.description}
-          onChange={(e) => handleInputChange(e, setNewBlog, newBlog)}
-        />
+      <Form onSubmit={handleAddOrUpdateBlog} aria-label="Blog post form">
+        <FormGroup>
+          <Label htmlFor="blog-title">Title</Label>
+          <Input id="blog-title" type="text" name="title" value={newBlog.title} onChange={(e) => handleInputChange(e, setNewBlog, newBlog)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="blog-date">Date</Label>
+          <Input id="blog-date" type="date" name="date" value={newBlog.date} onChange={(e) => handleInputChange(e, setNewBlog, newBlog)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="blog-author">Author</Label>
+          <Input id="blog-author" type="text" name="author" value={newBlog.author} onChange={(e) => handleInputChange(e, setNewBlog, newBlog)} required />
+        </FormGroup>
+        <FormGroup>
+          <Label htmlFor="blog-description">Description</Label>
+          <TextArea id="blog-description" name="description" value={newBlog.description} onChange={(e) => handleInputChange(e, setNewBlog, newBlog)} required />
+        </FormGroup>
         <ImageUpload onUpload={(url) => handleImageUpload(url, setNewBlog, newBlog)} />
-        <Button type="submit">{isEditingBlog ? 'Update Blog' : 'Add Blog'}</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'Saving...' : isEditingBlog ? 'Update Blog' : 'Add Blog'}
+        </Button>
       </Form>
 
       <Heading>Current Blog Posts</Heading>
       <ElementsContainer>
         {blogData.map((item) => (
           <ElementCard key={item.id}>
-            <CardImage src={item.image} alt={item.title} />
+            {item.image && <CardImage src={item.image} alt={item.title || 'Blog post'} />}
             <ElementTitle>{item.title}</ElementTitle>
             <ElementDate>{item.date}</ElementDate>
             <ElementContent>{item.description}</ElementContent>
-            <ElementStockSymbol>{item.author}</ElementStockSymbol>
+            {item.author && <ElementStockSymbol>By {item.author}</ElementStockSymbol>}
             <Button onClick={() => handleEditBlog(item)}>Edit</Button>
-            <Button onClick={() => handleDeleteBlog(item.id)}>Delete</Button>
+            {deleteConfirm === `blog-${item.id}` ? (
+              <ConfirmBar>
+                <span style={{ color: '#c00' }}>Delete this?</span>
+                <DeleteButton onClick={() => handleDeleteBlog(item.id)} style={{ marginTop: 0, padding: '0.4rem 1rem', fontSize: '0.85rem' }}>Yes</DeleteButton>
+                <Button onClick={() => setDeleteConfirm(null)} style={{ marginTop: 0, padding: '0.4rem 1rem', fontSize: '0.85rem' }}>No</Button>
+              </ConfirmBar>
+            ) : (
+              <DeleteButton onClick={() => setDeleteConfirm(`blog-${item.id}`)}>Delete</DeleteButton>
+            )}
           </ElementCard>
         ))}
       </ElementsContainer>

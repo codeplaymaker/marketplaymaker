@@ -1,23 +1,39 @@
 // src/components/PurchasePage.js
 import React from 'react';
+import styled from 'styled-components';
+
+const Container = styled.div`
+  text-align: center;
+  margin-top: 20px;
+  padding: 2rem;
+  min-height: 80vh;
+`;
+
+const Title = styled.h1`
+  margin-bottom: 1rem;
+`;
+
+const Description = styled.p`
+  margin-bottom: 2rem;
+  color: #666;
+`;
 
 const PurchasePage = () => {
   React.useEffect(() => {
-    // Make sure Stripe Buy Button script has loaded
     if (window.StripeBuyButton) {
       window.StripeBuyButton.load();
     }
   }, []);
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '20px' }}>
-      <h1>Purchase Product</h1>
-      <p>Complete your purchase by selecting a payment method below.</p>
+    <Container>
+      <Title>Purchase Product</Title>
+      <Description>Complete your purchase by selecting a payment method below.</Description>
       <stripe-buy-button
-        buy-button-id="buy_btn_1PoCswBQ5dVVUoajzSWdKTH7"
-        publishable-key="pk_live_51PkTr0BQ5dVVUoajsRhl46KlNpxhd9RYZ2r4rUQXyfnEuA3W9Nr2S4VMGVaXzwJejXVFfxBTEGKhQv100vZXKyur00fBGlG9D7"
+        buy-button-id={process.env.REACT_APP_STRIPE_BUY_BUTTON_ID}
+        publishable-key={process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY}
       ></stripe-buy-button>
-    </div>
+    </Container>
   );
 };
 

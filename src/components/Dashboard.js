@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import styled from 'styled-components';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -12,25 +12,13 @@ const Section = styled.section`
   padding: 4rem 2rem;
   text-align: center;
   background-color: white;
+  min-height: 80vh;
 `;
 
 const Heading = styled.h1`
   font-size: 3rem;
   margin-bottom: 2rem;
   color: #333;
-  animation: bounce 2s infinite;
-
-  @keyframes bounce {
-    0%, 20%, 50%, 80%, 100% {
-      transform: translateY(0);
-    }
-    40% {
-      transform: translateY(-30px);
-    }
-    60% {
-      transform: translateY(-15px);
-    }
-  }
 `;
 
 const CardContainer = styled.div`
@@ -54,6 +42,10 @@ const Card = styled.div`
   transition: transform 0.3s, box-shadow 0.3s;
   position: relative;
   overflow: hidden;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 
   &:hover {
     transform: translateY(-10px);
@@ -123,6 +115,38 @@ const IconButton = styled.button`
     background-color: #333;
     transform: translateY(-5px);
   }
+
+  &:focus-visible {
+    outline: 2px solid #000;
+    outline-offset: 2px;
+  }
+`;
+
+const ErrorText = styled.p`
+  color: #d32f2f;
+  font-size: 1.1rem;
+  margin: 2rem 0;
+`;
+
+const EmptyState = styled.div`
+  padding: 3rem;
+  color: #666;
+  font-size: 1.1rem;
+`;
+
+const RetryButton = styled.button`
+  padding: 0.5rem 1.5rem;
+  background-color: #000;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 1rem;
+  font-size: 1rem;
+
+  &:hover {
+    background-color: #333;
+  }
 `;
 
 const Dashboard = () => {
@@ -132,24 +156,29 @@ const Dashboard = () => {
   const [isImagePopupOpen, setIsImagePopupOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const fetchDashboardData = async () => {
-    const querySnapshot = await getDocs(collection(db, 'dashboard'));
-    const dashboardData = [];
-    querySnapshot.forEach((doc) => {
-      dashboardData.push({ id: doc.id, ...doc.data() });
-    });
-    setData(dashboardData);
-  };
+  const fetchDashboardData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'dashboard'));
+      const dashboardData = [];
+      querySnapshot.forEach((doc) => {
+        dashboardData.push({ id: doc.id, ...doc.data() });
+      });
+      setData(dashboardData);
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
+      setError('Failed to load dashboard data. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 5000); // Simulate loading time
-
-    return () => clearTimeout(timer);
-  }, []);
+  }, [fetchDashboardData]);
 
   const handleButtonClick = (stockSymbol) => {
     if (stockSymbol) {
@@ -179,27 +208,44 @@ const Dashboard = () => {
 
   return (
     <Section>
-      <Heading>🚀</Heading>
-      <CardContainer>
-        {data.map((item) => (
-          <Card key={item.id}>
-            <CardHeader>
-              <CardTitle>{item.title}</CardTitle>
-              <CardDate>{item.date}</CardDate>
-            </CardHeader>
-            <ImageContainer onClick={() => handleImageClick(item.image)}>
-              {item.image && <CardImage src={item.image} alt={item.title} />}
-            </ImageContainer>
-            <CardContent>{item.content}</CardContent>
-            {item.stockSymbol && (
-              <IconButton onClick={() => handleButtonClick(item.stockSymbol)}>
-                <FontAwesomeIcon icon={faDesktop} size="lg" />
-                <span>Chart</span>
-              </IconButton>
-            )}
-          </Card>
-        ))}
-      </CardContainer>
+      <Heading>Dashboard</Heading>
+
+      {error ? (
+        <ErrorText role="alert">
+          {error}
+          <br />
+          <RetryButton onClick={fetchDashboardData}>Retry</RetryButton>
+        </ErrorText>
+      ) : data.length === 0 ? (
+        <EmptyState>
+          <p>No dashboard items yet. Check back soon!</p>
+        </EmptyState>
+      ) : (
+        <CardContainer>
+          {data.map((item) => (
+            <Card key={item.id}>
+              <CardHeader>
+                <CardTitle>{item.title}</CardTitle>
+                <CardDate>{item.date}</CardDate>
+              </CardHeader>
+              <ImageContainer onClick={() => handleImageClick(item.image)}>
+                {item.image && <CardImage src={item.image} alt={item.title || 'Dashboard item'} />}
+              </ImageContainer>
+              <CardContent>{item.content}</CardContent>
+              {item.stockSymbol && (
+                <IconButton
+                  onClick={() => handleButtonClick(item.stockSymbol)}
+                  aria-label={`View chart for ${item.stockSymbol}`}
+                >
+                  <FontAwesomeIcon icon={faDesktop} size="lg" />
+                  <span>Chart</span>
+                </IconButton>
+              )}
+            </Card>
+          ))}
+        </CardContainer>
+      )}
+
       {isModalOpen && selectedStock && (
         <TradingViewModal
           stockSymbol={selectedStock}

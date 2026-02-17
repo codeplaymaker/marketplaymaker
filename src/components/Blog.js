@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import styled from 'styled-components';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit, startAfter } from 'firebase/firestore';
 import { db } from '../firebase';
-import { HelmetProvider, Helmet } from 'react-helmet-async';
+import { Helmet } from 'react-helmet-async';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
+import useModal from '../hooks/useModal';
 
 const Section = styled.section`
   padding: 4rem 2rem;
@@ -147,87 +148,143 @@ const Blog = () => {
   const [blogs, setBlogs] = useState([]);
   const [selectedBlog, setSelectedBlog] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const POSTS_PER_PAGE = 12;
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedBlog(null);
+  }, []);
+
+  useModal(!!selectedBlog, handleCloseModal);
+
+  const fetchBlogPosts = useCallback(async (loadMore = false) => {
+    try {
+      setLoading(true);
+      let q;
+      if (loadMore && lastDoc) {
+        q = query(collection(db, 'blogPosts'), orderBy('date', 'desc'), startAfter(lastDoc), limit(POSTS_PER_PAGE));
+      } else {
+        q = query(collection(db, 'blogPosts'), orderBy('date', 'desc'), limit(POSTS_PER_PAGE));
+      }
+      const querySnapshot = await getDocs(q);
+      const blogPosts = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (querySnapshot.docs.length < POSTS_PER_PAGE) {
+        setHasMore(false);
+      }
+
+      if (querySnapshot.docs.length > 0) {
+        setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      }
+
+      if (loadMore) {
+        setBlogs(prev => [...prev, ...blogPosts]);
+      } else {
+        setBlogs(blogPosts);
+      }
+    } catch (err) {
+      console.error('Error fetching blog posts:', err);
+      setError('Failed to load blog posts. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [lastDoc]);
 
   useEffect(() => {
-    const fetchBlogPosts = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'blogPosts'));
-        const blogPosts = [];
-        querySnapshot.forEach((doc) => {
-          blogPosts.push({ id: doc.id, ...doc.data() });
-        });
-        setBlogs(blogPosts);
-      } catch (error) {
-        console.error('Error fetching blog posts:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchBlogPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleBlogClick = (blog) => {
     setSelectedBlog(blog);
   };
 
-  const handleCloseModal = () => {
-    setSelectedBlog(null);
-  };
-
   const truncateText = (text, length) => {
+    if (!text) return '';
     return text.length > length ? text.substring(0, length) + '...' : text;
   };
 
+  const formatDate = (dateStr) => {
+    try {
+      return new Date(dateStr).toLocaleDateString();
+    } catch {
+      return dateStr;
+    }
+  };
+
   return (
-    <HelmetProvider>
+    <>
       <Helmet>
-        <title>Blog - marketplaymaker</title>
-        <meta name="description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
+        <title>Blog - MarketPlaymaker</title>
+        <meta name="description" content="Read the latest blog posts on trading, investing, and market insights. Stay updated with MarketPlaymaker." />
         <meta name="robots" content="index, follow" />
-        <meta property="og:title" content="Blog - marketplaymaker"/>
-        <meta property="og:description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
-        <meta property="og:image" content={selectedBlog ? selectedBlog.image : ''} />
+        <meta property="og:title" content="Blog - MarketPlaymaker" />
+        <meta property="og:description" content="Read the latest blog posts on trading, investing, and market insights." />
         <meta property="og:url" content={window.location.href} />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Blog - marketplaymaker" />
-        <meta name="twitter:description" content="Read the latest blog posts on various topics. Stay updated with our blog for interesting insights and updates." />
-        <meta name="twitter:image" content={selectedBlog ? selectedBlog.image : ''} />
+        <meta name="twitter:title" content="Blog - MarketPlaymaker" />
+        <meta name="twitter:description" content="Read the latest blog posts on trading, investing, and market insights." />
       </Helmet>
 
       <Section>
         <Heading>Blog</Heading>
-        {loading ? (
+        {error ? (
+          <p role="alert" style={{ color: '#d32f2f' }}>{error}</p>
+        ) : loading && blogs.length === 0 ? (
           <p>Loading blog posts...</p>
+        ) : blogs.length === 0 ? (
+          <p>No blog posts yet. Check back soon!</p>
         ) : (
-          <BlogContainer>
-            {blogs.map((post) => (
-              <BlogCard key={post.id} onClick={() => handleBlogClick(post)}>
-                <BlogImage src={post.image} alt={post.title} />
-                <BlogTitle>{post.title}</BlogTitle>
-                <BlogDate>{new Date(post.date).toLocaleDateString()}</BlogDate>
-                <BlogAuthor>{post.author}</BlogAuthor>
-                <BlogDescription>{truncateText(post.description, 100)}</BlogDescription>
-                <ReadMoreLink>Keep reading</ReadMoreLink>
-              </BlogCard>
-            ))}
-          </BlogContainer>
+          <>
+            <BlogContainer>
+              {blogs.map((post) => (
+                <BlogCard key={post.id} onClick={() => handleBlogClick(post)} role="article">
+                  <BlogImage src={post.image} alt={post.title || 'Blog post'} />
+                  <BlogTitle>{post.title}</BlogTitle>
+                  <BlogDate>{formatDate(post.date)}</BlogDate>
+                  <BlogAuthor>{post.author}</BlogAuthor>
+                  <BlogDescription>{truncateText(post.description, 100)}</BlogDescription>
+                  <ReadMoreLink>Keep reading</ReadMoreLink>
+                </BlogCard>
+              ))}
+            </BlogContainer>
+            {hasMore && (
+              <button
+                onClick={() => fetchBlogPosts(true)}
+                disabled={loading}
+                style={{
+                  padding: '0.75rem 2rem',
+                  backgroundColor: '#000',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  marginTop: '2rem',
+                  fontSize: '1rem',
+                }}
+              >
+                {loading ? 'Loading...' : 'Load More'}
+              </button>
+            )}
+          </>
         )}
 
         {selectedBlog && (
-          <Modal show={!!selectedBlog}>
+          <Modal show={!!selectedBlog} role="dialog" aria-modal="true" aria-label={selectedBlog.title}>
             <ModalContent>
-              <CloseButton onClick={handleCloseModal}>Close</CloseButton>
-              <ModalImage src={selectedBlog.image} alt={selectedBlog.title} />
+              <CloseButton onClick={handleCloseModal} aria-label="Close">Close</CloseButton>
+              <ModalImage src={selectedBlog.image} alt={selectedBlog.title || 'Blog post'} />
               <BlogTitle>{selectedBlog.title}</BlogTitle>
-              <BlogDate>{new Date(selectedBlog.date).toLocaleDateString()}</BlogDate>
+              <BlogDate>{formatDate(selectedBlog.date)}</BlogDate>
               <BlogAuthor>{selectedBlog.author}</BlogAuthor>
               <BlogDescription>{selectedBlog.description}</BlogDescription>
             </ModalContent>
           </Modal>
         )}
       </Section>
-    </HelmetProvider>
+    </>
   );
 };
 

@@ -1,24 +1,22 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-
-import { getStorage } from 'firebase/storage';  // Import getStorage
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAg9UWRG334AInTD7m4bDkm9u8mJQGtSDc",
-  authDomain: "marketplaymaker-2e4b9.firebaseapp.com",
-  projectId: "marketplaymaker-2e4b9",
-  storageBucket: "marketplaymaker-2e4b9.appspot.com",
-  messagingSenderId: "639311000126",
-  appId: "1:639311000126:web:e8cd8664067e4b1f21976f",
-  measurementId: "G-7XNP5PX3WF"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);  // Initialize Firebase Storage
+const storage = getStorage(app);
 
 export { auth, db, storage };
 export default app;

@@ -1,34 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import Hero from './Hero';
-import LoadingScreen from './LoadingScreen';
-import { HelmetProvider, Helmet } from 'react-helmet-async'; // Import for SEO management
+import { Helmet } from 'react-helmet-async';
 
 const MainContainer = styled.div`
   font-family: 'Open Sans', sans-serif;
   color: #fff;
-  background-color: #000; /* Space Black background for the whole page */
+  background-color: #000;
   display: flex;
   flex-direction: column;
-  min-height: 100vh; /* Ensure container covers full height */
+  min-height: 100vh;
 `;
 
 const Section = styled.section`
   padding: 4rem 2rem;
   text-align: center;
-  background-color: #000; /* Space Black background for each section */
-  color: #fff; /* Text color to ensure readability */
+  background-color: #000;
+  color: #fff;
   margin: 1rem 0;
   border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2); /* Subtle light shadow */
+  box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
 `;
 
 const Heading = styled.h1`
   font-size: 2.5rem;
   margin-bottom: 2rem;
-  color: #fff; /* Light color for headings */
+  color: #fff;
 `;
 
 const CardContainer = styled.div`
@@ -39,8 +38,8 @@ const CardContainer = styled.div`
 `;
 
 const Card = styled.div`
-  background-color: #222; /* Dark background for cards */
-  border: 1px solid #444; /* Dark border */
+  background-color: #222;
+  border: 1px solid #444;
   border-radius: 15px;
   padding: 2rem;
   width: 250px;
@@ -54,17 +53,24 @@ const Card = styled.div`
   transition: transform 0.3s, background-color 0.3s;
   cursor: pointer;
 
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
   &:hover {
     transform: translateY(-10px);
-    background-color: #333; /* Slightly lighter on hover */
+    background-color: #333;
   }
 `;
 
 const Emoji = styled.div`
   font-size: 3rem;
   margin-bottom: 1rem;
-  color: #ff5722; /* Bright color for emojis */
-  animation: bounce 1s infinite;
+  color: #ff5722;
+
+  @media (prefers-reduced-motion: no-preference) {
+    animation: bounce 1s infinite;
+  }
 
   @keyframes bounce {
     0%, 20%, 50%, 80%, 100% {
@@ -82,12 +88,12 @@ const Emoji = styled.div`
 const CardTitle = styled.h2`
   font-size: 1.5rem;
   margin: 0;
-  color: #fff; /* Light color for card titles */
+  color: #fff;
 `;
 
 const Badge = styled.div`
-  background-color: #444; /* Dark badge background */
-  color: #fff; /* Light text color */
+  background-color: #444;
+  color: #fff;
   padding: 0.5rem 1rem;
   border-radius: 8px;
   font-size: 0.8rem;
@@ -99,14 +105,14 @@ const Badge = styled.div`
 `;
 
 const CallToAction = styled.div`
-  margin-top: auto; /* Pushes the CTA button to the bottom */
+  margin-top: auto;
   text-align: center;
   padding: 2rem;
 `;
 
 const CTAButton = styled.button`
   padding: 1rem 2rem;
-  background-color: #ff4136; /* Bright button color */
+  background-color: #ff4136;
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -116,14 +122,23 @@ const CTAButton = styled.button`
   margin: 0 auto;
   display: block;
 
+  @media (prefers-reduced-motion: reduce) {
+    transition: background-color 0.3s;
+  }
+
   &:hover {
     background-color: #e33e2d;
     transform: translateY(-5px);
   }
+
+  &:focus-visible {
+    outline: 2px solid #ff4136;
+    outline-offset: 2px;
+  }
 `;
 
 const BenefitsSection = styled(Section)`
-  background-color: #000; /* Space Black background for benefits section */
+  background-color: #000;
 `;
 
 const BenefitCard = styled(Card)`
@@ -133,60 +148,23 @@ const BenefitCard = styled(Card)`
   text-align: left;
 `;
 
-// const TestimonialsSection = styled(Section)`
-//   background-color: #000; /* Space Black background for testimonials section */
-// `;
+const FEATURES = [
+  { emoji: '📚', title: 'Playbooks', path: '/dashboard' },
+  { emoji: '🎮', title: 'Plays', path: '/dashboard' },
+  { emoji: '🔍', title: 'Stats', path: '/trading-journal' },
+];
 
-// const TestimonialBubble = styled.div`
-//   position: relative;
-//   background: #222; /* Dark background for testimonials */
-//   border: 1px solid #444; /* Dark border */
-//   border-radius: 15px;
-//   padding: 1.5rem;
-//   width: 300px;
-//   box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
-//   text-align: left;
-//   overflow: hidden;
-//   margin: 1rem;
-//   &:before {
-//     content: '';
-//     position: absolute;
-//     bottom: -20px;
-//     left: 20px;
-//     width: 0;
-//     height: 0;
-//     border-left: 20px solid transparent;
-//     border-right: 20px solid transparent;
-//     border-top: 20px solid #222;
-//     transform: translateY(10px);
-//   }
-// `;
+const BENEFITS = [
+  { emoji: '🚀', title: 'Expert Insights', description: 'Gain access to expert insights and strategies to maximize your investments.' },
+  { emoji: '📈', title: 'Real-Time Data', description: 'Stay updated with real-time market data and analytics.' },
+  { emoji: '🤝', title: 'Community Support', description: 'Join a community of like-minded investors and get support and advice.' },
+];
 
-// const TestimonialText = styled.p`
-//   font-size: 1rem;
-//   color: #ddd; /* Light color for testimonial text */
-//   margin: 0;
-// `;
-
-// const TestimonialAuthor = styled.p`
-//   font-size: 1rem;
-//   font-weight: bold;
-//   margin-top: 1rem;
-//   color: #fff; /* Light color for author name */
-// `;
+const siteUrl = process.env.REACT_APP_SITE_URL || 'https://marketplaymaker.com';
 
 const HomePage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const handleCardClick = (path) => {
     if (user) {
@@ -196,24 +174,19 @@ const HomePage = () => {
     }
   };
 
-  if (isLoading) {
-    return <LoadingScreen />;
-  }
-
   return (
-    <HelmetProvider>
+    <>
       <Helmet>
-        <title>marketplaymaker</title>
-        <meta name="description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
+        <title>MarketPlaymaker - Empower Your Investments</title>
+        <meta name="description" content="Discover our features, benefits, and trading tools. Explore how MarketPlaymaker can help you make smarter investment decisions." />
         <meta name="robots" content="index, follow" />
-        <meta property="og:title" content="Home - marketplaymaker"/>
-        <meta property="og:description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
-        <meta property="og:image" content="URL_TO_IMAGE" />
-        <meta property="og:url" content="YOUR_PAGE_URL" />
-        <meta property="twitter:card" content="summary_large_image" />
-        <meta property="twitter:title" content="Home - marketplaymaker" />
-        <meta property="twitter:description" content="Discover our features, benefits, and testimonials. Explore how our platform can help you achieve your goals." />
-        <meta property="twitter:image" content="URL_TO_IMAGE" />
+        <meta property="og:title" content="MarketPlaymaker - Empower Your Investments" />
+        <meta property="og:description" content="Discover our features, benefits, and trading tools. Explore how MarketPlaymaker can help you make smarter investment decisions." />
+        <meta property="og:url" content={siteUrl} />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="MarketPlaymaker - Empower Your Investments" />
+        <meta name="twitter:description" content="Discover our features, benefits, and trading tools. Explore how MarketPlaymaker can help you make smarter investment decisions." />
       </Helmet>
 
       <MainContainer>
@@ -221,74 +194,44 @@ const HomePage = () => {
         <Section>
           <Heading>Explore Our Features</Heading>
           <CardContainer>
-            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-              <Card>
-                <Badge>💎</Badge>
-                <Emoji>📚</Emoji>
-                <CardTitle>Playbooks</CardTitle>
-              </Card>
-            </div>
-            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-              <Card>
-                <Badge>💎</Badge>
-                <Emoji>🎮</Emoji>
-                <CardTitle>Plays</CardTitle>
-              </Card>
-            </div>
-            <div onClick={() => handleCardClick('/dashboard')} style={{ position: 'relative' }}>
-              <Card>
-                <Badge>💎</Badge>
-                <Emoji>🔍</Emoji>
-                <CardTitle>Stats</CardTitle>
-              </Card>
-            </div>
+            {FEATURES.map((feature) => (
+              <div
+                key={feature.title}
+                onClick={() => handleCardClick(feature.path)}
+                style={{ position: 'relative' }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && handleCardClick(feature.path)}
+                aria-label={`Go to ${feature.title}`}
+              >
+                <Card>
+                  <Badge aria-hidden="true">💎</Badge>
+                  <Emoji role="img" aria-label={feature.title}>{feature.emoji}</Emoji>
+                  <CardTitle>{feature.title}</CardTitle>
+                </Card>
+              </div>
+            ))}
           </CardContainer>
         </Section>
 
         <BenefitsSection>
           <Heading>Why Choose Us?</Heading>
           <CardContainer>
-            <BenefitCard>
-              <Emoji>🚀</Emoji>
-              <CardTitle>Expert Insights</CardTitle>
-              <p>Gain access to expert insights and strategies to maximize your investments.</p>
-            </BenefitCard>
-            <BenefitCard>
-              <Emoji>📈</Emoji>
-              <CardTitle>Real-Time Data</CardTitle>
-              <p>Stay updated with real-time market data and analytics.</p>
-            </BenefitCard>
-            <BenefitCard>
-              <Emoji>🤝</Emoji>
-              <CardTitle>Community Support</CardTitle>
-              <p>Join a community of like-minded investors and get support and advice.</p>
-            </BenefitCard>
+            {BENEFITS.map((benefit) => (
+              <BenefitCard key={benefit.title}>
+                <Emoji role="img" aria-label={benefit.title}>{benefit.emoji}</Emoji>
+                <CardTitle>{benefit.title}</CardTitle>
+                <p>{benefit.description}</p>
+              </BenefitCard>
+            ))}
           </CardContainer>
         </BenefitsSection>
-{/* 
-        <TestimonialsSection>
-          <Heading>What Our Users Say</Heading>
-          <CardContainer>
-            <TestimonialBubble>
-              <TestimonialText>"MarketPlaymaker has completely transformed my investment strategy. The insights are invaluable!"</TestimonialText>
-              <TestimonialAuthor>— Jane Doe</TestimonialAuthor>
-            </TestimonialBubble>
-            <TestimonialBubble>
-              <TestimonialText>"I love the community aspect of MarketPlaymaker. I've learned so much from other members."</TestimonialText>
-              <TestimonialAuthor>— John Smith</TestimonialAuthor>
-            </TestimonialBubble>
-            <TestimonialBubble>
-              <TestimonialText>"The real-time data and analytics have given me a significant edge in the market."</TestimonialText>
-              <TestimonialAuthor>— Emily Johnson</TestimonialAuthor>
-            </TestimonialBubble>
-          </CardContainer>
-        </TestimonialsSection> */}
 
         <CallToAction>
           <CTAButton onClick={() => navigate('/signup')}>Get Started Now</CTAButton>
         </CallToAction>
       </MainContainer>
-    </HelmetProvider>
+    </>
   );
 };
 

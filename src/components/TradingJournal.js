@@ -3,8 +3,9 @@ import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { collection, getDocs, addDoc, query, where, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
-import { useAuthState } from 'react-firebase-hooks/auth';
+import { db } from '../firebase';
+import { useAuth } from '../hooks/useAuth';
+import useModal from '../hooks/useModal';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
@@ -218,7 +219,7 @@ const FIELD_ORDER = [
 ];
 
 const TradingJournal = () => {
-  const [user] = useAuthState(auth);
+  const { user } = useAuth();
   const [entries, setEntries] = useState([]);
   const [date, setDate] = useState(new Date());
   const [journalEntry, setJournalEntry] = useState({
@@ -238,17 +239,22 @@ const TradingJournal = () => {
     timeInTrade: ''
   });
   const [editMode, setEditMode] = useState(false);
-  const [modalEntry, setModalEntry] = useState(null); // State for modal
+  const [modalEntry, setModalEntry] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     if (user) {
       try {
+        setError(null);
         const q = query(collection(db, 'tradingJournal'), where('userId', '==', user.uid));
         const querySnapshot = await getDocs(q);
         const fetchedEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setEntries(fetchedEntries);
-      } catch (error) {
-        console.error("Error fetching entries: ", error);
+      } catch (err) {
+        console.error("Error fetching entries: ", err);
+        setError('Failed to load journal entries. Please try again.');
       }
     }
   }, [user]);
@@ -264,6 +270,8 @@ const TradingJournal = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
+    setError(null);
     try {
       if (editMode) {
         const entryRef = doc(db, 'tradingJournal', journalEntry.id);
@@ -292,8 +300,11 @@ const TradingJournal = () => {
         timeInTrade: ''
       });
       fetchEntries();
-    } catch (error) {
-      console.error("Error submitting entry: ", error);
+    } catch (err) {
+      console.error("Error submitting entry: ", err);
+      setError('Failed to save entry. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -305,20 +316,27 @@ const TradingJournal = () => {
   const handleDeleteEntry = async (id) => {
     try {
       await deleteDoc(doc(db, 'tradingJournal', id));
+      setDeleteConfirm(null);
       fetchEntries();
-    } catch (error) {
-      console.error("Error deleting entry: ", error);
+    } catch (err) {
+      console.error("Error deleting entry: ", err);
+      setError('Failed to delete entry. Please try again.');
     }
   };
+
+  const confirmDelete = (id) => setDeleteConfirm(id);
+  const cancelDelete = () => setDeleteConfirm(null);
 
 
   const showModal = (entry) => {
     setModalEntry(entry);
   };
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setModalEntry(null);
-  };
+  }, []);
+
+  useModal(!!modalEntry, closeModal);
 
   const calculateStats = () => {
     if (entries.length === 0) {
@@ -466,31 +484,46 @@ const TradingJournal = () => {
                 Show Details
               </Button>
               <EditButton onClick={() => handleEditEntry(entry)}>Edit Entry</EditButton>
-              <DeleteButton onClick={() => handleDeleteEntry(entry.id)}>Delete Entry</DeleteButton>
+              <DeleteButton onClick={() => confirmDelete(entry.id)}>Delete Entry</DeleteButton>
+              {deleteConfirm === entry.id && (
+                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', color: '#c00' }}>Are you sure?</span>
+                  <Button onClick={() => handleDeleteEntry(entry.id)} style={{ backgroundColor: 'red', marginLeft: 0 }}>Yes</Button>
+                  <Button onClick={cancelDelete} style={{ marginLeft: 0 }}>No</Button>
+                </div>
+              )}
             </EntryCard>
           ))}
       </EntriesContainer>
       <Form onSubmit={handleSubmit}>
+        {error && <p style={{ color: '#c00', fontSize: '0.85rem' }} role="alert">{error}</p>}
         {FIELD_ORDER.map((field) => (
           field !== 'id' && field !== 'userId' && (
-            <Input
-              key={field}
-              type={field === 'date' ? 'date' : 'text'}
-              name={field}
-              placeholder={field.replace(/([A-Z])/g, ' $1').toUpperCase()}
-              value={journalEntry[field]}
-              onChange={handleChange}
-            />
+            <div key={field} style={{ display: 'flex', flexDirection: 'column' }}>
+              <label htmlFor={`journal-${field}`} style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.2rem', textTransform: 'capitalize' }}>
+                {field.replace(/([A-Z])/g, ' $1')}
+              </label>
+              <Input
+                id={`journal-${field}`}
+                type={field === 'date' ? 'date' : 'text'}
+                name={field}
+                placeholder={field.replace(/([A-Z])/g, ' $1').toUpperCase()}
+                value={journalEntry[field]}
+                onChange={handleChange}
+              />
+            </div>
           )
         ))}
-        <Button type="submit">{editMode ? 'Update Entry' : 'Add Entry'}</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'Saving...' : editMode ? 'Update Entry' : 'Add Entry'}
+        </Button>
       </Form>
 
       {/* Modal for showing details */}
       {modalEntry && (
-        <ModalOverlay>
-          <ModalContent>
-            <ModalCloseButton onClick={closeModal}>×</ModalCloseButton>
+        <ModalOverlay onClick={closeModal} role="dialog" aria-modal="true" aria-label="Entry details">
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalCloseButton onClick={closeModal} aria-label="Close details">×</ModalCloseButton>
             <h3>Entry Details</h3>
             {FIELD_ORDER.map((field) => (
               field !== 'id' && field !== 'userId' && (

@@ -11,9 +11,9 @@ const ModernTradingDashboard = ({ userDetails }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [calendarEvents, setCalendarEvents] = useState([]);
-  const [balance, setBalance] = useState(20); // Initial balance is 20
-  const [netPnL, setNetPnL] = useState(8.96); // Initial Net P&L is 8.96
-  const [profitFactor, setProfitFactor] = useState(1); // Initial Profit Factor
+  const [balance, setBalance] = useState(0);
+  const [netPnL, setNetPnL] = useState(0);
+  const [profitFactor, setProfitFactor] = useState(0);
 
   const fetchTrades = useCallback(async () => {
     const { apiToken, accountId } = userDetails;
@@ -71,10 +71,7 @@ const ModernTradingDashboard = ({ userDetails }) => {
       totalProfit += trade.profit;
     });
 
-    setBalance(27.78 + totalProfit); // Adjust balance based on starting balance
-    setNetPnL(7.78 + totalProfit); // Adjust Net P&L based on starting value
-
-    // Calculate Profit Factor
+    // Calculate from trade data (no hardcoded values)
     const totalGrossProfit = trades
       .filter((trade) => trade.profit > 0)
       .reduce((acc, trade) => acc + trade.profit, 0);
@@ -83,8 +80,13 @@ const ModernTradingDashboard = ({ userDetails }) => {
       .filter((trade) => trade.profit < 0)
       .reduce((acc, trade) => acc + trade.profit, 0);
 
-    const calculatedProfitFactor = totalGrossProfit / Math.abs(totalGrossLoss);
-    setProfitFactor(isNaN(calculatedProfitFactor) ? 1 : calculatedProfitFactor); // Set Profit Factor
+    setNetPnL(totalProfit);
+    setBalance(totalProfit); // Balance from traded P&L
+
+    const calculatedProfitFactor = Math.abs(totalGrossLoss) > 0
+      ? totalGrossProfit / Math.abs(totalGrossLoss)
+      : totalGrossProfit > 0 ? Infinity : 0;
+    setProfitFactor(isNaN(calculatedProfitFactor) ? 0 : calculatedProfitFactor);
   };
 
   const updateCalendarEvents = (trades) => {
@@ -206,14 +208,24 @@ const ModernTradingDashboard = ({ userDetails }) => {
                     const totalProfit = info.event.extendedProps.totalProfit;
                     const totalTrades = info.event.extendedProps.totalTrades;
 
-                    // Ensure only one text block (fix duplicate values)
-                    info.el.innerHTML = `
-                      <div style="text-align: center;">
-                        <strong style="font-size: 16px; display: block;">${totalProfit >= 0 ? 'Profit' : 'Loss'}: £${totalProfit.toFixed(2)}</strong>
-                        <span style="font-size: 12px;">Trades: ${totalTrades}</span>
-                      </div>
-                    `;
-                    info.el.style.padding = '4px';
+                    // Clear existing content and build DOM safely (avoid XSS)
+                    info.el.textContent = '';
+                    const container = document.createElement('div');
+                    container.style.textAlign = 'center';
+                    container.style.padding = '4px';
+
+                    const profitEl = document.createElement('strong');
+                    profitEl.style.fontSize = '16px';
+                    profitEl.style.display = 'block';
+                    profitEl.textContent = `${totalProfit >= 0 ? 'Profit' : 'Loss'}: £${totalProfit.toFixed(2)}`;
+
+                    const tradesEl = document.createElement('span');
+                    tradesEl.style.fontSize = '12px';
+                    tradesEl.textContent = `Trades: ${totalTrades}`;
+
+                    container.appendChild(profitEl);
+                    container.appendChild(tradesEl);
+                    info.el.appendChild(container);
                     info.el.style.borderRadius = '4px';
                   }}
                 />

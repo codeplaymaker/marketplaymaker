@@ -6,6 +6,8 @@ const resolver = require('./resolver');
 const riskManager = require('./riskManager');
 const executor = require('./executor');
 const paperTrader = require('./paperTrader');
+const alerts = require('./alerts');
+const signalTracker = require('./signalTracker');
 const fs = require('fs');
 const path = require('path');
 
@@ -21,12 +23,16 @@ let newsSignal = null;
 try { wsClient = require('../polymarket/websocket'); } catch { /* optional */ }
 try { newsSignal = require('../data/newsSignal'); } catch { /* optional */ }
 
+let independentSignals = null;
+try { independentSignals = require('../data/independentSignals'); } catch { /* optional */ }
+
 let scanInterval = null;
 let isRunning = false;
 let lastScan = null;
 let opportunities = [];
 let bankroll = 1000;
 let scanCount = 0;
+let lastIndependentResults = null;
 
 // Load persisted bankroll
 try {
@@ -109,7 +115,15 @@ async function scan() {
     // Record paper trades for performance tracking
     if (newOpps.length > 0) {
       paperTrader.recordScanResults(newOpps);
+      // Record signals for credibility tracking
+      for (const opp of newOpps.slice(0, 10)) {
+        signalTracker.recordSignal(opp);
+      }
     }
+
+    // Record price snapshots & check alerts
+    alerts.recordPriceSnapshot(allMarkets);
+    const firedAlerts = alerts.checkAlerts(allMarkets, newOpps);
 
     // Check pending limit/TWAP orders
     let pendingResult = { filled: 0, expired: 0, pending: 0 };
@@ -121,7 +135,28 @@ async function scan() {
       pendingResult = executor.checkPendingOrders(priceMap);
     }
 
-    log.info('SCANNER', `Scan #${scanCount}: ${newOpps.length} opps from ${allMarkets.length} markets | pending: ${pendingResult.pending}`);
+    // Run independent signal analysis (LLM + Polling + Expert)
+    let independentEdges = [];
+    if (independentSignals) {
+      try {
+        const indResults = await independentSignals.batchAnalyze(allMarkets, {
+          maxMarkets: 15,
+          skipLLM: scanCount % 3 !== 0, // LLM every 3rd scan to save API costs
+        });
+        // Store edge results for status reporting
+        for (const [condId, signal] of indResults) {
+          if (signal.edgeSignal === 'STRONG' || signal.edgeSignal === 'MODERATE') {
+            independentEdges.push({ conditionId: condId, ...signal });
+          }
+        }
+        lastIndependentResults = indResults;
+        log.info('SCANNER', `Independent signals: ${indResults.size} analyzed, ${independentEdges.length} edges found`);
+      } catch (err) {
+        log.warn('SCANNER', `Independent signal batch failed: ${err.message}`);
+      }
+    }
+
+    log.info('SCANNER', `Scan #${scanCount}: ${newOpps.length} opps from ${allMarkets.length} markets | pending: ${pendingResult.pending}${firedAlerts.length > 0 ? ` | 🔔 ${firedAlerts.length} alerts` : ''}${independentEdges.length > 0 ? ` | 🧠 ${independentEdges.length} independent edges` : ''}`);
 
     return {
       scanNumber: scanCount,
@@ -130,6 +165,8 @@ async function scan() {
       opportunitiesFound: newOpps.length,
       topOpportunities: newOpps.slice(0, 5),
       pendingOrders: pendingResult,
+      alerts: firedAlerts,
+      independentEdges: independentEdges.slice(0, 10),
     };
   } catch (err) {
     log.error('SCANNER', `Scan failed: ${err.message}`);
@@ -258,6 +295,16 @@ function getStatus() {
   try {
     status.paperTrading = paperTrader.getStats();
   } catch { status.paperTrading = { available: false }; }
+
+  // Independent signal sources status
+  if (independentSignals) {
+    try {
+      status.independentSources = independentSignals.getStatus();
+      if (lastIndependentResults) {
+        status.independentSources.lastResultCount = lastIndependentResults.size;
+      }
+    } catch { status.independentSources = { available: false }; }
+  }
 
   return status;
 }

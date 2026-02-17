@@ -1,0 +1,11 @@
+.git
+node_modules
+bot/node_modules
+bot/logs/*.json
+bot/.env
+.env
+.env.*
+coverage
+*.md
+.vscode
+.husky

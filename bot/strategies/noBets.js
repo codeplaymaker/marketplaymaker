@@ -3,6 +3,7 @@ const log = require('../utils/logger');
 const fees = require('../engine/fees');
 const probabilityModel = require('../engine/probabilityModel');
 const client = require('../polymarket/client');
+const marketData = require('./marketData');
 
 let newsSignal = null;
 try { newsSignal = require('../data/newsSignal'); } catch { /* optional */ }
@@ -103,9 +104,9 @@ async function findOpportunities(markets, bankroll) {
     let noOrderbook = null;
     try {
       [orderbook, priceHistory, noOrderbook] = await Promise.all([
-        market.yesTokenId ? client.getOrderbook(market.yesTokenId).catch(() => null) : null,
-        market.yesTokenId ? client.getPriceHistory(market.yesTokenId, 'max', 50).catch(() => null) : null,
-        market.noTokenId ? client.getOrderbook(market.noTokenId).catch(() => null) : null,
+        marketData.getOrderbook(market),
+        marketData.getPriceHistory(market, 'max', 50),
+        marketData.getNoOrderbook(market),
       ]);
     } catch { /* continue without enrichment */ }
 
@@ -154,7 +155,7 @@ async function findOpportunities(markets, bankroll) {
         }
       } catch { /* optional */ }
     }
-    const finalNoProb = Math.max(0.5, Math.min(0.99, adjustedTrueNoProb + newsAdj));
+    const finalNoProb = Math.max(0.01, Math.min(0.99, adjustedTrueNoProb + newsAdj));
 
     // Edge = our NO estimate - market NO price
     // Positive edge = we think NO is more likely than market says
@@ -204,6 +205,7 @@ async function findOpportunities(markets, bankroll) {
       conditionId: market.conditionId,
       slug: market.slug,
       tokenId: market.noTokenId,
+      platform: market.platform || 'POLYMARKET',
       side: 'NO',
       noPrice: market.noPrice,
       yesPrice: market.yesPrice,

@@ -4,6 +4,7 @@ const fees = require('../engine/fees');
 const probabilityModel = require('../engine/probabilityModel');
 const client = require('../polymarket/client');
 const oddsApi = require('../bookmakers/oddsApi');
+const marketData = require('./marketData');
 
 const CONF = config.strategies.sportsEdge;
 
@@ -484,8 +485,8 @@ async function findOpportunities(markets, bankroll) {
       let orderbook = null;
       try {
         [priceHistory, orderbook] = await Promise.all([
-          market.yesTokenId ? client.getPriceHistory(market.yesTokenId, 'max', 50).catch(() => null) : null,
-          market.yesTokenId ? client.getOrderbook(market.yesTokenId).catch(() => null) : null,
+          marketData.getPriceHistory(market, 'max', 50),
+          marketData.getOrderbook(market),
         ]);
       } catch { /* continue without */ }
 
@@ -577,6 +578,7 @@ async function findOpportunities(markets, bankroll) {
         slug: market.slug,
         yesTokenId: market.yesTokenId,
         noTokenId: market.noTokenId,
+        platform: market.platform || 'POLYMARKET',
         side,
         yesPrice: market.yesPrice,
         noPrice: market.noPrice,

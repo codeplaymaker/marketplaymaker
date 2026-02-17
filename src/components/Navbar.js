@@ -1,9 +1,7 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useCallback } from 'react';
+import { NavLink as RouterNavLink, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { useAuth } from '../hooks/useAuth';
-import { auth } from '../firebase';
-import { signOut } from 'firebase/auth';
 import logo2 from '../components/logo/logo1.png';
 
 const Nav = styled.nav`
@@ -22,6 +20,11 @@ const LogoImage = styled.img`
   width: 50px;
   height: auto;
   transition: transform 0.3s;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
   &:hover {
     transform: rotate(-10deg);
   }
@@ -32,24 +35,29 @@ const NavLinks = styled.ul`
   display: flex;
   gap: 2rem;
   align-items: center;
+  margin: 0;
+  padding: 0;
 
   @media (max-width: 768px) {
     display: none;
   }
 `;
 
-const NavLink = styled.li`
+const NavLinkItem = styled.li`
   position: relative;
 
   a {
     color: #fff;
     text-decoration: none;
     font-size: 1rem;
-    transition: color 0.3s, transform 0.3s;
-    
-    &.active, &:hover {
+    transition: color 0.3s;
+
+    &.active {
       color: #ff4136;
-      transform: scale(1.1);
+    }
+
+    &:hover {
+      color: #ff4136;
     }
   }
 
@@ -65,7 +73,7 @@ const NavLink = styled.li`
     left: 0;
   }
 
-  a.active:after {
+  &:has(a.active)::after {
     width: 100%;
   }
 `;
@@ -78,18 +86,27 @@ const Button = styled.button`
   border-radius: 8px;
   cursor: pointer;
   transition: background-color 0.3s, transform 0.3s;
+  font-size: 1rem;
 
   &:hover {
     background-color: #fff;
     color: #ff4136;
     transform: translateY(-3px);
   }
+
+  &:focus-visible {
+    outline: 2px solid #ff4136;
+    outline-offset: 2px;
+  }
 `;
 
-const Hamburger = styled.div`
+const Hamburger = styled.button`
   display: none;
   flex-direction: column;
   cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0.5rem;
 
   @media (max-width: 768px) {
     display: flex;
@@ -102,15 +119,21 @@ const Hamburger = styled.div`
     margin-bottom: 4px;
     border-radius: 2px;
     transition: background-color 0.3s;
+  }
 
-    &:hover {
-      background-color: #ff4136;
-    }
+  &:hover span,
+  &:focus-visible span {
+    background-color: #ff4136;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #ff4136;
+    outline-offset: 2px;
   }
 `;
 
 const MobileMenu = styled.div`
-  display: ${props => (props.open ? 'flex' : 'none')};
+  display: ${props => (props.$open ? 'flex' : 'none')};
   flex-direction: column;
   background-color: #000;
   position: absolute;
@@ -124,119 +147,142 @@ const MobileMenu = styled.div`
   @media (min-width: 769px) {
     display: none;
   }
+
+  a {
+    color: #fff;
+    text-decoration: none;
+    font-size: 1rem;
+    padding: 0.5rem 0;
+
+    &.active {
+      color: #ff4136;
+    }
+
+    &:hover {
+      color: #ff4136;
+    }
+  }
 `;
 
+const NAV_LINKS = [
+  { to: '/', label: 'Home', auth: false },
+  { to: '/polymarket', label: 'Polymarket Bot', auth: false },
+  { to: '/blog', label: 'Blog', auth: false },
+  { to: '/trade-plan', label: 'Trade Plan', auth: true },
+  { to: '/connect-api', label: 'ConnectAPI', auth: true },
+  { to: '/trading-journal', label: 'Trading Journal', auth: true },
+  { to: '/dashboard', label: 'Dashboard', auth: true },
+  { to: '/admin', label: 'Admin', auth: true, adminOnly: true },
+];
+
 const Navbar = () => {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [isOpen, setIsOpen] = React.useState(false);
   const navigate = useNavigate();
+  const menuRef = useRef(null);
+  const hamburgerRef = useRef(null);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate('/login');
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
+    await signOut();
+    navigate('/login');
+    setIsOpen(false);
   };
+
+  const closeMenu = useCallback(() => {
+    setIsOpen(false);
+  }, []);
 
   const toggleMenu = () => {
-    setIsOpen(!isOpen);
+    setIsOpen(prev => !prev);
   };
 
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isOpen) {
+        closeMenu();
+        hamburgerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, closeMenu]);
+
+  // Close on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        isOpen &&
+        menuRef.current &&
+        !menuRef.current.contains(e.target) &&
+        hamburgerRef.current &&
+        !hamburgerRef.current.contains(e.target)
+      ) {
+        closeMenu();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen, closeMenu]);
+
+  const filteredLinks = NAV_LINKS.filter(link => {
+    if (link.auth && !user) return false;
+    if (link.adminOnly && (!user || !user.isAdmin)) return false;
+    return true;
+  });
+
+  const renderLinks = (onClick) =>
+    filteredLinks.map(link => (
+      <NavLinkItem key={link.to}>
+        <RouterNavLink
+          to={link.to}
+          end={link.to === '/'}
+          onClick={onClick}
+        >
+          {link.label}
+        </RouterNavLink>
+      </NavLinkItem>
+    ));
+
   return (
-    <Nav>
-      <Link to="/">
-        <LogoImage src={logo2} alt="Logo" />
-      </Link>
+    <Nav role="navigation" aria-label="Main navigation">
+      <RouterNavLink to="/" onClick={closeMenu}>
+        <LogoImage src={logo2} alt="MarketPlaymaker home" />
+      </RouterNavLink>
       <NavLinks>
-        <NavLink>
-          <Link to="/" className={({ isActive }) => (isActive ? 'active' : '')}>Home</Link>
-        </NavLink>
-        <NavLink>
-          <Link to="/blog" className={({ isActive }) => (isActive ? 'active' : '')}>Blog</Link>
-        </NavLink>
-        {user && (
-          <>
-            <NavLink>
-              <Link to="/trade-plan" className={({ isActive }) => (isActive ? 'active' : '')}>Trade Plan</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/connect-api" className={({ isActive }) => (isActive ? 'active' : '')}>ConnectAPI</Link>
-            </NavLink>
-          </>
-        )}
+        {renderLinks(undefined)}
         {user ? (
-          <>
-            <NavLink>
-              <Link to="/trading-journal" className={({ isActive }) => (isActive ? 'active' : '')}>Trading Journal</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/dashboard" className={({ isActive }) => (isActive ? 'active' : '')}>Dashboard</Link>
-            </NavLink>
-            {user.isAdmin && (
-              <NavLink>
-                <Link to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>Admin</Link>
-              </NavLink>
-            )}
-            <Button onClick={handleLogout}>Logout</Button>
-          </>
+          <Button onClick={handleLogout}>Logout</Button>
         ) : (
           <>
-            <NavLink>
-              <Link to="/login" className={({ isActive }) => (isActive ? 'active' : '')}>Login</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/signup" className={({ isActive }) => (isActive ? 'active' : '')}>Sign-up</Link>
-            </NavLink>
+            <NavLinkItem>
+              <RouterNavLink to="/login">Login</RouterNavLink>
+            </NavLinkItem>
+            <NavLinkItem>
+              <RouterNavLink to="/signup">Sign-up</RouterNavLink>
+            </NavLinkItem>
           </>
         )}
       </NavLinks>
-      <Hamburger onClick={toggleMenu} aria-expanded={isOpen} aria-controls="mobile-menu">
+      <Hamburger
+        ref={hamburgerRef}
+        onClick={toggleMenu}
+        aria-expanded={isOpen}
+        aria-controls="mobile-menu"
+        aria-label="Toggle navigation menu"
+      >
         <span />
         <span />
         <span />
       </Hamburger>
-      <MobileMenu id="mobile-menu" open={isOpen}>
-        <NavLink>
-          <Link to="/" onClick={() => setIsOpen(false)}>Home</Link>
-        </NavLink>
-        <NavLink>
-          <Link to="/blog" onClick={() => setIsOpen(false)}>Blog</Link>
-        </NavLink>
-        {user && (
-          <>
-            <NavLink>
-              <Link to="/trade-plan" onClick={() => setIsOpen(false)}>Trade Plan</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/connect-api" onClick={() => setIsOpen(false)}>ConnectAPI</Link>
-            </NavLink>
-          </>
-        )}
+      <MobileMenu id="mobile-menu" $open={isOpen} ref={menuRef} role="menu">
+        {renderLinks(closeMenu)}
         {user ? (
-          <>
-            <NavLink>
-              <Link to="/trading-journal" onClick={() => setIsOpen(false)}>Trading Journal</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/dashboard" onClick={() => setIsOpen(false)}>Dashboard</Link>
-            </NavLink>
-            {user.isAdmin && (
-              <NavLink>
-                <Link to="/admin" onClick={() => setIsOpen(false)}>Admin</Link>
-              </NavLink>
-            )}
-            <Button onClick={() => { handleLogout(); setIsOpen(false); }}>Logout</Button>
-          </>
+          <Button onClick={handleLogout}>Logout</Button>
         ) : (
           <>
-            <NavLink>
-              <Link to="/login" onClick={() => setIsOpen(false)}>Login</Link>
-            </NavLink>
-            <NavLink>
-              <Link to="/signup" onClick={() => setIsOpen(false)}>Sign-up</Link>
-            </NavLink>
+            <RouterNavLink to="/login" onClick={closeMenu}>Login</RouterNavLink>
+            <RouterNavLink to="/signup" onClick={closeMenu}>Sign-up</RouterNavLink>
           </>
         )}
       </MobileMenu>

@@ -129,9 +129,7 @@ const TradePlanComponent = () => {
   }, []);
 
   useEffect(() => {
-    if (savedPlans.length > 0) {
-      localStorage.setItem('tradePlans', JSON.stringify(savedPlans));
-    }
+    localStorage.setItem('tradePlans', JSON.stringify(savedPlans));
   }, [savedPlans]);
 
   const addTask = () => {
@@ -201,17 +199,22 @@ const TradePlanComponent = () => {
       <h2>Trade Plan Manager</h2>
       <p>Fail to plan, you plan to fail.</p>
       <TradePlanWrapper>
+        <label htmlFor="new-task-input" style={{ display: 'none' }}>New task</label>
         <TaskInput
+          id="new-task-input"
           type="text"
           value={newTask}
           onChange={(e) => setNewTask(e.target.value)}
           placeholder="Add a new task..."
+          onKeyDown={(e) => e.key === 'Enter' && addTask()}
         />
         <AddTaskButton onClick={addTask}>Add Task</AddTaskButton>
       </TradePlanWrapper>
 
       <TradePlanWrapper>
+        <label htmlFor="plan-name-input" style={{ display: 'none' }}>Plan name</label>
         <TaskInput
+          id="plan-name-input"
           type="text"
           value={planName}
           onChange={(e) => setPlanName(e.target.value)}

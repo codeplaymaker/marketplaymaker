@@ -1,6 +1,18 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
+  // ─── Polymarket Bot API (must be BEFORE /api to match first) ─────
+  app.use(
+    '/polybot',
+    createProxyMiddleware({
+      target: 'http://localhost:4000/api',
+      changeOrigin: true,
+      pathRewrite: { '^/polybot': '' },
+      logger: console,
+    })
+  );
+
+  // ─── MetaTrader Client API ──────────────────────────────────────
   app.use(
     '/api',
     createProxyMiddleware({
@@ -10,10 +22,11 @@ module.exports = function(app) {
         '^/api': '',
       },
       ws: true,
-      logLevel: 'debug',
+      logger: console,
     })
   );
 
+  // ─── MetaStats API ─────────────────────────────────────────────
   app.use(
     '/metastats-api',
     createProxyMiddleware({
@@ -23,7 +36,7 @@ module.exports = function(app) {
         '^/metastats-api': '',
       },
       ws: true,
-      logLevel: 'debug',
+      logger: console,
     })
   );
 };

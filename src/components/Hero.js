@@ -4,10 +4,12 @@ import logo2 from '../components/logo/logo1.png';
 import { useNavigate } from 'react-router-dom';
 
 const HeroSection = styled.section`
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=DM+Sans:wght@400;500&family=Orbitron:wght@400;500&display=swap');
+
   background-color: #000;
   color: #fff;
   padding: 4rem 2rem;
-  text-align: left; /* Align text to the left */
+  text-align: left;
   position: relative;
   overflow: hidden;
 `;
@@ -27,45 +29,51 @@ const HeroLogo = styled.img`
 const HeroContent = styled.div`
   position: relative;
   z-index: 2;
-  max-width: 600px; /* Restrict max width for better alignment */
+  max-width: 600px;
 `;
 
 const HeroHeading = styled.h1`
-  font-size: 3rem; /* Increased font size for emphasis */
+  font-size: 3rem;
   margin-bottom: 1rem;
-  color: #d3d3d3; /* Light grey for a softer look */
-  font-family: 'Inter', sans-serif; /* Ensure 'Inter' font is imported */
+  color: #f0f0f0;
+  font-family: 'Inter', sans-serif;
 `;
 
 const HeroSubheading = styled.p`
-  font-size: 2rem; /* Adjusted font size */
+  font-size: 2rem;
   margin-bottom: 2rem;
-  color: #a9a9a9; /* Darker grey for contrast */
-  font-family: 'DM Sans', sans-serif; /* Ensure 'DM Sans' font is imported */
+  color: #c0c0c0;
+  font-family: 'DM Sans', sans-serif;
 `;
 
 const HeroButton = styled.button`
   padding: 0.75rem 1.5rem;
-  background-color: grey; /* Background color for button */
-  color: white; /* Text color */
+  background-color: #ff4136;
+  color: #fff;
   border: none;
   border-radius: 4px;
   font-size: 1rem;
   cursor: pointer;
-  font-family: 'Orbitron', sans-serif; /* Ensure 'Orbitron' font is imported */
-  transition: background-color 0.3s;
+  font-family: 'Orbitron', sans-serif;
+  transition: background-color 0.3s, transform 0.2s;
 
   &:hover {
-    background-color: red; /* Color change on hover */
+    background-color: #e33e2d;
+    transform: translateY(-2px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #ff4136;
+    outline-offset: 2px;
   }
 `;
 
 const Hero = () => {
-  const navigate = useNavigate(); // Correctly use the navigate function
+  const navigate = useNavigate();
 
   return (
     <HeroSection>
-      <HeroLogo src={logo2} alt="Logo" />
+      <HeroLogo src={logo2} alt="" aria-hidden="true" />
       <HeroContent>
         <HeroHeading>Empower Your Investments</HeroHeading>
         <HeroSubheading>Unlocking Smarter Decisions for Every Investor</HeroSubheading>

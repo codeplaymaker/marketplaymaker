@@ -31,6 +31,9 @@ const path = require('path');
 let newsSignal = null;
 try { newsSignal = require('../data/newsSignal'); } catch { /* optional */ }
 
+let independentSignals = null;
+try { independentSignals = require('../data/independentSignals'); } catch { /* optional */ }
+
 const CALIBRATION_FILE = path.join(__dirname, '../logs/calibration.json');
 
 // ─── Calibration & Learning State ────────────────────────────────────
@@ -91,9 +94,11 @@ function betaCredibleInterval(alpha, beta) {
   const mean = alpha / (alpha + beta);
   const variance = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1));
   const std = Math.sqrt(variance);
+  const lower = Math.max(0.001, Math.min(mean - 1.96 * std, mean - 0.01));
+  const upper = Math.min(0.999, Math.max(mean + 1.96 * std, mean + 0.01));
   return {
-    lower: Math.max(0.01, mean - 1.96 * std),
-    upper: Math.min(0.99, mean + 1.96 * std),
+    lower: Math.round(lower * 10000) / 10000,
+    upper: Math.round(upper * 10000) / 10000,
     mean,
     std,
   };
@@ -637,9 +642,10 @@ function depthProfileSignal(orderbook, currentPrice) {
  * @param {Object} [orderbook] - Live orderbook
  * @param {Array} [priceHistory] - Price history points
  * @param {Object} [bookmakerData] - Optional bookmaker consensus from oddsApi
+ * @param {Object} [independentData] - Optional independent source consensus from independentSignals hub
  * @returns {Object} Bayesian estimate with credible interval
  */
-function estimateProbability(market, orderbook = null, priceHistory = null, bookmakerData = null) {
+function estimateProbability(market, orderbook = null, priceHistory = null, bookmakerData = null, independentData = null) {
   const marketProb = market.yesPrice;
 
   // ─── Prior: start with market price in log-odds space ───
@@ -650,7 +656,9 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
   // prior shift toward our model (we trust the market less)
   const categoryTrust = cat.efficiency; // 0-1: how much we trust the market
   // This is small — just sets the stage for signals to have more/less impact
-  const categoryPriorShift = 0; // We let signals do the work, not the prior
+  // Less efficient categories get a slight prior shift away from market price
+  // (we trust the market less in low-efficiency categories)
+  const categoryPriorShift = (1 - categoryTrust) * 0.02 * (marketProb > 0.5 ? -1 : 1);
 
   priorLogOdds += categoryPriorShift;
 
@@ -779,6 +787,41 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
         divergence: r4(divergence),
         bookmakerCount: bookmakerData.bookmakerCount,
         pinnacleProb: bookmakerData.pinnacleProb,
+      },
+    });
+  }
+
+  // 8. Independent Sources (LLM + Polling + Expert cross-platform)
+  // This is the KEY signal for breaking circular edge detection.
+  // These probabilities come from sources OUTSIDE the market itself.
+  if (independentData && independentData.prob != null) {
+    const indProb = independentData.prob;
+    const indDivergence = indProb - marketProb;
+    const indLogLR = probToLogOdds(indProb) - probToLogOdds(marketProb);
+
+    // Weight scales with source count and confidence
+    const confMultiplier =
+      independentData.confidence === 'HIGH' ? 1.0 :
+      independentData.confidence === 'MEDIUM' ? 0.7 : 0.4;
+    const sourceMultiplier = Math.min(independentData.sourceCount / 3, 1);
+    const baseWeight = 0.45; // Highest-alpha signal when available
+    const indWeight = getSignalWeight('Independent', baseWeight) * confMultiplier * sourceMultiplier;
+
+    const scaledLR = indLogLR * indWeight;
+    totalLogLR += scaledLR;
+    signals.push({
+      name: 'Independent',
+      adjustment: r4(indDivergence),
+      logLR: r4(indLogLR),
+      weight: r4(indWeight),
+      scaledLR: r4(scaledLR),
+      data: {
+        consensusProb: indProb,
+        divergence: r4(indDivergence),
+        sourceCount: independentData.sourceCount,
+        confidence: independentData.confidence,
+        edgeSignal: independentData.edgeSignal,
+        sources: independentData.sources?.map(s => ({ label: s.label, prob: s.prob })),
       },
     });
   }

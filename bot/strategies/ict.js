@@ -4,6 +4,7 @@ const log = require('../utils/logger');
 const { estimateProbability } = require('../engine/probabilityModel');
 const { feeAdjustedEV, feeAdjustedKelly, estimateSlippage } = require('../engine/fees');
 const wsClient = require('../polymarket/websocket');
+const marketData = require('./marketData');
 
 let newsSignal = null;
 try { newsSignal = require('../data/newsSignal'); } catch { /* optional */ }
@@ -277,11 +278,17 @@ function assessMarketDepth(orderbook, currentPrice) {
 const priceHistoryCache = new Map();
 const CACHE_TTL = 60000; // 1 minute cache
 
-async function getCachedHistory(tokenId) {
+async function getCachedHistory(tokenId, market) {
   const cached = priceHistoryCache.get(tokenId);
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
 
-  const history = await client.getPriceHistory(tokenId, 'max', 100);
+  // Platform-aware: use marketData helper if market object provided
+  let history;
+  if (market && marketData.isKalshi(market)) {
+    history = await marketData.getPriceHistory(market, 'max', 100);
+  } else {
+    history = await client.getPriceHistory(tokenId, 'max', 100);
+  }
   if (history.length > 0) {
     priceHistoryCache.set(tokenId, { data: history, ts: Date.now() });
   }
@@ -586,13 +593,13 @@ async function findOpportunities(allMarkets, bankroll) {
       let orderbook = null;
       let history = null;
 
-      if (wsClient.hasFreshData(market.yesTokenId)) {
-        orderbook = wsClient.getOrderbook(market.yesTokenId);
+      if (marketData.hasFreshWsData(market)) {
+        orderbook = marketData.getWsOrderbook(market);
       }
 
       [history, orderbook] = await Promise.all([
-        getCachedHistory(market.yesTokenId),
-        orderbook || client.getOrderbook(market.yesTokenId).catch(() => null),
+        getCachedHistory(market.yesTokenId, market),
+        orderbook || marketData.getOrderbook(market),
       ]);
 
       if (history.length < CONF.minHistoryPoints) continue;
@@ -716,6 +723,7 @@ async function findOpportunities(allMarkets, bankroll) {
         slug: market.slug,
         yesTokenId: market.yesTokenId,
         noTokenId: market.noTokenId,
+        platform: market.platform || 'POLYMARKET',
         side,
         yesPrice: market.yesPrice,
         noPrice: market.noPrice,

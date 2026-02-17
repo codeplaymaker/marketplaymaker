@@ -31,12 +31,18 @@ const LoadingContainer = styled.div`
 const LoadingLogo = styled.img`
   width: 150px;
   height: auto;
-  animation: ${glow} 2s infinite;
+
+  @media (prefers-reduced-motion: no-preference) {
+    animation: ${glow} 2s infinite;
+  }
 `;
 
 const LoadingScreen = () => (
-  <LoadingContainer>
-    <LoadingLogo src={logo2} alt="Loading Logo" />
+  <LoadingContainer role="status" aria-live="polite" aria-label="Loading">
+    <LoadingLogo src={logo2} alt="Loading" />
+    <span className="sr-only" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
+      Loading...
+    </span>
   </LoadingContainer>
 );
 
