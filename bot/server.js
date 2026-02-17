@@ -1168,17 +1168,26 @@ async function fireWebhookAlerts(edges) {
 
 // ─── Debug: Build info endpoint ──────────────────────────────────────
 app.get('/api/debug/build', (req, res) => {
-  const buildPath = path.join(__dirname, '..', 'build');
-  const exists = fs.existsSync(buildPath);
-  const indexExists = exists && fs.existsSync(path.join(buildPath, 'index.html'));
-  let files = [];
-  if (exists) { try { files = fs.readdirSync(buildPath); } catch {} }
-  res.json({ buildPath, exists, indexExists, files, cwd: process.cwd(), dirname: __dirname });
+  const candidates = [
+    path.join(__dirname, '..', 'build'),
+    path.join(__dirname, 'build'),
+    path.join(process.cwd(), 'build'),
+    path.join(process.cwd(), '..', 'build'),
+  ];
+  const found = candidates.find(p => fs.existsSync(path.join(p, 'index.html')));
+  res.json({ candidates, found: found || null, cwd: process.cwd(), dirname: __dirname });
 });
 
 // ─── Production: Serve React Frontend ────────────────────────────────
-const buildPath = path.join(__dirname, '..', 'build');
-if (fs.existsSync(buildPath)) {
+// Try multiple paths — Railway may flatten structure differently than local dev
+const buildCandidates = [
+  path.join(__dirname, '..', 'build'),   // local dev: bot/../build
+  path.join(__dirname, 'build'),          // Railway: /app/build
+  path.join(process.cwd(), 'build'),      // cwd/build
+  path.join(process.cwd(), '..', 'build'),// cwd/../build
+];
+const buildPath = buildCandidates.find(p => fs.existsSync(path.join(p, 'index.html')));
+if (buildPath) {
   app.use(express.static(buildPath));
   // Client-side routing: serve index.html for any non-API route
   app.get('*', (req, res) => {
