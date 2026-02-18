@@ -1440,7 +1440,9 @@ const Polymarket = () => {
                   const isICT = opp.strategy === 'ICT';
                   const isNO = opp.strategy === 'NO_BETS';
                   const isSE = opp.strategy === 'SPORTS_EDGE';
-                  const entryPrice = isArb ? null : isNO ? opp.noPrice : isICT ? opp.price : (opp.side === 'YES' ? opp.yesPrice : opp.noPrice);
+                  const entryPrice = isArb
+                    ? (opp.yesPrice || opp.noPrice || opp.markets?.[0]?.yesPrice || null)
+                    : isNO ? opp.noPrice : isICT ? opp.price : (opp.side === 'YES' ? opp.yesPrice : opp.noPrice);
                   const rankColors = ['#fcd34d', '#c0c0c0', '#cd7f32', '#a5b4fc', '#a5b4fc'];
                   return (
                     <div key={`top5-${i}`} style={{
@@ -1813,7 +1815,7 @@ const Polymarket = () => {
                       </Chip>
                     </span>
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      ${opp.noPrice?.toFixed(3) || opp.yesPrice?.toFixed(3) || '—'}
+                      ${opp.yesPrice?.toFixed(3) || opp.noPrice?.toFixed(3) || opp.markets?.[0]?.yesPrice?.toFixed(3) || '—'}
                     </span>
                     <span style={{ fontVariantNumeric: 'tabular-nums', color: '#a5b4fc' }}>
                       ${opp.positionSize?.toFixed(2) || '—'}
