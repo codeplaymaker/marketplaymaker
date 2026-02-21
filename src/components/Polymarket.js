@@ -1889,7 +1889,7 @@ const Polymarket = () => {
 
                 {/* Stats summary */}
                 {accaData?.stats && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
                     <StatCard>
                       <StatValue $color="#a5b4fc">{accaData.stats.total}</StatValue>
                       <StatLabel>Accas Found</StatLabel>
@@ -1903,7 +1903,11 @@ const Polymarket = () => {
                       <StatLabel>A-Tier</StatLabel>
                     </StatCard>
                     <StatCard>
-                      <StatValue $color="#fbbf24">{accaData.stats.avgEV || 0}%</StatValue>
+                      <StatValue $color="#fbbf24">{accaData.stats.byGrade?.B || 0}</StatValue>
+                      <StatLabel>B-Tier</StatLabel>
+                    </StatCard>
+                    <StatCard>
+                      <StatValue $color="#f97316">{accaData.stats.avgEV || 0}%</StatValue>
                       <StatLabel>Avg EV</StatLabel>
                     </StatCard>
                     <StatCard>
@@ -1913,9 +1917,28 @@ const Polymarket = () => {
                   </div>
                 )}
 
+                {/* Build info bar */}
                 {accaData?.lastBuildTime && (
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '1rem' }}>
-                    Last built: {new Date(accaData.lastBuildTime).toLocaleString()} • {accaData.totalLegs || 0} legs available
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <span>Built: {new Date(accaData.lastBuildTime).toLocaleString()}</span>
+                    <span>•</span>
+                    <span>{accaData.totalLegs || 0} legs available</span>
+                    {accaData.buildStats?.hygiene && (
+                      <>
+                        <span>•</span>
+                        <span style={{ color: '#94a3b8' }}>
+                          Filtered: {accaData.buildStats.hygiene.stale || 0} stale, {accaData.buildStats.hygiene.settled || 0} settled, {accaData.buildStats.hygiene.thinMarket || 0} thin
+                        </span>
+                      </>
+                    )}
+                    {accaData.stats?.avgDataQuality && accaData.stats.avgDataQuality !== 'n/a' && (
+                      <>
+                        <span>•</span>
+                        <span style={{ color: accaData.stats.avgDataQuality === 'excellent' ? '#22c55e' : accaData.stats.avgDataQuality === 'good' ? '#6366f1' : '#fbbf24' }}>
+                          Data: {accaData.stats.avgDataQuality}
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1941,7 +1964,7 @@ const Polymarket = () => {
                         }}>
                           {/* Header */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                               <span style={{
                                 background: `${gradeColor}22`, color: gradeColor,
                                 border: `1px solid ${gradeColor}44`, borderRadius: '6px',
@@ -1952,22 +1975,50 @@ const Polymarket = () => {
                               <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
                                 {acca.numLegs}-Leg {acca.crossSport ? 'Cross-Sport ' : ''}Acca
                               </span>
+                              {acca.dataQuality && (
+                                <span style={{
+                                  background: acca.dataQuality === 'excellent' ? 'rgba(34,197,94,0.1)' : acca.dataQuality === 'good' ? 'rgba(99,102,241,0.1)' : 'rgba(251,191,36,0.1)',
+                                  color: acca.dataQuality === 'excellent' ? '#22c55e' : acca.dataQuality === 'good' ? '#818cf8' : '#fbbf24',
+                                  border: `1px solid ${acca.dataQuality === 'excellent' ? 'rgba(34,197,94,0.2)' : acca.dataQuality === 'good' ? 'rgba(99,102,241,0.2)' : 'rgba(251,191,36,0.2)'}`,
+                                  borderRadius: '4px', padding: '0.1rem 0.4rem', fontSize: '0.7rem', fontWeight: 500,
+                                }}>
+                                  {acca.dataQuality}
+                                </span>
+                              )}
                             </div>
                             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                              <span style={{ color: acca.evPercent >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: '1.1rem' }}>
-                                {acca.evPercent >= 0 ? '+' : ''}{acca.evPercent}% EV
-                              </span>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ color: acca.evPercent >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: '1.1rem' }}>
+                                  {acca.evPercent >= 0 ? '+' : ''}{acca.evPercent}% EV
+                                </span>
+                                {acca.evConfidence && (
+                                  <div style={{ fontSize: '0.65rem', color: '#64748b' }}>
+                                    CI: {acca.evConfidence.low > 0 ? '+' : ''}{acca.evConfidence.low}% to {acca.evConfidence.high > 0 ? '+' : ''}{acca.evConfidence.high}%
+                                  </div>
+                                )}
+                              </div>
                               <span style={{ color: '#a5b4fc', fontWeight: 600, fontSize: '0.95rem' }}>
                                 {acca.combinedOdds}x
                               </span>
                             </div>
                           </div>
 
+                          {/* EV skepticism warning */}
+                          {acca.evPercent > 15 && (
+                            <div style={{
+                              padding: '0.4rem 0.6rem', marginBottom: '0.6rem', borderRadius: '6px',
+                              background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
+                              fontSize: '0.72rem', color: '#fbbf24',
+                            }}>
+                              ⚠️ High EV ({acca.evPercent}%) — treat with caution. Sharp bettors typically see 3-8% EV. High EV may indicate stale lines or thin market data.
+                            </div>
+                          )}
+
                           {/* Legs */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
                             {acca.legs.map((leg, li) => (
                               <div key={li} style={{
-                                display: 'grid', gridTemplateColumns: '2fr 1.2fr 0.6fr 0.8fr',
+                                display: 'grid', gridTemplateColumns: '1.8fr 1.2fr 0.7fr 0.9fr',
                                 gap: '0.5rem', alignItems: 'center', padding: '0.4rem 0.6rem',
                                 background: 'rgba(255,255,255,0.02)', borderRadius: '6px',
                                 fontSize: '0.82rem',
@@ -1978,11 +2029,19 @@ const Polymarket = () => {
                                 <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
                                   {leg.pick}
                                 </span>
-                                <span style={{
-                                  color: leg.betType === 'MONEYLINE' ? '#a5b4fc' : leg.betType === 'SPREAD' ? '#fbbf24' : '#34d399',
-                                  fontSize: '0.75rem',
-                                }}>
-                                  {leg.betType}
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                  <span style={{
+                                    color: leg.betType === 'MONEYLINE' ? '#a5b4fc' : leg.betType === 'SPREAD' ? '#fbbf24' : '#34d399',
+                                    fontSize: '0.72rem',
+                                  }}>
+                                    {leg.betType}
+                                  </span>
+                                  {leg.sharpConfidence && (
+                                    <span style={{
+                                      width: '6px', height: '6px', borderRadius: '50%',
+                                      background: leg.sharpConfidence === 'high' ? '#22c55e' : leg.sharpConfidence === 'medium' ? '#fbbf24' : '#ef4444',
+                                    }} title={`${leg.sharpConfidence} confidence`} />
+                                  )}
                                 </span>
                                 <span style={{ textAlign: 'right' }}>
                                   <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{leg.odds}</span>
@@ -1994,16 +2053,19 @@ const Polymarket = () => {
 
                           {/* Footer: hypothetical */}
                           <div style={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap',
                             padding: '0.5rem 0.75rem', background: 'rgba(99,102,241,0.06)',
-                            borderRadius: '8px', fontSize: '0.8rem',
+                            borderRadius: '8px', fontSize: '0.8rem', gap: '0.5rem',
                           }}>
                             <span style={{ color: '#64748b' }}>
-                              💰 $10 stake → <strong style={{ color: '#22c55e' }}>${acca.hypothetical?.payout}</strong> payout
+                              💰 {acca.kelly?.suggestedStake > 0
+                                ? <>Kelly: <strong style={{ color: '#a5b4fc' }}>${acca.kelly.suggestedStake}</strong> ({acca.kelly.bankrollPercent}% of $1k)</>
+                                : <>Min stake</>
+                              } → <strong style={{ color: '#22c55e' }}>${acca.hypothetical?.payout}</strong> payout
                             </span>
                             <span style={{ color: '#64748b' }}>
-                              Expected: <strong style={{ color: acca.hypothetical?.expectedReturn >= 0 ? '#22c55e' : '#ef4444' }}>
-                                ${acca.hypothetical?.expectedReturn >= 0 ? '+' : ''}{acca.hypothetical?.expectedReturn}
+                              E[profit]: <strong style={{ color: acca.hypothetical?.expectedProfit >= 0 ? '#22c55e' : '#ef4444' }}>
+                                {acca.hypothetical?.expectedProfit >= 0 ? '+' : ''}${acca.hypothetical?.expectedProfit}
                               </strong>
                             </span>
                             <span style={{ color: '#475569', fontSize: '0.7rem' }}>
@@ -2021,12 +2083,25 @@ const Polymarket = () => {
                   marginTop: '1.5rem', padding: '1rem', background: 'rgba(99,102,241,0.05)',
                   borderRadius: '8px', border: '1px solid rgba(99,102,241,0.1)',
                 }}>
-                  <div style={{ fontWeight: 600, color: '#a5b4fc', marginBottom: '0.5rem', fontSize: '0.85rem' }}>How +EV Accas Work</div>
+                  <div style={{ fontWeight: 600, color: '#a5b4fc', marginBottom: '0.5rem', fontSize: '0.85rem' }}>How +EV Accas Work (v2)</div>
                   <div style={{ fontSize: '0.78rem', color: '#64748b', lineHeight: 1.6 }}>
-                    We scan odds from 15+ sportsbooks, remove the vig using sharp lines (Pinnacle),
-                    calculate true combined probability with correlation adjustments, and compare against
-                    the softest available odds. When the true probability is lower than the book implies →
-                    positive expected value. Place each leg at the book with the best odds shown.
+                    <strong style={{ color: '#94a3b8' }}>1. Data Hygiene</strong> — Filter stale/settled events. Only future matches with 3+ bookmakers qualify.{' '}
+                    <strong style={{ color: '#94a3b8' }}>2. Sharp Lines</strong> — Remove vig using Shin method (soccer) or multiplicative method (2-way), prioritizing Pinnacle/Matchbook.{' '}
+                    <strong style={{ color: '#94a3b8' }}>3. Correlation</strong> — Sport-specific coefficients with 30% safety margin (underestimating correlation = phantom +EV).{' '}
+                    <strong style={{ color: '#94a3b8' }}>4. Kelly Sizing</strong> — Quarter-Kelly stake sizing, capped at 3% of bankroll per acca.{' '}
+                    <strong style={{ color: '#94a3b8' }}>5. Confidence</strong> — Each EV shows a confidence interval. EV above 15% triggers a skepticism warning.{' '}
+                    <strong style={{ color: '#94a3b8' }}>6. CLV Tracking</strong> — Line snapshots saved for closing line value analysis over time.
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> High confidence
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#fbbf24' }} /> Medium confidence
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Low confidence
+                      </span>
+                    </div>
                   </div>
                 </div>
               </Card>
