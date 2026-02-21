@@ -569,6 +569,16 @@ const Polymarket = () => {
   const [picksResolving, setPicksResolving] = useState(false);
   const [learningData, setLearningData] = useState(null);
 
+  // Tab UI state
+  const [marketSearch, setMarketSearch] = useState('');
+  const [marketSort, setMarketSort] = useState('volume');
+  const [marketPlatform, setMarketPlatform] = useState('ALL');
+  const [tradeFilter, setTradeFilter] = useState('all');
+  const [signalSearch, setSignalSearch] = useState('');
+  const [picksGradeFilter, setPicksGradeFilter] = useState('ALL');
+  const [alertMarket, setAlertMarket] = useState('');
+  const [marketsShown, setMarketsShown] = useState(20);
+
   // ─── Data Fetching ───────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
@@ -825,28 +835,33 @@ const Polymarket = () => {
   };
 
   // ─── Filtered Opportunities ──────────────────────────────────────
-  const filteredOpps = oppsFilter === 'ALL'
-    ? opportunities
-    : oppsFilter === 'TOP_5'
-    ? (() => {
-        // Strategy-diverse Top 5: best from each active strategy, then fill by score
-        const sorted = [...opportunities].sort((a, b) => (b.score || 0) - (a.score || 0));
-        const strategies = ['NO_BETS', 'ARBITRAGE', 'ICT', 'SPORTS_EDGE'];
-        const picked = [];
-        const usedIds = new Set();
-        // 1. Pick best from each strategy
-        for (const strat of strategies) {
-          const best = sorted.find(o => o.strategy === strat && !usedIds.has(o.conditionId));
-          if (best) { picked.push(best); usedIds.add(best.conditionId); }
-        }
-        // 2. Fill remaining slots up to 5 by score
-        for (const o of sorted) {
-          if (picked.length >= 5) break;
-          if (!usedIds.has(o.conditionId)) { picked.push(o); usedIds.add(o.conditionId); }
-        }
-        return picked;
-      })()
-    : opportunities.filter((o) => o.strategy === oppsFilter);
+  const filteredOpps = (() => {
+    // Apply text search first
+    const searchFiltered = signalSearch
+      ? opportunities.filter(o => (o.market || '').toLowerCase().includes(signalSearch.toLowerCase()))
+      : opportunities;
+
+    if (oppsFilter === 'ALL') return searchFiltered;
+    if (oppsFilter === 'TOP_5') {
+      // Strategy-diverse Top 5: best from each active strategy, then fill by score
+      const sorted = [...searchFiltered].sort((a, b) => (b.score || 0) - (a.score || 0));
+      const strategies = ['NO_BETS', 'ARBITRAGE', 'ICT', 'SPORTS_EDGE'];
+      const picked = [];
+      const usedIds = new Set();
+      // 1. Pick best from each strategy
+      for (const strat of strategies) {
+        const best = sorted.find(o => o.strategy === strat && !usedIds.has(o.conditionId));
+        if (best) { picked.push(best); usedIds.add(best.conditionId); }
+      }
+      // 2. Fill remaining slots up to 5 by score
+      for (const o of sorted) {
+        if (picked.length >= 5) break;
+        if (!usedIds.has(o.conditionId)) { picked.push(o); usedIds.add(o.conditionId); }
+      }
+      return picked;
+    }
+    return searchFiltered.filter((o) => o.strategy === oppsFilter);
+  })();
 
   // ─── Render ──────────────────────────────────────────────────────
   return (
@@ -1464,6 +1479,19 @@ const Polymarket = () => {
               ))}
             </div>
 
+            {/* Signal Search */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <Input
+                type="text" placeholder="🔍 Search signals by market name..." value={signalSearch}
+                onChange={(e) => setSignalSearch(e.target.value)}
+                $width="100%" style={{ fontSize: '0.78rem', padding: '0.4rem 0.6rem' }}
+                aria-label="Search signals"
+              />
+              {signalSearch && (
+                <Button $variant="ghost" onClick={() => setSignalSearch('')} style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', flexShrink: 0 }}>✕</Button>
+              )}
+            </div>
+
             {/* Strategy Info Panel */}
             <div style={{
               background: 'rgba(30, 41, 59, 0.6)',
@@ -1850,12 +1878,20 @@ const Polymarket = () => {
                         </div>
                       )}
 
-                      {/* Expiry */}
-                      {opp.endDate && (
-                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem', textAlign: 'right' }}>
-                          Expires: {new Date(opp.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {/* Expiry + Quick Actions */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                          {opp.endDate ? `Expires: ${new Date(opp.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
                         </div>
-                      )}
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                          <Button $variant="ghost" onClick={() => addToWatchlist(opp)} style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }} title="Add to watchlist">
+                            ⭐ Watch
+                          </Button>
+                          <Button $variant="primary" onClick={() => { setTradeModal(opp); setTradeSide(opp.side || 'YES'); }} style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }}>
+                            📝 Paper Trade
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -1978,7 +2014,17 @@ const Polymarket = () => {
                   </div>
                 </div>
 
-                {/* Action bar */}
+                {/* Grade filter + Action bar */}
+                <div style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                  {['ALL', 'S', 'A', 'B', 'C'].map(g => (
+                    <Button key={g} $variant={picksGradeFilter === g ? 'primary' : 'ghost'}
+                      onClick={() => setPicksGradeFilter(g)}
+                      style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}>
+                      {g === 'ALL' ? '🏆 All Grades' : g === 'S' ? '🟢 S-Tier' : g === 'A' ? '🔵 A-Tier' : g === 'B' ? '🟡 B-Tier' : '⚪ C-Tier'}
+                    </Button>
+                  ))}
+                </div>
+
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <button
@@ -2027,7 +2073,7 @@ const Polymarket = () => {
                   </EmptyState>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {accaData.accas.map((acca, idx) => {
+                    {accaData.accas.filter(a => picksGradeFilter === 'ALL' || a.grade === picksGradeFilter).map((acca, idx) => {
                       // Translate grade to user-friendly confidence
                       const confidenceMap = {
                         S: { label: 'Excellent', color: '#22c55e', stars: 5, bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)' },
@@ -2572,23 +2618,42 @@ const Polymarket = () => {
         {/* ── MARKETS TAB ───────────────────────────────────────── */}
         {activeTab === 'markets' && (
           <Card $delay="0.1s">
-            <CardTitle>🌐 Live Markets ({markets.length})</CardTitle>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <CardTitle style={{ margin: 0 }}>🌐 Live Markets</CardTitle>
+              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                {(() => { const fm = markets.filter(m => { if (marketPlatform !== 'ALL' && m.platform !== marketPlatform) return false; if (marketSearch && !(m.question || '').toLowerCase().includes(marketSearch.toLowerCase())) return false; return true; }); return `${fm.length} of ${markets.length} markets`; })()}
+              </span>
+            </div>
 
-            <div style={{
-              background: 'rgba(99, 102, 241, 0.08)',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
-              borderRadius: '10px',
-              padding: '0.6rem 0.9rem',
-              fontSize: '0.8rem',
-              color: '#a5b4fc',
-              lineHeight: '1.5',
-              marginBottom: '0.75rem',
-            }}>
-              💡 <strong>Browse active markets</strong> from Polymarket & Kalshi. The price bar shows the current YES probability. High volume + tight spreads = the most liquid markets. Click ⭐ to add to your watchlist.
+            {/* Search + Sort + Platform Filter */}
+            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <Input
+                type="text" placeholder="Search markets..." value={marketSearch}
+                onChange={(e) => setMarketSearch(e.target.value)}
+                $width="180px" style={{ fontSize: '0.78rem', padding: '0.4rem 0.6rem' }}
+                aria-label="Search markets"
+              />
+              <div style={{ display: 'flex', gap: '0.2rem' }}>
+                {[{ k: 'ALL', l: 'All' }, { k: 'POLYMARKET', l: '🟣 Poly' }, { k: 'KALSHI', l: '🔵 Kalshi' }].map(p => (
+                  <Button key={p.k} $variant={marketPlatform === p.k ? 'primary' : 'ghost'} onClick={() => setMarketPlatform(p.k)}
+                    style={{ fontSize: '0.68rem', padding: '0.25rem 0.5rem' }}>
+                    {p.l}
+                  </Button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '0.15rem', marginLeft: 'auto' }}>
+                <span style={{ fontSize: '0.68rem', color: '#64748b', alignSelf: 'center', marginRight: '0.2rem' }}>Sort:</span>
+                {[{ k: 'volume', l: '📊 Vol' }, { k: 'yes', l: '📈 Price' }, { k: 'liquidity', l: '💧 Liq' }].map(s => (
+                  <Button key={s.k} $variant={marketSort === s.k ? 'primary' : 'ghost'} onClick={() => setMarketSort(s.k)}
+                    style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem' }}>
+                    {s.l}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <Table>
-              <TableRow $header $columns="2.5fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr">
+              <TableRow $header $columns="2.5fr 0.7fr 0.7fr 0.8fr 0.8fr 0.7fr">
                 <span>Market</span>
                 <span>YES</span>
                 <span>NO</span>
@@ -2597,62 +2662,75 @@ const Polymarket = () => {
                 <span>Actions</span>
               </TableRow>
 
-              {markets.length === 0 ? (
-                <EmptyState>
-                  {connected ? 'Loading markets...' : 'Connect to server to see live markets'}
-                </EmptyState>
-              ) : (
-                markets.map((m, i) => (
-                  <TableRow key={m.conditionId || i} $columns="2.5fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr">
-                    <div>
-                      <div style={{ fontWeight: 500, color: '#e2e8f0', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span style={{
-                          fontSize: '0.6rem',
-                          fontWeight: 700,
-                          padding: '0.05rem 0.3rem',
-                          borderRadius: '3px',
-                          background: m.platform === 'KALSHI' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(139, 92, 246, 0.15)',
-                          color: m.platform === 'KALSHI' ? '#60a5fa' : '#a78bfa',
-                          flexShrink: 0,
-                        }}>{m.platform === 'KALSHI' ? 'K' : 'P'}</span>
-                        <span>{m.question?.length > 60 ? m.question.slice(0, 57) + '...' : m.question}</span>
+              {(() => {
+                const filtered = markets
+                  .filter(m => {
+                    if (marketPlatform !== 'ALL' && m.platform !== marketPlatform) return false;
+                    if (marketSearch && !(m.question || '').toLowerCase().includes(marketSearch.toLowerCase())) return false;
+                    return true;
+                  })
+                  .sort((a, b) => {
+                    if (marketSort === 'yes') return (b.yesPrice || 0) - (a.yesPrice || 0);
+                    if (marketSort === 'liquidity') return (b.liquidity || 0) - (a.liquidity || 0);
+                    return (b.volume24hr || 0) - (a.volume24hr || 0);
+                  });
+                const shown = filtered.slice(0, marketsShown);
+                return shown.length === 0 ? (
+                  <EmptyState>
+                    {markets.length === 0
+                      ? (connected ? 'Loading markets...' : 'Connect to server to see live markets')
+                      : `No markets match "${marketSearch}". Try a different search.`}
+                  </EmptyState>
+                ) : (
+                  <>
+                    {shown.map((m, i) => (
+                      <TableRow key={m.conditionId || i} $columns="2.5fr 0.7fr 0.7fr 0.8fr 0.8fr 0.7fr">
+                        <div>
+                          <div style={{ fontWeight: 500, color: '#e2e8f0', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ fontSize: '0.6rem', fontWeight: 700, padding: '0.05rem 0.3rem', borderRadius: '3px', background: m.platform === 'KALSHI' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(139, 92, 246, 0.15)', color: m.platform === 'KALSHI' ? '#60a5fa' : '#a78bfa', flexShrink: 0 }}>{m.platform === 'KALSHI' ? 'K' : 'P'}</span>
+                            <span>{m.question?.length > 55 ? m.question.slice(0, 52) + '...' : m.question}</span>
+                          </div>
+                          <PriceBar>
+                            <PriceFill $pct={(m.yesPrice || 0.5) * 100} />
+                          </PriceBar>
+                        </div>
+                        <span style={{ color: '#34d399', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                          {m.yesPrice?.toFixed(2) || '—'}¢
+                        </span>
+                        <span style={{ color: '#f87171', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                          {m.noPrice?.toFixed(2) || '—'}¢
+                        </span>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                          ${m.volume24hr >= 1000000 ? (m.volume24hr / 1000000).toFixed(1) + 'M' : m.volume24hr >= 1000 ? (m.volume24hr / 1000).toFixed(1) + 'K' : m.volume24hr?.toFixed(0) || '0'}
+                        </span>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                          ${m.liquidity >= 1000 ? (m.liquidity / 1000).toFixed(1) + 'K' : m.liquidity?.toFixed(0) || '0'}
+                        </span>
+                        <span style={{ display: 'flex', gap: '0.25rem' }}>
+                          <Button $variant="ghost" onClick={() => addToWatchlist(m)} style={{ fontSize: '0.7rem', padding: '0.2rem 0.35rem' }} title="Add to watchlist">
+                            {watchlistData.some(w => w.conditionId === m.conditionId) ? '★' : '☆'}
+                          </Button>
+                          <Button $variant="ghost" onClick={() => { setTradeModal(m); setTradeSide('YES'); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.35rem' }} title="Paper trade">
+                            📝
+                          </Button>
+                          {m.slug && (
+                            <a href={`https://polymarket.com/event/${m.slug}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.7rem', padding: '0.2rem 0.3rem', color: '#64748b', textDecoration: 'none' }} title="View on Polymarket">
+                              ↗
+                            </a>
+                          )}
+                        </span>
+                      </TableRow>
+                    ))}
+                    {filtered.length > marketsShown && (
+                      <div style={{ textAlign: 'center', padding: '0.75rem' }}>
+                        <Button $variant="ghost" onClick={() => setMarketsShown(prev => prev + 20)} style={{ fontSize: '0.78rem', padding: '0.4rem 1.2rem' }}>
+                          Show More ({filtered.length - marketsShown} remaining)
+                        </Button>
                       </div>
-                      <PriceBar>
-                        <PriceFill $pct={(m.yesPrice || 0.5) * 100} />
-                      </PriceBar>
-                    </div>
-                    <span style={{ color: '#34d399', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {m.yesPrice?.toFixed(2) || '—'}¢
-                    </span>
-                    <span style={{ color: '#f87171', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {m.noPrice?.toFixed(2) || '—'}¢
-                    </span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
-                      ${m.volume24hr >= 1000 ? (m.volume24hr / 1000).toFixed(1) + 'K' : m.volume24hr?.toFixed(0) || '0'}
-                    </span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
-                      ${m.liquidity >= 1000 ? (m.liquidity / 1000).toFixed(1) + 'K' : m.liquidity?.toFixed(0) || '0'}
-                    </span>
-                    <span style={{ display: 'flex', gap: '0.3rem' }}>
-                      <Button
-                        $variant="ghost"
-                        onClick={() => addToWatchlist(m)}
-                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                        title="Add to watchlist"
-                      >
-                        {watchlistData.some(w => w.conditionId === m.conditionId) ? '★' : '☆'}
-                      </Button>
-                      <Button
-                        $variant="ghost"
-                        onClick={() => { setTradeModal(m); setTradeSide('YES'); }}
-                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
-                      >
-                        📝
-                      </Button>
-                    </span>
-                  </TableRow>
-                ))
-              )}
+                    )}
+                  </>
+                );
+              })()}
             </Table>
           </Card>
         )}
@@ -2900,6 +2978,58 @@ const Polymarket = () => {
                 </div>
               </div>
             </Card>
+
+            {/* Source Reliability Summary */}
+            <FullWidthSection>
+              <Card $delay="0.18s">
+                <CardTitle>📊 Source Reliability</CardTitle>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                  {[
+                    ...(indSourcesStatus?.polling?.sources || []).map(s => ({
+                      name: s.name, type: 'poll',
+                      successes: s.stats?.successes || 0,
+                      failures: s.stats?.failures || 0,
+                      status: s.status,
+                    })),
+                    ...(indSourcesStatus?.expert?.sources || []).map(s => ({
+                      name: s.name, type: 'expert',
+                      successes: s.stats?.successes || 0,
+                      failures: s.stats?.failures || 0,
+                      status: s.status,
+                    })),
+                    {
+                      name: 'GPT-4o AI', type: 'llm',
+                      successes: indSourcesStatus?.llm?.totalCalls || 0,
+                      failures: 0,
+                      status: llmConfigured ? 'active' : 'down',
+                    },
+                  ].map((src, i) => {
+                    const total = src.successes + src.failures;
+                    const reliability = total > 0 ? ((src.successes / total) * 100).toFixed(0) : '—';
+                    return (
+                      <div key={i} style={{
+                        background: 'rgba(0,0,0,0.2)', borderRadius: '10px', padding: '0.55rem 0.65rem',
+                        border: `1px solid ${src.status === 'active' ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.15)'}`,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: src.status === 'active' ? '#e2e8f0' : '#64748b' }}>{src.name}</span>
+                          <span style={{ fontSize: '0.6rem', color: src.status === 'active' ? '#22c55e' : '#64748b' }}>{src.status === 'active' ? '●' : '○'}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.3rem' }}>
+                          <span style={{ fontSize: '1.1rem', fontWeight: 800, color: reliability === '—' ? '#64748b' : Number(reliability) >= 90 ? '#22c55e' : Number(reliability) >= 70 ? '#fbbf24' : '#f87171' }}>
+                            {reliability}{reliability !== '—' ? '%' : ''}
+                          </span>
+                          <span style={{ fontSize: '0.6rem', color: '#64748b' }}>reliability</span>
+                        </div>
+                        <div style={{ fontSize: '0.62rem', color: '#475569', marginTop: '0.15rem' }}>
+                          {src.successes}✓ {src.failures > 0 ? `${src.failures}✗` : ''} {total > 0 ? `· ${total} total` : ''}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            </FullWidthSection>
 
             {/* Batch Analysis Trigger */}
             <FullWidthSection>
@@ -3182,261 +3312,342 @@ const Polymarket = () => {
 
         {/* ── TRADES TAB ────────────────────────────────────────── */}
         {activeTab === 'trades' && (
-          <Card $delay="0.1s">
-            <CardTitle>📜 Trade History ({trades.length})</CardTitle>
+          <Grid>
+            {/* Performance Summary Strip */}
+            <FullWidthSection>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                {[
+                  { label: 'Total Trades', value: trades.length, icon: '📊', color: '#a5b4fc' },
+                  { label: 'Filled', value: trades.filter(t => t.status === 'FILLED').length, icon: '✅', color: '#22c55e' },
+                  { label: 'Deployed', value: `$${trades.reduce((s, t) => s + (t.positionSize || 0), 0).toFixed(0)}`, icon: '💵', color: '#fbbf24' },
+                  { label: 'Avg Size', value: trades.length > 0 ? `$${(trades.reduce((s, t) => s + (t.positionSize || 0), 0) / trades.length).toFixed(2)}` : '$0', icon: '📐', color: '#c084fc' },
+                  { label: 'Strategies', value: [...new Set(trades.map(t => t.strategy).filter(Boolean))].length, icon: '🎯', color: '#34d399' },
+                  { label: 'P&L', value: `${(performance?.totalPnL || 0) >= 0 ? '+' : ''}$${(performance?.totalPnL || 0).toFixed(2)}`, icon: '📈', color: (performance?.totalPnL || 0) >= 0 ? '#22c55e' : '#ef4444' },
+                ].map((kpi, i) => (
+                  <div key={i} style={{ background: 'rgba(30, 30, 50, 0.9)', borderRadius: '10px', padding: '0.55rem 0.4rem', textAlign: 'center', border: '1px solid rgba(99, 102, 241, 0.12)' }}>
+                    <div style={{ fontSize: '0.7rem', marginBottom: '0.1rem' }}>{kpi.icon}</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
+                    <div style={{ fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{kpi.label}</div>
+                  </div>
+                ))}
+              </div>
+            </FullWidthSection>
 
-            <div style={{
-              background: 'rgba(99, 102, 241, 0.08)',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
-              borderRadius: '10px',
-              padding: '0.6rem 0.9rem',
-              fontSize: '0.8rem',
-              color: '#a5b4fc',
-              lineHeight: '1.5',
-              marginBottom: '0.75rem',
-            }}>
-              💡 <strong>Review your paper trades</strong> here. Each row shows the strategy, side (YES/NO), position size, and fill status. All trades are simulated — no real funds. Use <strong>Paper-Trade Top 3</strong> on the Overview tab to generate trades.
-            </div>
+            <FullWidthSection>
+              <Card $delay="0.1s">
+                {/* Header with filter & export */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <CardTitle style={{ margin: 0 }}>📜 Trade History</CardTitle>
+                  <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                    {['all', 'today', 'week'].map(f => (
+                      <Button key={f} $variant={tradeFilter === f ? 'primary' : 'ghost'} onClick={() => setTradeFilter(f)}
+                        style={{ fontSize: '0.68rem', padding: '0.25rem 0.55rem' }}>
+                        {f === 'all' ? 'All' : f === 'today' ? 'Today' : '7d'}
+                      </Button>
+                    ))}
+                    <Button $variant="ghost" style={{ fontSize: '0.68rem', padding: '0.25rem 0.55rem' }}
+                      onClick={() => { const csv = trades.map(t => `${t.timestamp||''},"${(t.market||'').replace(/"/g,'')}",${t.strategy||''},${t.side||''},${t.positionSize||0},${t.status||''}`).join('\n'); navigator.clipboard?.writeText(`Time,Market,Strategy,Side,Size,Status\n${csv}`).then(() => alert('Copied to clipboard!')); }}>
+                      📋 Export
+                    </Button>
+                  </div>
+                </div>
 
-            <Table>
-              <TableRow $header $columns="1.2fr 2fr 0.8fr 0.8fr 0.8fr 0.8fr">
-                <span>Time</span>
-                <span>Market</span>
-                <span>Strategy</span>
-                <span>Side</span>
-                <span>Size</span>
-                <span>Status</span>
-              </TableRow>
+                {/* Strategy Breakdown Bar */}
+                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                  {[{ k: 'NO_BETS', l: 'NO', c: '#34d399' }, { k: 'ARBITRAGE', l: 'ARB', c: '#a5b4fc' }, { k: 'SPORTS_EDGE', l: 'SPREAD', c: '#fbbf24' }, { k: 'ICT', l: 'ICT', c: '#c084fc' }].map(s => {
+                    const count = trades.filter(t => t.strategy === s.k).length;
+                    return (
+                      <div key={s.k} style={{ background: count > 0 ? `${s.c}10` : 'rgba(0,0,0,0.2)', border: `1px solid ${count > 0 ? `${s.c}30` : 'rgba(100,116,139,0.15)'}`, borderRadius: '8px', padding: '0.3rem 0.55rem', fontSize: '0.7rem', display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 700, color: s.c }}>{count}</span>
+                        <span style={{ color: count > 0 ? '#e2e8f0' : '#64748b' }}>{s.l}</span>
+                      </div>
+                    );
+                  })}
+                  {trades.length > 0 && (
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem', fontSize: '0.72rem', color: '#64748b', alignItems: 'center' }}>
+                      <span>YES: <strong style={{ color: '#34d399' }}>{trades.filter(t => t.side === 'YES').length}</strong></span>
+                      <span>NO: <strong style={{ color: '#f87171' }}>{trades.filter(t => t.side === 'NO').length}</strong></span>
+                    </div>
+                  )}
+                </div>
 
-              {trades.length === 0 ? (
-                <EmptyState>No trades yet. Start the scanner and paper-trade to track signals.</EmptyState>
-              ) : (
-                trades.map((t, i) => (
-                  <TableRow key={t.id || i} $columns="1.2fr 2fr 0.8fr 0.8fr 0.8fr 0.8fr">
-                    <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
-                      {t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : '—'}
-                    </span>
-                    <span style={{ fontWeight: 500 }}>
-                      {t.market?.length > 50 ? t.market.slice(0, 47) + '...' : t.market}
-                    </span>
-                    <span>
-                      <Chip $strategy={t.strategy}>{t.strategy?.replace('_', ' ') || '—'}</Chip>
-                    </span>
-                    <span style={{ color: t.side === 'NO' ? '#f87171' : '#34d399', fontWeight: 600 }}>
-                      {t.side || '—'}
-                    </span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>${t.positionSize?.toFixed(2) || '0.00'}</span>
-                    <span>
-                      <Badge $type={t.status === 'FILLED' ? 'running' : 'stopped'}>
-                        {t.status || '—'}
-                      </Badge>
-                    </span>
+                <Table>
+                  <TableRow $header $columns="1.1fr 2.2fr 0.7fr 0.5fr 0.7fr 0.6fr">
+                    <span>Time</span>
+                    <span>Market</span>
+                    <span>Strategy</span>
+                    <span>Side</span>
+                    <span>Size</span>
+                    <span>Status</span>
                   </TableRow>
-                ))
-              )}
-            </Table>
-          </Card>
+
+                  {(() => {
+                    const now = new Date();
+                    const filtered = trades.filter(t => {
+                      if (tradeFilter === 'all') return true;
+                      if (!t.timestamp) return false;
+                      const d = new Date(t.timestamp);
+                      if (tradeFilter === 'today') return d.toDateString() === now.toDateString();
+                      if (tradeFilter === 'week') return (now - d) < 7 * 24 * 60 * 60 * 1000;
+                      return true;
+                    });
+                    return filtered.length === 0 ? (
+                      <EmptyState>
+                        {trades.length === 0
+                          ? <span>No trades yet. Use <strong>Paper-Trade Top 3</strong> on the Overview tab or manually trade from the Markets tab.</span>
+                          : `No trades for ${tradeFilter === 'today' ? 'today' : 'this week'}. Try a different filter.`}
+                      </EmptyState>
+                    ) : (
+                      filtered.map((t, i) => (
+                        <TableRow key={t.id || i} $columns="1.1fr 2.2fr 0.7fr 0.5fr 0.7fr 0.6fr">
+                          <span style={{ color: '#64748b', fontSize: '0.72rem', fontVariantNumeric: 'tabular-nums' }}>
+                            {t.timestamp ? new Date(t.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </span>
+                          <span style={{ fontWeight: 500, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <span style={{ fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.25rem', borderRadius: '3px', background: t.platform === 'KALSHI' ? 'rgba(59,130,246,0.15)' : 'rgba(139,92,246,0.15)', color: t.platform === 'KALSHI' ? '#60a5fa' : '#a78bfa', flexShrink: 0 }}>{t.platform === 'KALSHI' ? 'K' : 'P'}</span>
+                            <span>{t.market?.length > 48 ? t.market.slice(0, 45) + '...' : t.market}</span>
+                          </span>
+                          <span><Chip $strategy={t.strategy}>{t.strategy === 'NO_BETS' ? 'NO' : t.strategy === 'ARBITRAGE' ? 'ARB' : t.strategy === 'ICT' ? 'ICT' : 'SPRD'}</Chip></span>
+                          <span style={{ color: t.side === 'NO' ? '#f87171' : '#34d399', fontWeight: 600, fontSize: '0.82rem' }}>{t.side || '—'}</span>
+                          <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>${t.positionSize?.toFixed(2) || '0.00'}</span>
+                          <span><Badge $type={t.status === 'FILLED' ? 'running' : 'stopped'}>{t.status || '—'}</Badge></span>
+                        </TableRow>
+                      ))
+                    );
+                  })()}
+                </Table>
+              </Card>
+            </FullWidthSection>
+          </Grid>
         )}
 
         {/* ── WATCHLIST TAB ─────────────────────────────────────── */}
         {activeTab === 'watchlist' && (
-          <Card $delay="0.1s">
-            <CardTitle>⭐ Your Watchlist ({watchlistData.length})</CardTitle>
+          <Grid>
+            {/* Watchlist Summary Strip */}
+            <FullWidthSection>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                {[
+                  { label: 'Watching', value: watchlistData.length, icon: '⭐', color: '#fbbf24' },
+                  { label: 'With Signals', value: watchlistData.filter(w => w.signalCount > 0).length, icon: '🎯', color: '#22c55e' },
+                  { label: 'Price Up', value: watchlistData.filter(w => (w.priceChange || 0) > 0).length, icon: '📈', color: '#34d399' },
+                  { label: 'Price Down', value: watchlistData.filter(w => (w.priceChange || 0) < 0).length, icon: '📉', color: '#f87171' },
+                  { label: 'Polymarket', value: watchlistData.filter(w => w.platform !== 'KALSHI').length, icon: '🟣', color: '#a78bfa' },
+                  { label: 'Kalshi', value: watchlistData.filter(w => w.platform === 'KALSHI').length, icon: '🔵', color: '#60a5fa' },
+                ].map((kpi, i) => (
+                  <div key={i} style={{ background: 'rgba(30, 30, 50, 0.9)', borderRadius: '10px', padding: '0.55rem 0.4rem', textAlign: 'center', border: '1px solid rgba(99, 102, 241, 0.12)' }}>
+                    <div style={{ fontSize: '0.7rem', marginBottom: '0.1rem' }}>{kpi.icon}</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
+                    <div style={{ fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{kpi.label}</div>
+                  </div>
+                ))}
+              </div>
+            </FullWidthSection>
 
-            <div style={{
-              background: 'rgba(99, 102, 241, 0.08)',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
-              borderRadius: '10px',
-              padding: '0.6rem 0.9rem',
-              fontSize: '0.8rem',
-              color: '#a5b4fc',
-              lineHeight: '1.5',
-              marginBottom: '0.75rem',
-            }}>
-              💡 <strong>Track markets you care about.</strong> Add markets from the Markets tab and see price changes, active signals, and volume in one personalized view. Click ✖ to remove.
-            </div>
+            <FullWidthSection>
+              <Card $delay="0.1s">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <CardTitle style={{ margin: 0 }}>⭐ Watchlist</CardTitle>
+                  <Button $variant="ghost" onClick={() => setActiveTab('markets')} style={{ fontSize: '0.72rem', padding: '0.3rem 0.7rem' }}>
+                    + Add from Markets
+                  </Button>
+                </div>
 
-            <Table>
-              <TableRow $header $columns="2fr 0.5fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr">
-                <span>Market</span>
-                <span>Platform</span>
-                <span>Added At</span>
-                <span>Current</span>
-                <span>Change</span>
-                <span>Signals</span>
-                <span></span>
-              </TableRow>
-
-              {watchlistData.length === 0 ? (
-                <EmptyState>No markets watched yet. Go to the Markets tab and click ⭐ to add.</EmptyState>
-              ) : (
-                watchlistData.map((w, i) => (
-                  <TableRow key={w.conditionId || i} $columns="2fr 0.5fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr">
-                    <span style={{ fontWeight: 500 }}>
-                      {w.market?.length > 50 ? w.market.slice(0, 47) + '...' : w.market}
-                    </span>
-                    <span>
-                      <Badge $type={w.platform === 'KALSHI' ? 'kalshi' : 'running'}>
-                        {w.platform === 'KALSHI' ? 'KAL' : 'POLY'}
-                      </Badge>
-                    </span>
-                    <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
-                      ${w.priceAtAdd?.toFixed(2) || '—'}
-                    </span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                      {w.currentPrice != null ? `${(w.currentPrice * 100).toFixed(0)}¢` : '—'}
-                    </span>
-                    <span style={{
-                      color: w.priceChange > 0 ? '#34d399' : w.priceChange < 0 ? '#f87171' : '#94a3b8',
-                      fontWeight: 600,
-                    }}>
-                      {w.priceChangePct != null ? `${w.priceChangePct > 0 ? '+' : ''}${(w.priceChangePct * 100).toFixed(1)}%` : '—'}
-                    </span>
-                    <span>
-                      {w.signalCount > 0 ? (
-                        <Badge $type="running">{w.signalCount} signal{w.signalCount !== 1 ? 's' : ''}</Badge>
-                      ) : (
-                        <span style={{ color: '#64748b', fontSize: '0.8rem' }}>None</span>
-                      )}
-                    </span>
-                    <span>
-                      <Button
-                        $variant="ghost"
-                        onClick={() => removeFromWatchlist(w.conditionId)}
-                        style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }}
-                      >
-                        ✖
-                      </Button>
-                    </span>
-                  </TableRow>
-                ))
-              )}
-            </Table>
-          </Card>
+                {watchlistData.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
+                    <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>⭐</div>
+                    <div style={{ fontSize: '1rem', color: '#e2e8f0', fontWeight: 600, marginBottom: '0.4rem' }}>No markets watched yet</div>
+                    <div style={{ color: '#64748b', maxWidth: '350px', margin: '0 auto', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                      Track the markets you care about. You&apos;ll see live prices, changes, and any active signals.
+                    </div>
+                    <Button $variant="primary" onClick={() => setActiveTab('markets')} style={{ fontSize: '0.85rem' }}>
+                      Browse Markets →
+                    </Button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {watchlistData.map((w, i) => {
+                      const changeUp = (w.priceChange || 0) > 0;
+                      const changeDown = (w.priceChange || 0) < 0;
+                      return (
+                        <div key={w.conditionId || i} style={{
+                          background: 'rgba(0,0,0,0.2)', borderRadius: '10px', padding: '0.65rem 0.75rem',
+                          border: `1px solid ${w.signalCount > 0 ? 'rgba(34,197,94,0.2)' : 'rgba(99,102,241,0.08)'}`,
+                          display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap',
+                        }}>
+                          {/* Direction arrow */}
+                          <div style={{
+                            width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+                            background: changeUp ? 'rgba(34,197,94,0.12)' : changeDown ? 'rgba(239,68,68,0.12)' : 'rgba(100,116,139,0.1)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
+                          }}>
+                            {changeUp ? '↑' : changeDown ? '↓' : '→'}
+                          </div>
+                          {/* Market info */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+                              <span style={{ fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.25rem', borderRadius: '3px', background: w.platform === 'KALSHI' ? 'rgba(59,130,246,0.15)' : 'rgba(139,92,246,0.15)', color: w.platform === 'KALSHI' ? '#60a5fa' : '#a78bfa' }}>{w.platform === 'KALSHI' ? 'K' : 'P'}</span>
+                              <span style={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {w.market?.length > 55 ? w.market.slice(0, 52) + '...' : w.market}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', fontSize: '0.75rem' }}>
+                              <span style={{ color: '#64748b' }}>Added: <strong style={{ color: '#94a3b8' }}>{w.priceAtAdd ? `${(w.priceAtAdd * 100).toFixed(0)}¢` : '—'}</strong></span>
+                              <span style={{ color: '#64748b' }}>Now: <strong style={{ color: '#e2e8f0' }}>{w.currentPrice != null ? `${(w.currentPrice * 100).toFixed(0)}¢` : '—'}</strong></span>
+                              <span style={{ color: changeUp ? '#22c55e' : changeDown ? '#ef4444' : '#64748b', fontWeight: 700 }}>
+                                {w.priceChangePct != null ? `${w.priceChangePct > 0 ? '+' : ''}${(w.priceChangePct * 100).toFixed(1)}%` : '—'}
+                              </span>
+                              {w.signalCount > 0 && (
+                                <Badge $type="running">{w.signalCount} signal{w.signalCount !== 1 ? 's' : ''}</Badge>
+                              )}
+                            </div>
+                          </div>
+                          {/* Actions */}
+                          <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                            <Button $variant="ghost" onClick={() => { const m = markets.find(mk => mk.conditionId === w.conditionId); if (m) { setTradeModal(m); setTradeSide('YES'); } }} style={{ fontSize: '0.68rem', padding: '0.2rem 0.4rem' }} title="Paper trade">📝</Button>
+                            <Button $variant="ghost" onClick={() => removeFromWatchlist(w.conditionId)} style={{ fontSize: '0.68rem', padding: '0.2rem 0.4rem', color: '#f87171' }} title="Remove">✖</Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            </FullWidthSection>
+          </Grid>
         )}
 
         {/* ── ALERTS TAB ──────────────────────────────────────── */}
         {activeTab === 'alerts' && (
           <Grid>
-            {/* Create Alert */}
-            <Card $delay="0.1s">
-              <CardTitle>🔔 Create Alert</CardTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ color: '#94a3b8', fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Alert Type</label>
-                  <select
-                    value={newAlertType}
-                    onChange={(e) => setNewAlertType(e.target.value)}
-                    style={{
-                      background: 'rgba(0,0,0,0.3)',
-                      border: '1px solid rgba(99,102,241,0.3)',
-                      borderRadius: '8px',
-                      color: '#e2e8f0',
-                      padding: '0.5rem',
-                      width: '100%',
-                      fontSize: '0.85rem',
-                    }}
-                  >
-                    <option value="PRICE_MOVE">Price Movement</option>
-                    <option value="DIVERGENCE">Bookmaker Divergence</option>
-                    <option value="NEW_SIGNAL">High-Score Signal</option>
-                    <option value="VOLUME_SPIKE">Volume Spike</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ color: '#94a3b8', fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Threshold</label>
-                  <Input
-                    type="number"
-                    value={newAlertThreshold}
-                    onChange={(e) => setNewAlertThreshold(e.target.value)}
-                    step="0.01"
-                    min="0.01"
-                    $width="100%"
-                    placeholder="e.g. 0.05 = 5%"
-                  />
-                  <span style={{ color: '#64748b', fontSize: '0.7rem' }}>
-                    {newAlertType === 'PRICE_MOVE' && 'Price change % (e.g. 0.05 = 5%)'}
-                    {newAlertType === 'DIVERGENCE' && 'Min divergence between platforms (e.g. 0.05 = 5%)'}
-                    {newAlertType === 'NEW_SIGNAL' && 'Min signal score threshold (0-1, e.g. 0.7 = score 70+)'}
-                    {newAlertType === 'VOLUME_SPIKE' && 'Volume increase ratio (e.g. 0.5 = 50% spike)'}
-                  </span>
-                </div>
-                <Button $variant="primary" onClick={createNewAlert}>
-                  + Create Alert
-                </Button>
+            {/* Alert Summary Strip */}
+            <FullWidthSection>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                {[
+                  { label: 'Active', value: alertsData.alerts?.length || 0, icon: '🔔', color: '#fbbf24' },
+                  { label: 'Total Fired', value: (alertsData.alerts || []).reduce((s, a) => s + (a.firedCount || 0), 0), icon: '⚡', color: '#c084fc' },
+                  { label: 'History', value: alertsData.history?.length || 0, icon: '📜', color: '#a5b4fc' },
+                  { label: 'Price Alerts', value: (alertsData.alerts || []).filter(a => a.type === 'PRICE_MOVE').length, icon: '📊', color: '#34d399' },
+                  { label: 'Signal Alerts', value: (alertsData.alerts || []).filter(a => a.type === 'NEW_SIGNAL').length, icon: '🎯', color: '#22c55e' },
+                ].map((kpi, i) => (
+                  <div key={i} style={{ background: 'rgba(30, 30, 50, 0.9)', borderRadius: '10px', padding: '0.55rem 0.4rem', textAlign: 'center', border: '1px solid rgba(99, 102, 241, 0.12)' }}>
+                    <div style={{ fontSize: '0.7rem', marginBottom: '0.1rem' }}>{kpi.icon}</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
+                    <div style={{ fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{kpi.label}</div>
+                  </div>
+                ))}
               </div>
-            </Card>
+            </FullWidthSection>
+
+            {/* Create Alert — Full Width */}
+            <FullWidthSection>
+              <Card $delay="0.1s">
+                <CardTitle>🔔 Create Alert</CardTitle>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: '1 1 140px', minWidth: '140px' }}>
+                    <label style={{ color: '#94a3b8', fontSize: '0.72rem', display: 'block', marginBottom: '0.2rem' }}>Type</label>
+                    <select value={newAlertType} onChange={(e) => setNewAlertType(e.target.value)}
+                      style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', color: '#e2e8f0', padding: '0.45rem 0.5rem', width: '100%', fontSize: '0.8rem' }}>
+                      <option value="PRICE_MOVE">📊 Price Movement</option>
+                      <option value="DIVERGENCE">🔀 Bookmaker Divergence</option>
+                      <option value="NEW_SIGNAL">🎯 High-Score Signal</option>
+                      <option value="VOLUME_SPIKE">📈 Volume Spike</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: '1 1 100px', minWidth: '100px' }}>
+                    <label style={{ color: '#94a3b8', fontSize: '0.72rem', display: 'block', marginBottom: '0.2rem' }}>Threshold</label>
+                    <Input type="number" value={newAlertThreshold} onChange={(e) => setNewAlertThreshold(e.target.value)}
+                      step="0.01" min="0.01" $width="100%" placeholder="0.05 = 5%" style={{ fontSize: '0.8rem', padding: '0.42rem 0.5rem' }} />
+                  </div>
+                  <div style={{ flex: '1 1 180px', minWidth: '180px' }}>
+                    <label style={{ color: '#94a3b8', fontSize: '0.72rem', display: 'block', marginBottom: '0.2rem' }}>Market (optional)</label>
+                    <Input type="text" value={alertMarket} onChange={(e) => setAlertMarket(e.target.value)}
+                      $width="100%" placeholder="All markets" style={{ fontSize: '0.8rem', padding: '0.42rem 0.5rem' }} />
+                  </div>
+                  <Button $variant="primary" onClick={() => { createNewAlert(); setAlertMarket(''); }} style={{ fontSize: '0.8rem', padding: '0.45rem 1rem', height: '36px' }}>
+                    + Create
+                  </Button>
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.4rem' }}>
+                  {newAlertType === 'PRICE_MOVE' && '🔹 Fires when any market price moves by the threshold % (e.g. 0.05 = 5%)'}
+                  {newAlertType === 'DIVERGENCE' && '🔹 Fires when bookmaker vs market divergence exceeds threshold'}
+                  {newAlertType === 'NEW_SIGNAL' && '🔹 Fires when a signal with score above threshold is detected'}
+                  {newAlertType === 'VOLUME_SPIKE' && '🔹 Fires when 24h volume spikes above ratio (e.g. 0.5 = 50% spike)'}
+                </div>
+              </Card>
+            </FullWidthSection>
 
             {/* Active Alerts */}
-            <Card $delay="0.15s" style={{ gridColumn: 'span 2' }}>
-              <CardTitle>Active Alerts ({alertsData.alerts?.length || 0})</CardTitle>
-              {(!alertsData.alerts || alertsData.alerts.length === 0) ? (
-                <EmptyState>No active alerts. Create one to get notified when conditions are met.</EmptyState>
-              ) : (
-                <Table>
-                  <TableRow $header $columns="1fr 1.5fr 0.8fr 0.8fr 0.5fr">
-                    <span>Type</span>
-                    <span>Market</span>
-                    <span>Threshold</span>
-                    <span>Fired</span>
-                    <span></span>
-                  </TableRow>
-                  {alertsData.alerts.map((a) => (
-                    <TableRow key={a.id} $columns="1fr 1.5fr 0.8fr 0.8fr 0.5fr">
-                      <span>
-                        <Chip $strategy={a.type}>{a.type.replace('_', ' ')}</Chip>
-                      </span>
-                      <span style={{ fontSize: '0.85rem' }}>
-                        {a.market ? (a.market.length > 40 ? a.market.slice(0, 37) + '...' : a.market) : 'All markets'}
-                      </span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{(a.threshold * 100).toFixed(0)}%</span>
-                      <span style={{ color: '#94a3b8' }}>{a.firedCount}x</span>
-                      <span>
-                        <Button
-                          $variant="ghost"
-                          onClick={() => deleteAlertById(a.id)}
-                          style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }}
-                        >
-                          ✖
-                        </Button>
-                      </span>
-                    </TableRow>
-                  ))}
-                </Table>
-              )}
-            </Card>
+            <FullWidthSection>
+              <Card $delay="0.15s">
+                <CardTitle>Active Alerts ({alertsData.alerts?.length || 0})</CardTitle>
+                {(!alertsData.alerts || alertsData.alerts.length === 0) ? (
+                  <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔔</div>
+                    <div style={{ fontSize: '0.95rem', color: '#e2e8f0', fontWeight: 600, marginBottom: '0.3rem' }}>No active alerts</div>
+                    <div style={{ color: '#64748b', fontSize: '0.82rem' }}>Create your first alert above to get notified when market conditions match.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {alertsData.alerts.map((a) => {
+                      const typeIcons = { PRICE_MOVE: '📊', DIVERGENCE: '🔀', NEW_SIGNAL: '🎯', VOLUME_SPIKE: '📈' };
+                      return (
+                        <div key={a.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          background: 'rgba(0,0,0,0.2)', borderRadius: '10px', padding: '0.55rem 0.75rem',
+                          border: '1px solid rgba(99,102,241,0.08)',
+                        }}>
+                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{typeIcons[a.type] || '🔔'}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                              <Chip $strategy={a.type}>{a.type.replace(/_/g, ' ')}</Chip>
+                              <span style={{ fontSize: '0.78rem', color: '#e2e8f0' }}>
+                                {a.market ? (a.market.length > 35 ? a.market.slice(0, 32) + '...' : a.market) : 'All markets'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>
+                              Threshold: {(a.threshold * 100).toFixed(0)}% · Fired: {a.firedCount}x
+                            </div>
+                          </div>
+                          <Button $variant="ghost" onClick={() => deleteAlertById(a.id)} style={{ padding: '0.25rem 0.4rem', fontSize: '0.7rem', color: '#f87171', flexShrink: 0 }}>✖</Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            </FullWidthSection>
 
             {/* Alert History */}
             <FullWidthSection>
               <Card $delay="0.2s">
-                <CardTitle>📜 Alert History</CardTitle>
+                <CardTitle>📜 Alert History ({alertsData.history?.length || 0})</CardTitle>
                 {(!alertsData.history || alertsData.history.length === 0) ? (
                   <EmptyState>No alerts fired yet. They&apos;ll appear here when conditions are met during scans.</EmptyState>
                 ) : (
-                  <Table>
-                    <TableRow $header $columns="1fr 0.8fr 2.5fr 1fr">
-                      <span>Time</span>
-                      <span>Type</span>
-                      <span>Message</span>
-                      <span>Market</span>
-                    </TableRow>
-                    {alertsData.history.map((h, i) => (
-                      <TableRow key={i} $columns="1fr 0.8fr 2.5fr 1fr">
-                        <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
-                          {h.firedAt ? new Date(h.firedAt).toLocaleTimeString() : '—'}
-                        </span>
-                        <span>
-                          <Chip $strategy={h.type}>{h.type.replace('_', ' ')}</Chip>
-                        </span>
-                        <span style={{ fontSize: '0.82rem', color: '#e2e8f0' }}>
-                          {h.message?.length > 80 ? h.message.slice(0, 77) + '...' : h.message}
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                          {h.market?.length > 30 ? h.market.slice(0, 27) + '...' : h.market}
-                        </span>
-                      </TableRow>
-                    ))}
-                  </Table>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {alertsData.history.map((h, i) => {
+                      const typeIcons = { PRICE_MOVE: '📊', DIVERGENCE: '🔀', NEW_SIGNAL: '🎯', VOLUME_SPIKE: '📈' };
+                      return (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.5rem',
+                          padding: '0.4rem 0.6rem', borderRadius: '8px',
+                          background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(99,102,241,0.06)',
+                        }}>
+                          <span style={{ fontSize: '0.75rem', flexShrink: 0 }}>{typeIcons[h.type] || '🔔'}</span>
+                          <span style={{ fontSize: '0.72rem', color: '#64748b', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                            {h.firedAt ? new Date(h.firedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </span>
+                          <span style={{ fontSize: '0.78rem', color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {h.message || '—'}
+                          </span>
+                          <span style={{ fontSize: '0.68rem', color: '#94a3b8', flexShrink: 0 }}>
+                            {h.market?.length > 20 ? h.market.slice(0, 17) + '...' : h.market}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </Card>
             </FullWidthSection>
