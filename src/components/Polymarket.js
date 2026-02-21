@@ -593,6 +593,7 @@ const Polymarket = () => {
   const [accaBuilding, setAccaBuilding] = useState(false);
   const [picksRecord, setPicksRecord] = useState(null);
   const [picksResolving, setPicksResolving] = useState(false);
+  const [learningData, setLearningData] = useState(null);
 
   // ─── Data Fetching ───────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -651,6 +652,9 @@ const Polymarket = () => {
       }).catch(() => {});
       api('/polybot/picks/track-record').then(r => {
         if (r) setPicksRecord(r);
+      }).catch(() => {});
+      api('/polybot/picks/learning').then(l => {
+        if (l) setLearningData(l);
       }).catch(() => {});
 
       setError(null);
@@ -2291,7 +2295,7 @@ const Polymarket = () => {
                   {(!picksRecord || picksRecord.summary?.totalPicks === 0) ? (
                     <div style={{ textAlign: 'center', padding: '1.5rem 1rem', color: '#64748b', fontSize: '0.85rem' }}>
                       <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</div>
-                      <p style={{ margin: 0 }}>No picks tracked yet. Hit <strong>"Find New Picks"</strong> above to start building your track record.</p>
+                      <p style={{ margin: 0 }}>No picks tracked yet. Hit <strong>&ldquo;Find New Picks&rdquo;</strong> above to start building your track record.</p>
                       <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#475569' }}>
                         Every pick you generate is automatically saved. Results are checked against final scores.
                       </p>
@@ -2476,6 +2480,100 @@ const Polymarket = () => {
                   )}
                 </div>
               </Card>
+
+              {/* ── AI LEARNING INSIGHTS ─────────────────────────── */}
+              {learningData && learningData.totalResolved > 0 && (
+                <Card $delay="0.5s" style={{ marginTop: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <span style={{ fontSize: '1.2rem' }}>🧠</span>
+                    <span style={{
+                      fontSize: '1rem', fontWeight: 700, color: '#e2e8f0',
+                      background: 'linear-gradient(135deg, #818cf8, #c084fc)',
+                      WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                    }}>
+                      AI Learning Engine
+                    </span>
+                    <span style={{
+                      marginLeft: 'auto', padding: '0.15rem 0.5rem', borderRadius: '12px',
+                      fontSize: '0.65rem', fontWeight: 600,
+                      background: learningData.adjustments ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
+                      color: learningData.adjustments ? '#22c55e' : '#f59e0b',
+                      border: `1px solid ${learningData.adjustments ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                    }}>
+                      {learningData.adjustments ? '● Active' : '○ Gathering Data'}
+                    </span>
+                  </div>
+
+                  <div style={{
+                    background: 'rgba(129,140,248,0.06)', borderRadius: '10px', padding: '0.6rem 0.8rem',
+                    border: '1px solid rgba(129,140,248,0.15)', marginBottom: '0.75rem',
+                    fontSize: '0.75rem', color: '#a5b4fc', lineHeight: '1.5',
+                  }}>
+                    The AI analyzes every resolved pick to find patterns — which sports, bet types, and odds ranges perform best — then automatically adjusts future picks to be smarter.
+                    {learningData.totalResolved > 0 && (
+                      <span style={{ display: 'block', marginTop: '0.3rem', color: '#94a3b8' }}>
+                        Learned from <strong style={{ color: '#e2e8f0' }}>{learningData.totalResolved}</strong> resolved picks
+                        {learningData.learnedAt && ` • Last updated ${new Date(learningData.learnedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Learning Insights */}
+                  {learningData.insights && learningData.insights.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {learningData.insights.map((insight, i) => (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: '0.4rem',
+                          padding: '0.35rem 0.6rem', borderRadius: '8px',
+                          background: insight.includes('profitable') || insight.includes('Best')
+                            ? 'rgba(34,197,94,0.06)' : insight.includes('losing') || insight.includes('Weakest') || insight.includes('reducing')
+                            ? 'rgba(239,68,68,0.06)' : 'rgba(148,163,184,0.04)',
+                          border: `1px solid ${insight.includes('profitable') || insight.includes('Best')
+                            ? 'rgba(34,197,94,0.12)' : insight.includes('losing') || insight.includes('Weakest')
+                            ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.08)'}`,
+                        }}>
+                          <span style={{ flexShrink: 0, fontSize: '0.7rem', marginTop: '1px' }}>
+                            {insight.includes('profitable') || insight.includes('Best') ? '📈' :
+                             insight.includes('losing') || insight.includes('Weakest') || insight.includes('reducing') ? '📉' :
+                             insight.includes('Overall') ? '📊' : '💡'}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#cbd5e1', lineHeight: '1.4' }}>
+                            {insight}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Active Adjustments Summary */}
+                  {learningData.adjustments && (
+                    <div style={{
+                      marginTop: '0.6rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem',
+                    }}>
+                      {Object.entries(learningData.adjustments.sportMultipliers || {}).map(([sport, mult]) => (
+                        <span key={sport} style={{
+                          padding: '0.15rem 0.45rem', borderRadius: '6px', fontSize: '0.62rem', fontWeight: 600,
+                          background: mult > 1 ? 'rgba(34,197,94,0.1)' : mult < 1 ? 'rgba(239,68,68,0.1)' : 'rgba(148,163,184,0.06)',
+                          color: mult > 1 ? '#4ade80' : mult < 1 ? '#f87171' : '#94a3b8',
+                          border: `1px solid ${mult > 1 ? 'rgba(34,197,94,0.2)' : mult < 1 ? 'rgba(239,68,68,0.2)' : 'rgba(148,163,184,0.1)'}`,
+                        }}>
+                          {sport} {mult > 1 ? '↑' : mult < 1 ? '↓' : '='}{((mult - 1) * 100).toFixed(0)}%
+                        </span>
+                      ))}
+                      {Object.entries(learningData.adjustments.betTypeMultipliers || {}).map(([bt, mult]) => (
+                        <span key={bt} style={{
+                          padding: '0.15rem 0.45rem', borderRadius: '6px', fontSize: '0.62rem', fontWeight: 600,
+                          background: mult > 1 ? 'rgba(99,102,241,0.1)' : mult < 1 ? 'rgba(239,68,68,0.1)' : 'rgba(148,163,184,0.06)',
+                          color: mult > 1 ? '#a5b4fc' : mult < 1 ? '#f87171' : '#94a3b8',
+                          border: `1px solid ${mult > 1 ? 'rgba(99,102,241,0.2)' : mult < 1 ? 'rgba(239,68,68,0.2)' : 'rgba(148,163,184,0.1)'}`,
+                        }}>
+                          {bt} {mult > 1 ? '↑' : mult < 1 ? '↓' : '='}{((mult - 1) * 100).toFixed(0)}%
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
             </FullWidthSection>
           </Grid>
         )}

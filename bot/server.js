@@ -49,6 +49,9 @@ try { accaBuilder = require('./strategies/accaBuilder'); } catch { /* optional *
 let picksTracker = null;
 try { picksTracker = require('./engine/picksTracker'); } catch { /* optional */ }
 
+let picksLearner = null;
+try { picksLearner = require('./engine/picksLearner'); } catch { /* optional */ }
+
 const app = express();
 
 // ─── Process Stability ─────────────────────────────────────────────
@@ -685,6 +688,33 @@ app.get('/api/public/picks/track-record', (req, res) => {
     legs: p.legs.map(l => ({ match: l.match, pick: l.pick, sport: l.sport, result: l.result, score: l.score })),
   }));
   res.json(record);
+});
+
+// ─── Picks Learning / Intelligence ──────────────────────────────────
+app.get('/api/picks/learning', (req, res) => {
+  if (!picksLearner) return res.json({ learnedAt: null, totalResolved: 0, adjustments: null, insights: ['Learning engine not available'] });
+  const report = picksLearner.getLearningReport();
+  res.json(report);
+});
+
+app.post('/api/picks/learn', (req, res) => {
+  if (!picksLearner) return res.status(503).json({ error: 'Learning engine not available' });
+  const result = picksLearner.learn();
+  if (!result) return res.json({ success: false, message: 'Not enough resolved picks to learn from' });
+  res.json({ success: true, totalResolved: result.totalResolved, insights: result.insights });
+});
+
+app.get('/api/public/picks/learning', (req, res) => {
+  if (!picksLearner) return res.json({ insights: [], adjustments: null });
+  const report = picksLearner.getLearningReport();
+  // Sanitized public version
+  res.json({
+    totalResolved: report.totalResolved || 0,
+    overallWinRate: report.overallWinRate || 0,
+    overallROI: report.overallROI || 0,
+    insights: report.insights || [],
+    learnedAt: report.learnedAt,
+  });
 });
 
 // ─── Paper Trade Tracking ────────────────────────────────────────────

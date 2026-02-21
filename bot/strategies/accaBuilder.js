@@ -25,6 +25,7 @@
 const log = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
+const { getAdjustments: getLearningAdjustments, learn: runLearning } = require('../engine/picksLearner');
 
 const ACCA_CACHE_FILE = path.join(__dirname, '..', 'logs', 'acca-cache.json');
 const CLV_FILE = path.join(__dirname, '..', 'logs', 'acca-clv.json');
@@ -404,6 +405,12 @@ function adjustedCombinedProb(legs) {
  * Build all viable acca legs from cached bookmaker events.
  */
 function buildLegs() {
+  // ── Load learning adjustments (if enough data) ──
+  const learned = getLearningAdjustments();
+  if (learned) {
+    log.info('ACCA', `Learning active: ${Object.keys(learned.sportMultipliers || {}).length} sport adj, ${Object.keys(learned.betTypeMultipliers || {}).length} bet-type adj`);
+  }
+
   let cachedOdds = [];
   try {
     const cacheFile = path.join(__dirname, '..', 'logs', 'odds-cache.json');
@@ -451,7 +458,15 @@ function buildLegs() {
       if (trueProb < 0.15 || trueProb > 0.85) continue;
 
       const impliedByBest = 1 / best.odds;
-      const legEV = (trueProb * best.odds) - 1;
+      let legEV = (trueProb * best.odds) - 1;
+
+      // ── Apply learning adjustments to leg EV ──
+      if (learned) {
+        const sportGroup = getSportGroup(event.sport_key);
+        const sportMult = learned.sportMultipliers?.[sportGroup] || 1.0;
+        const btMult = learned.betTypeMultipliers?.['MONEYLINE'] || 1.0;
+        legEV *= sportMult * btMult;
+      }
 
       // FILTER: Individual leg must have meaningful edge (2%+)
       // Zero-EV filler legs drag down acca quality — no passenger legs allowed.
@@ -493,10 +508,10 @@ function buildLegs() {
     }
 
     // ── Spread legs ──
-    buildSpreadLegs(event, legs);
+    buildSpreadLegs(event, legs, learned);
 
     // ── Totals legs ──
-    buildTotalLegs(event, legs);
+    buildTotalLegs(event, legs, learned);
   }
 
   // Track line movements for all legs (detects steam moves, RLM)
@@ -512,7 +527,7 @@ function buildLegs() {
  * Build spread (handicap) legs for an event.
  * Uses proper paired-outcome devig instead of hardcoded margin.
  */
-function buildSpreadLegs(event, legs) {
+function buildSpreadLegs(event, legs, learned) {
   // Group spread outcomes by bookmaker and point value
   // so we can pair complementary outcomes for proper devig
   const spreadByBook = {};
@@ -576,7 +591,14 @@ function buildSpreadLegs(event, legs) {
     if (sharpEntries.length >= 2) sharpConfidence = 'high';
     else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
-    const legEV = trueProb * best.price - 1;
+    let legEV = trueProb * best.price - 1;
+    // Apply learning adjustments for SPREAD legs
+    if (learned) {
+      const sportGroup = getSportGroup(event.sport_key);
+      const sportMult = learned.sportMultipliers?.[sportGroup] || 1.0;
+      const btMult = learned.betTypeMultipliers?.['SPREAD'] || 1.0;
+      legEV *= sportMult * btMult;
+    }
     if (legEV < 0.02 || legEV > 0.10) continue;
 
     legs.push({
@@ -610,7 +632,7 @@ function buildSpreadLegs(event, legs) {
  * Build over/under (totals) legs.
  * Uses proper paired-outcome devig (Over vs Under at same point).
  */
-function buildTotalLegs(event, legs) {
+function buildTotalLegs(event, legs, learned) {
   // For each book, pair Over/Under at the same point for proper devig
   const totalLines = {};
   for (const bm of event.bookmakers) {
@@ -670,7 +692,15 @@ function buildTotalLegs(event, legs) {
     else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
     const legEV = trueProb * best.price - 1;
-    if (legEV < 0.02 || legEV > 0.10) continue;
+    // Apply learning adjustments for TOTAL legs
+    let adjustedLegEV = legEV;
+    if (learned) {
+      const sportGroup = getSportGroup(event.sport_key);
+      const sportMult = learned.sportMultipliers?.[sportGroup] || 1.0;
+      const btMult = learned.betTypeMultipliers?.['TOTAL'] || 1.0;
+      adjustedLegEV *= sportMult * btMult;
+    }
+    if (adjustedLegEV < 0.02 || adjustedLegEV > 0.10) continue;
 
     legs.push({
       eventId: event.id,
@@ -688,7 +718,7 @@ function buildTotalLegs(event, legs) {
       bestBookKey: best.bookKey,
       bestBookIsSharp: SHARP_BOOKS.includes(best.bookKey),
       impliedProb: round4(1 / best.price),
-      legEV: round4(legEV),
+      legEV: round4(adjustedLegEV),
       bookmakerCount: entries.length,
       matchLabel: `${event.home_team} vs ${event.away_team}`,
       betType: 'TOTAL',
@@ -722,6 +752,9 @@ function calculateDataQuality(sharp, best, event) {
 // ─── Acca Combination Engine ─────────────────────────────────────────
 
 function buildAccas(maxLegs = 5, minLegs = 2) {
+  // Re-learn from latest resolved picks before building
+  try { runLearning(); } catch (err) { log.warn('ACCA', `Learning pass failed: ${err.message}`); }
+
   const { legs: allLegs, hygiene, lineMovements } = buildLegs();
 
   if (allLegs.length < minLegs) {
@@ -913,6 +946,8 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
       spread: allLegs.filter(l => l.betType === 'SPREAD').length,
       total: allLegs.filter(l => l.betType === 'TOTAL').length,
     },
+    learningActive: !!getLearningAdjustments(),
+    learningSports: Object.keys(getLearningAdjustments()?.sportMultipliers || {}),
   };
   save();
   saveCLVSnapshot(cachedAccas);
@@ -982,6 +1017,16 @@ function gradeAcca(ev, legs, avgCorrelation, dataQuality) {
   const betTypes = new Set(legs.map(l => l.betType));
   if (betTypes.size >= 3) score += 5;
   else if (betTypes.size >= 2) score += 3;
+
+  // ── Learning-based grade boosts (±5 pts) ──
+  // If historical data shows certain grades over/under-perform, adjust
+  const learned = getLearningAdjustments();
+  if (learned?.gradeBoosts) {
+    // Pre-compute tentative grade to apply boost
+    const tentative = score >= 80 ? 'S' : score >= 60 ? 'A' : score >= 40 ? 'B' : 'C';
+    const boost = learned.gradeBoosts[tentative] || 0;
+    score += boost;
+  }
 
   if (score >= 80) return 'S';
   if (score >= 60) return 'A';
