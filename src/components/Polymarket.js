@@ -1923,7 +1923,7 @@ const Polymarket = () => {
                 {(!accaData?.accas || accaData.accas.length === 0) ? (
                   <EmptyState>
                     <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎰</div>
-                    No accumulators built yet. Click "Build Accas" to scan for +EV parlays across {accaData?.totalLegs || 0} bookmaker events.
+                    No accumulators built yet. Click &ldquo;Build Accas&rdquo; to scan for +EV parlays across {accaData?.totalLegs || 0} bookmaker events.
                     <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#475569' }}>
                       Requires bookmaker odds data. Set your Odds API key in the Sources tab if not set.
                     </div>
