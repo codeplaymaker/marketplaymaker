@@ -41,7 +41,8 @@ function getProbModel() {
 const DATA_FILE = path.join(__dirname, '../logs/paper-trades.json');
 const LEARNING_FILE = path.join(__dirname, '../logs/learning-state.json');
 const MAX_HISTORY = 2000;
-const DEDUP_WINDOW_MS = 180000;         // 3 min — don't re-record same opp
+const DEDUP_WINDOW_MS = 300000;          // 5 min — don't re-record same opp
+const ARB_DEDUP_WINDOW_MS = 1800000;    // 30 min — arbs persist across scans, need longer dedup
 const RESOLUTION_CHECK_MS = 60000;      // Check resolutions every 60 seconds
 const MAX_RESOLUTION_BATCH = 15;        // Max API calls per resolution check cycle (rate limit friendly)
 const DEFAULT_PAPER_BANKROLL = 1000;    // $1000 starting simulated bankroll
@@ -146,15 +147,20 @@ function recordScanResults(opportunities, maxRecord = 20) {
   for (const opp of topOpps) {
     const key = `${opp.conditionId}:${opp.strategy}:${opp.side}`;
 
-    // Dedup: don't record same opp within 3 minutes
+    // Dedup: arbs persist longer across scans; other strategies 5 min
+    const dedupWindow = opp.strategy === 'ARBITRAGE' ? ARB_DEDUP_WINDOW_MS : DEDUP_WINDOW_MS;
     const existing = paperTrades.find(
-      t => t.key === key && (now - new Date(t.recordedAt).getTime()) < DEDUP_WINDOW_MS
+      t => t.key === key && (now - new Date(t.recordedAt).getTime()) < dedupWindow
     );
     if (existing) continue;
+
+    // Don't open trades we can't afford
+    if (simBankroll <= 1) continue;
 
     // Position size: use Kelly-based size relative to simulated bankroll, or a sensible default
     const rawKellySize = opp.positionSize || 0;
     const posSize = rawKellySize > 0 ? Math.min(rawKellySize, simBankroll * 0.05) : Math.min(10, simBankroll * 0.02);
+    if (posSize > simBankroll) continue; // Can't afford this trade
     const rawEntryPrice = opp.side === 'NO' ? (opp.noPrice || (1 - (opp.yesPrice || 0.5))) : (opp.price || opp.yesPrice || 0.5);
     // Simulate slippage: larger positions relative to liquidity get worse fills
     const liquidity = opp.liquidity || 50000;
@@ -350,18 +356,71 @@ function resolveMarket(conditionId, outcome) {
   for (const trade of unresolvedTrades) {
     // Calculate hypothetical P&L
     const hypotheticalSize = trade.kellySize || 10;
-    const hypotheticalShares = hypotheticalSize / trade.entryPrice;
-    let payout;
-    if (trade.side === 'YES') {
-      payout = outcome === 'YES' ? 1.0 : 0.0;
+
+    let grossPnL, won, payout, hypotheticalShares;
+
+    if (trade.strategy === 'ARBITRAGE') {
+      // ── Arb resolution: multi-leg, NOT single-leg binary ──
+      // An arb buys YES on ALL outcomes. Only the conditionId of the first leg
+      // is tracked, but the real P&L depends on the combined cost vs $1 payout.
+      // The edge.raw tells us the underround/overround gap.
+      // Win: first leg resolves YES → payout $1, cost was entryPrice per share → profit on this leg
+      // Loss: first leg resolves NO → this leg pays $0, but OTHER legs also paid $0
+      //   Real arb P&L on loss = -(total combined cost) since no leg won yet
+      //   But we only track one leg, so approximate:
+      //   - If outcome=YES for this leg → we won the arb (this leg pays out)
+      //   - If outcome=NO for this leg → we lost this leg's cost, but arb isn't fully resolved
+      //     (other legs might still win). For sim simplicity, treat as a loss of the
+      //     net edge gap (the premium paid above fair value), NOT 100% of position.
+      const edgeRaw = (typeof trade.edge === 'object' ? trade.edge.raw : trade.edge) || 0.05;
+      hypotheticalShares = hypotheticalSize / (trade.entryPrice || 0.5);
+
+      if (outcome === 'YES' && trade.side === 'YES') {
+        // This leg won — arb profit = edge * position
+        payout = 1.0;
+        grossPnL = (1.0 - trade.entryPrice) * hypotheticalShares;
+        won = true;
+      } else if (outcome === 'NO' && trade.side === 'YES') {
+        // This leg lost — but in a real arb, another leg should win.
+        // The loss is the cost of THIS leg only. In multi-outcome arbs,
+        // one leg always wins, so the P&L is approximately:
+        //   profit ≈ edge * positionSize (if complete arb)
+        //   loss ≈ -edge * positionSize (if incomplete/failed arb)
+        const riskLevel = trade.riskLevel || 'UNKNOWN';
+        if (riskLevel === 'LOW') {
+          // Complete arb — the cost of this leg is lost but another leg pays out
+          // Net P&L ≈ +(edge * position) across all legs. Since we can't track
+          // all legs here, mark as small win (arb profit).
+          grossPnL = edgeRaw * hypotheticalSize * 0.5; // Conservative: half the theoretical edge
+          won = true;
+          payout = 0; // This specific leg lost
+        } else {
+          // Incomplete arb — real risk of loss, but NOT 100% of position.
+          // Max realistic loss ≈ the overround gap (typically 5-15%)
+          grossPnL = -Math.min(hypotheticalSize * 0.15, hypotheticalSize * edgeRaw * 2);
+          won = false;
+          payout = 0;
+        }
+      } else {
+        // Side=NO on arb (unusual) — treat normally
+        payout = outcome === 'NO' ? 1.0 : 0.0;
+        grossPnL = (payout - trade.entryPrice) * hypotheticalShares;
+        won = grossPnL > 0;
+      }
     } else {
-      payout = outcome === 'NO' ? 1.0 : 0.0;
+      // ── Standard single-leg resolution (NO_BETS, SPORTS_EDGE, etc.) ──
+      hypotheticalShares = hypotheticalSize / trade.entryPrice;
+      if (trade.side === 'YES') {
+        payout = outcome === 'YES' ? 1.0 : 0.0;
+      } else {
+        payout = outcome === 'NO' ? 1.0 : 0.0;
+      }
+      grossPnL = (payout - trade.entryPrice) * hypotheticalShares;
+      won = grossPnL > 0;
     }
 
-    const grossPnL = (payout - trade.entryPrice) * hypotheticalShares;
     const fee = grossPnL > 0 ? grossPnL * fees.DEFAULT_FEE_RATE : 0;
     const netPnL = grossPnL - fee;
-    const won = grossPnL > 0;
 
     trade.resolved = true;
     trade.outcome = outcome;
@@ -390,6 +449,7 @@ function resolveMarket(conditionId, outcome) {
       simBankroll = 0;
       simBusted = true;
       log.warn('PAPER_TRADER', '💀 Simulated bankroll busted! Reset to continue paper trading.');
+      break; // Stop resolving more trades — we're bust
     }
 
     resolvedTrades.push({ ...trade });
