@@ -43,6 +43,9 @@ try { independentSignals = require('./data/independentSignals'); } catch { /* op
 let edgeResolver = null;
 try { edgeResolver = require('./engine/edgeResolver'); } catch { /* optional */ }
 
+let accaBuilder = null;
+try { accaBuilder = require('./strategies/accaBuilder'); } catch { /* optional */ }
+
 const app = express();
 
 // ─── Process Stability ─────────────────────────────────────────────
@@ -557,6 +560,53 @@ app.post('/api/odds/fetch', async (req, res) => {
 app.get('/api/odds/sports', async (req, res) => {
   const sports = await oddsApi.getSports();
   res.json(sports);
+});
+
+// ─── Accumulator (Parlay) Builder ────────────────────────────────────
+app.post('/api/accas/build', async (req, res) => {
+  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
+  try {
+    const { maxLegs, minLegs } = req.body || {};
+    const accas = accaBuilder.buildAccas(maxLegs || 5, minLegs || 2);
+    res.json(accaBuilder.getAccas());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/accas', (req, res) => {
+  if (!accaBuilder) return res.json({ accas: [], stats: { total: 0 }, lastBuildTime: null });
+  res.json(accaBuilder.getAccas());
+});
+
+app.get('/api/accas/top', (req, res) => {
+  if (!accaBuilder) return res.json([]);
+  const limit = parseInt(req.query.limit) || 10;
+  res.json(accaBuilder.getTopAccas(limit));
+});
+
+// Public acca endpoint (no auth required)
+app.get('/api/public/accas', (req, res) => {
+  if (!accaBuilder) return res.json({ accas: [], stats: { total: 0 }, lastBuildTime: null });
+  const data = accaBuilder.getAccas();
+  // Sanitize: remove bookmaker keys, just show picks and odds
+  const publicAccas = (data.accas || []).slice(0, 5).map(a => ({
+    grade: a.grade,
+    numLegs: a.numLegs,
+    combinedOdds: a.combinedOdds,
+    evPercent: a.evPercent,
+    crossSport: a.crossSport,
+    legs: a.legs.map(l => ({
+      match: l.match,
+      pick: l.pick,
+      odds: l.odds,
+      sport: l.sport,
+      betType: l.betType,
+    })),
+    hypothetical: a.hypothetical,
+    generatedAt: a.generatedAt,
+  }));
+  res.json({ accas: publicAccas, stats: data.stats, lastBuildTime: data.lastBuildTime });
 });
 
 // ─── Paper Trade Tracking ────────────────────────────────────────────

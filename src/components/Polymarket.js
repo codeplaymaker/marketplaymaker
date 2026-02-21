@@ -507,6 +507,8 @@ const Polymarket = () => {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [trackRecord, setTrackRecord] = useState(null);
   const [scanStatus, setScanStatus] = useState(null);
+  const [accaData, setAccaData] = useState(null);
+  const [accaBuilding, setAccaBuilding] = useState(false);
 
   // ─── Data Fetching ───────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -559,6 +561,9 @@ const Polymarket = () => {
       }).catch(() => {});
       api('/polybot/intel/track-record').then(t => {
         if (t) setTrackRecord(t);
+      }).catch(() => {});
+      api('/polybot/accas').then(a => {
+        if (a) setAccaData(a);
       }).catch(() => {});
 
       setError(null);
@@ -823,10 +828,11 @@ const Polymarket = () => {
 
         {/* Navigation Tabs */}
         <TabBar>
-          {['overview', 'signals', 'markets', 'watchlist', 'alerts', 'sources', 'trades'].map((tab) => (
+          {['overview', 'signals', 'accas', 'markets', 'watchlist', 'alerts', 'sources', 'trades'].map((tab) => (
             <Tab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
               {tab === 'overview' && '📊 '}
               {tab === 'signals' && '🎯 '}
+              {tab === 'accas' && '🎰 '}
               {tab === 'markets' && '🌐 '}
               {tab === 'watchlist' && '⭐ '}
               {tab === 'alerts' && '🔔 '}
@@ -1852,6 +1858,180 @@ const Polymarket = () => {
               </EmptyState>
             )}
           </Card>
+        )}
+
+        {/* ── ACCAS TAB ────────────────────────────────────────── */}
+        {activeTab === 'accas' && (
+          <Grid>
+            <FullWidthSection>
+              <Card $delay="0.05s">
+                <CardTitle style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>🎰 +EV Accumulators (Parlays)</span>
+                  <button
+                    onClick={async () => {
+                      setAccaBuilding(true);
+                      try {
+                        const result = await api('/polybot/accas/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                        if (result) setAccaData(result);
+                      } catch { /* ignore */ }
+                      setAccaBuilding(false);
+                    }}
+                    disabled={accaBuilding}
+                    style={{
+                      background: accaBuilding ? 'rgba(100,116,139,0.2)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '8px',
+                      fontSize: '0.8rem', fontWeight: 600, cursor: accaBuilding ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {accaBuilding ? 'Building...' : '🔄 Build Accas'}
+                  </button>
+                </CardTitle>
+
+                {/* Stats summary */}
+                {accaData?.stats && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                    <StatCard>
+                      <StatValue $color="#a5b4fc">{accaData.stats.total}</StatValue>
+                      <StatLabel>Accas Found</StatLabel>
+                    </StatCard>
+                    <StatCard>
+                      <StatValue $color="#22c55e">{accaData.stats.byGrade?.S || 0}</StatValue>
+                      <StatLabel>S-Tier</StatLabel>
+                    </StatCard>
+                    <StatCard>
+                      <StatValue $color="#6366f1">{accaData.stats.byGrade?.A || 0}</StatValue>
+                      <StatLabel>A-Tier</StatLabel>
+                    </StatCard>
+                    <StatCard>
+                      <StatValue $color="#fbbf24">{accaData.stats.avgEV || 0}%</StatValue>
+                      <StatLabel>Avg EV</StatLabel>
+                    </StatCard>
+                    <StatCard>
+                      <StatValue $color="#34d399">{accaData.stats.crossSportCount || 0}</StatValue>
+                      <StatLabel>Cross-Sport</StatLabel>
+                    </StatCard>
+                  </div>
+                )}
+
+                {accaData?.lastBuildTime && (
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '1rem' }}>
+                    Last built: {new Date(accaData.lastBuildTime).toLocaleString()} • {accaData.totalLegs || 0} legs available
+                  </div>
+                )}
+
+                {/* Acca cards */}
+                {(!accaData?.accas || accaData.accas.length === 0) ? (
+                  <EmptyState>
+                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎰</div>
+                    No accumulators built yet. Click "Build Accas" to scan for +EV parlays across {accaData?.totalLegs || 0} bookmaker events.
+                    <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#475569' }}>
+                      Requires bookmaker odds data. Set your Odds API key in the Sources tab if not set.
+                    </div>
+                  </EmptyState>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {accaData.accas.map((acca, idx) => {
+                      const gradeColors = { S: '#22c55e', A: '#6366f1', B: '#fbbf24', C: '#94a3b8' };
+                      const gradeColor = gradeColors[acca.grade] || '#64748b';
+                      return (
+                        <div key={idx} style={{
+                          background: 'rgba(15, 15, 25, 0.6)',
+                          border: `1px solid ${acca.grade === 'S' ? 'rgba(34,197,94,0.3)' : acca.grade === 'A' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                          borderRadius: '12px', padding: '1rem', position: 'relative',
+                        }}>
+                          {/* Header */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span style={{
+                                background: `${gradeColor}22`, color: gradeColor,
+                                border: `1px solid ${gradeColor}44`, borderRadius: '6px',
+                                padding: '0.2rem 0.5rem', fontSize: '0.8rem', fontWeight: 700,
+                              }}>
+                                {acca.grade}-TIER
+                              </span>
+                              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
+                                {acca.numLegs}-Leg {acca.crossSport ? 'Cross-Sport ' : ''}Acca
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                              <span style={{ color: acca.evPercent >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: '1.1rem' }}>
+                                {acca.evPercent >= 0 ? '+' : ''}{acca.evPercent}% EV
+                              </span>
+                              <span style={{ color: '#a5b4fc', fontWeight: 600, fontSize: '0.95rem' }}>
+                                {acca.combinedOdds}x
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Legs */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                            {acca.legs.map((leg, li) => (
+                              <div key={li} style={{
+                                display: 'grid', gridTemplateColumns: '2fr 1.2fr 0.6fr 0.8fr',
+                                gap: '0.5rem', alignItems: 'center', padding: '0.4rem 0.6rem',
+                                background: 'rgba(255,255,255,0.02)', borderRadius: '6px',
+                                fontSize: '0.82rem',
+                              }}>
+                                <span style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {leg.match}
+                                </span>
+                                <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
+                                  {leg.pick}
+                                </span>
+                                <span style={{
+                                  color: leg.betType === 'MONEYLINE' ? '#a5b4fc' : leg.betType === 'SPREAD' ? '#fbbf24' : '#34d399',
+                                  fontSize: '0.75rem',
+                                }}>
+                                  {leg.betType}
+                                </span>
+                                <span style={{ textAlign: 'right' }}>
+                                  <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{leg.odds}</span>
+                                  <span style={{ color: '#475569', fontSize: '0.7rem', marginLeft: '0.3rem' }}>@ {leg.book}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Footer: hypothetical */}
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '0.5rem 0.75rem', background: 'rgba(99,102,241,0.06)',
+                            borderRadius: '8px', fontSize: '0.8rem',
+                          }}>
+                            <span style={{ color: '#64748b' }}>
+                              💰 $10 stake → <strong style={{ color: '#22c55e' }}>${acca.hypothetical?.payout}</strong> payout
+                            </span>
+                            <span style={{ color: '#64748b' }}>
+                              Expected: <strong style={{ color: acca.hypothetical?.expectedReturn >= 0 ? '#22c55e' : '#ef4444' }}>
+                                ${acca.hypothetical?.expectedReturn >= 0 ? '+' : ''}{acca.hypothetical?.expectedReturn}
+                              </strong>
+                            </span>
+                            <span style={{ color: '#475569', fontSize: '0.7rem' }}>
+                              Corr: {(acca.avgCorrelation * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* How it works */}
+                <div style={{
+                  marginTop: '1.5rem', padding: '1rem', background: 'rgba(99,102,241,0.05)',
+                  borderRadius: '8px', border: '1px solid rgba(99,102,241,0.1)',
+                }}>
+                  <div style={{ fontWeight: 600, color: '#a5b4fc', marginBottom: '0.5rem', fontSize: '0.85rem' }}>How +EV Accas Work</div>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b', lineHeight: 1.6 }}>
+                    We scan odds from 15+ sportsbooks, remove the vig using sharp lines (Pinnacle),
+                    calculate true combined probability with correlation adjustments, and compare against
+                    the softest available odds. When the true probability is lower than the book implies →
+                    positive expected value. Place each leg at the book with the best odds shown.
+                  </div>
+                </div>
+              </Card>
+            </FullWidthSection>
+          </Grid>
         )}
 
         {/* ── MARKETS TAB ───────────────────────────────────────── */}

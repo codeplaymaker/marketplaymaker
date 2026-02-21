@@ -26,6 +26,9 @@ try { newsSignal = require('../data/newsSignal'); } catch { /* optional */ }
 let independentSignals = null;
 try { independentSignals = require('../data/independentSignals'); } catch { /* optional */ }
 
+let accaBuilder = null;
+try { accaBuilder = require('../strategies/accaBuilder'); } catch { /* optional */ }
+
 let scanInterval = null;
 let isRunning = false;
 let lastScan = null;
@@ -158,6 +161,17 @@ async function scan() {
 
     log.info('SCANNER', `Scan #${scanCount}: ${newOpps.length} opps from ${allMarkets.length} markets | pending: ${pendingResult.pending}${firedAlerts.length > 0 ? ` | 🔔 ${firedAlerts.length} alerts` : ''}${independentEdges.length > 0 ? ` | 🧠 ${independentEdges.length} independent edges` : ''}`);
 
+    // Build +EV accumulators from bookmaker odds (every other scan)
+    let accaCount = 0;
+    if (accaBuilder && scanCount % 2 === 0) {
+      try {
+        const accas = accaBuilder.buildAccas(5, 2);
+        accaCount = accas.length;
+        if (accaCount > 0) log.info('SCANNER', `🎰 Built ${accaCount} +EV accumulators`);
+      } catch (err) {
+        log.warn('SCANNER', `Acca build failed: ${err.message}`);
+      }
+    }
     return {
       scanNumber: scanCount,
       timestamp: lastScan,
