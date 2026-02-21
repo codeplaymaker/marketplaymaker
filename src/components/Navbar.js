@@ -167,6 +167,7 @@ const MobileMenu = styled.div`
 const NAV_LINKS = [
   { to: '/', label: 'Home', auth: false },
   { to: '/polymarket', label: 'Polymarket Bot', auth: false },
+  { to: '/track-record', label: 'Track Record', auth: false },
   { to: '/blog', label: 'Blog', auth: false },
   { to: '/trade-plan', label: 'Trade Plan', auth: true },
   { to: '/connect-api', label: 'ConnectAPI', auth: true },

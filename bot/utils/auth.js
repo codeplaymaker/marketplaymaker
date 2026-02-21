@@ -23,6 +23,7 @@ const PUBLIC_ROUTES = [
   '/api/health',
   '/api/auth/verify',
   '/api/auth/key',
+  '/api/public/',
 ];
 
 let apiKey = process.env.API_KEY || null;

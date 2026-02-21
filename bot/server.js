@@ -1040,6 +1040,95 @@ app.get('/api/intel/calibration', (req, res) => {
   });
 });
 
+// ─── Public Track Record (no auth) ───────────────────────────────────
+app.get('/api/public/track-record', (req, res) => {
+  try {
+    const record = edgeResolver ? edgeResolver.getTrackRecord() : null;
+    const resFile = path.join(__dirname, 'logs/edge-resolutions.json');
+    let allEdges = [];
+    try {
+      const raw = JSON.parse(fs.readFileSync(resFile, 'utf8'));
+      allEdges = raw.resolutions || [];
+    } catch { /* empty */ }
+
+    // Build a sanitized public view
+    const pending = allEdges.filter(e => !e.resolved);
+    const resolved = allEdges.filter(e => e.resolved);
+
+    // Grade distribution of ALL tracked edges
+    const gradeDistribution = {};
+    for (const e of allEdges) {
+      const g = e.edgeGrade || '?';
+      if (!gradeDistribution[g]) gradeDistribution[g] = 0;
+      gradeDistribution[g]++;
+    }
+
+    // Source count distribution
+    const sourceCountDist = {};
+    for (const e of allEdges) {
+      const sc = e.sourceCount || 0;
+      const bucket = sc >= 6 ? '6+' : String(sc);
+      if (!sourceCountDist[bucket]) sourceCountDist[bucket] = 0;
+      sourceCountDist[bucket]++;
+    }
+
+    // Active edges (pending) — show questions, grades, divergence ranges
+    const activeEdges = pending
+      .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
+      .map(e => ({
+        question: e.question,
+        edgeGrade: e.edgeGrade,
+        edgeDirection: e.edgeDirection,
+        divergence: e.divergence,
+        sourceCount: e.sourceCount,
+        recordedAt: e.recordedAt,
+        marketPrice: e.marketPrice,
+        ourProb: e.ourProb,
+      }));
+
+    // Resolved edges — full detail
+    const resolvedEdges = resolved
+      .sort((a, b) => new Date(b.resolvedAt) - new Date(a.resolvedAt))
+      .map(e => ({
+        question: e.question,
+        edgeGrade: e.edgeGrade,
+        edgeDirection: e.edgeDirection,
+        outcome: e.outcome === 1 ? 'YES' : 'NO',
+        pnlPp: e.pnlPp,
+        weWereBetter: e.weWereBetter,
+        ourProb: e.ourProb,
+        marketPrice: e.marketPrice,
+        resolvedAt: e.resolvedAt,
+        recordedAt: e.recordedAt,
+      }));
+
+    // Timeline: edges recorded per day
+    const timeline = {};
+    for (const e of allEdges) {
+      const day = e.recordedAt?.slice(0, 10);
+      if (day) {
+        if (!timeline[day]) timeline[day] = { recorded: 0, resolved: 0 };
+        timeline[day].recorded++;
+        if (e.resolved) timeline[day].resolved++;
+      }
+    }
+
+    res.json({
+      summary: record?.summary || { totalEdges: allEdges.length, resolvedEdges: resolved.length, wins: 0, losses: 0, totalPnLpp: 0, pending: pending.length },
+      hypothetical: record?.hypothetical || { totalBets: 0, totalReturn: 0, roi: 0 },
+      byGrade: record?.byGrade || {},
+      gradeDistribution,
+      sourceCountDist,
+      activeEdges,
+      resolvedEdges,
+      timeline,
+      lastUpdated: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Track record unavailable' });
+  }
+});
+
 // ─── Track Record & Resolution ───────────────────────────────────────
 
 // Get track record (resolved edges, P&L, accuracy)
