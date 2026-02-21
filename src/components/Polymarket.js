@@ -591,6 +591,8 @@ const Polymarket = () => {
   const [scanStatus, setScanStatus] = useState(null);
   const [accaData, setAccaData] = useState(null);
   const [accaBuilding, setAccaBuilding] = useState(false);
+  const [picksRecord, setPicksRecord] = useState(null);
+  const [picksResolving, setPicksResolving] = useState(false);
 
   // ─── Data Fetching ───────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -646,6 +648,9 @@ const Polymarket = () => {
       }).catch(() => {});
       api('/polybot/accas').then(a => {
         if (a) setAccaData(a);
+      }).catch(() => {});
+      api('/polybot/picks/track-record').then(r => {
+        if (r) setPicksRecord(r);
       }).catch(() => {});
 
       setError(null);
@@ -2249,6 +2254,226 @@ const Polymarket = () => {
                   }}>
                     💡 <strong style={{ color: '#94a3b8' }}>The star rating</strong> reflects how confident we are in the edge. More stars = more bookmaker agreement, sharper source data, and a bigger gap between odds offered and true probability.
                   </div>
+                </div>
+
+                {/* ── PICKS TRACK RECORD ────────────────────────────── */}
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(34,197,94,0.08), rgba(16,185,129,0.05))',
+                  border: '1px solid rgba(34,197,94,0.2)', borderRadius: '14px',
+                  padding: '1rem', marginTop: '1.25rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <h3 style={{ color: '#e2e8f0', margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      📊 Picks Track Record
+                    </h3>
+                    <button
+                      onClick={async () => {
+                        setPicksResolving(true);
+                        try {
+                          await api('/polybot/picks/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                          const r = await api('/polybot/picks/track-record');
+                          if (r) setPicksRecord(r);
+                        } catch { /* ignore */ }
+                        setPicksResolving(false);
+                      }}
+                      disabled={picksResolving}
+                      style={{
+                        padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid rgba(34,197,94,0.3)',
+                        background: picksResolving ? 'rgba(100,116,139,0.15)' : 'rgba(34,197,94,0.1)',
+                        color: '#94a3b8', fontSize: '0.75rem', cursor: picksResolving ? 'wait' : 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {picksResolving ? '⏳ Checking...' : '🔄 Check Results'}
+                    </button>
+                  </div>
+
+                  {(!picksRecord || picksRecord.summary?.totalPicks === 0) ? (
+                    <div style={{ textAlign: 'center', padding: '1.5rem 1rem', color: '#64748b', fontSize: '0.85rem' }}>
+                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</div>
+                      <p style={{ margin: 0 }}>No picks tracked yet. Hit <strong>"Find New Picks"</strong> above to start building your track record.</p>
+                      <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#475569' }}>
+                        Every pick you generate is automatically saved. Results are checked against final scores.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary Stats Grid */}
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+                        gap: '0.5rem', marginBottom: '0.75rem',
+                      }}>
+                        {[
+                          { label: 'Total Picks', value: picksRecord.summary.totalPicks, color: '#e2e8f0' },
+                          { label: 'Won', value: picksRecord.summary.won, color: '#22c55e' },
+                          { label: 'Lost', value: picksRecord.summary.lost, color: '#ef4444' },
+                          { label: 'Pending', value: picksRecord.summary.pending, color: '#f59e0b' },
+                          { label: 'Win Rate', value: `${picksRecord.summary.winRate}%`, color: picksRecord.summary.winRate >= 50 ? '#22c55e' : '#ef4444' },
+                          { label: 'ROI', value: `${picksRecord.summary.roi > 0 ? '+' : ''}${picksRecord.summary.roi}%`, color: picksRecord.summary.roi >= 0 ? '#22c55e' : '#ef4444' },
+                        ].map((stat, i) => (
+                          <div key={i} style={{
+                            background: 'rgba(15,23,42,0.5)', borderRadius: '10px', padding: '0.6rem',
+                            textAlign: 'center', border: '1px solid rgba(148,163,184,0.08)',
+                          }}>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 700, color: stat.color }}>{stat.value}</div>
+                            <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.15rem' }}>{stat.label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* P&L + Streak */}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                        <div style={{
+                          flex: '1 1 120px', background: 'rgba(15,23,42,0.5)', borderRadius: '10px', padding: '0.6rem',
+                          border: '1px solid rgba(148,163,184,0.08)', textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>Total P&L ($10/pick)</div>
+                          <div style={{
+                            fontSize: '1.2rem', fontWeight: 700,
+                            color: picksRecord.summary.totalPnl >= 0 ? '#22c55e' : '#ef4444',
+                          }}>
+                            {picksRecord.summary.totalPnl >= 0 ? '+' : ''}${picksRecord.summary.totalPnl.toFixed(2)}
+                          </div>
+                        </div>
+                        <div style={{
+                          flex: '1 1 120px', background: 'rgba(15,23,42,0.5)', borderRadius: '10px', padding: '0.6rem',
+                          border: '1px solid rgba(148,163,184,0.08)', textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>Current Streak</div>
+                          <div style={{
+                            fontSize: '1.2rem', fontWeight: 700,
+                            color: picksRecord.summary.currentStreak?.type === 'won' ? '#22c55e' : picksRecord.summary.currentStreak?.type === 'lost' ? '#ef4444' : '#94a3b8',
+                          }}>
+                            {picksRecord.summary.currentStreak?.count || 0}{picksRecord.summary.currentStreak?.type === 'won' ? 'W' : picksRecord.summary.currentStreak?.type === 'lost' ? 'L' : ''}
+                          </div>
+                        </div>
+                        <div style={{
+                          flex: '1 1 120px', background: 'rgba(15,23,42,0.5)', borderRadius: '10px', padding: '0.6rem',
+                          border: '1px solid rgba(148,163,184,0.08)', textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>Avg Odds</div>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#e2e8f0' }}>
+                            {picksRecord.summary.avgOdds.toFixed(2)}x
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Grade Breakdown */}
+                      {Object.keys(picksRecord.byGrade || {}).length > 0 && (
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, marginBottom: '0.4rem' }}>By Grade</div>
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            {Object.entries(picksRecord.byGrade).map(([grade, data]) => (
+                              <div key={grade} style={{
+                                background: 'rgba(15,23,42,0.5)', borderRadius: '8px', padding: '0.4rem 0.6rem',
+                                border: '1px solid rgba(148,163,184,0.08)', fontSize: '0.72rem',
+                                display: 'flex', gap: '0.5rem', alignItems: 'center',
+                              }}>
+                                <span style={{
+                                  fontWeight: 700,
+                                  color: grade === 'S' ? '#22c55e' : grade === 'A' ? '#6366f1' : grade === 'B' ? '#f59e0b' : '#94a3b8',
+                                }}>{grade}</span>
+                                <span style={{ color: '#94a3b8' }}>{data.won}W {data.lost}L</span>
+                                <span style={{ color: data.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                                  {data.pnl >= 0 ? '+' : ''}${data.pnl.toFixed(2)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recent Picks List */}
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, marginBottom: '0.4rem' }}>Recent Picks</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '400px', overflowY: 'auto' }}>
+                          {(picksRecord.recent || []).map((pick, idx) => (
+                            <div key={pick.historyId || idx} style={{
+                              background: 'rgba(15,23,42,0.4)', borderRadius: '10px', padding: '0.6rem',
+                              border: `1px solid ${pick.result === 'won' ? 'rgba(34,197,94,0.2)' : pick.result === 'lost' ? 'rgba(239,68,68,0.2)' : 'rgba(148,163,184,0.08)'}`,
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <span style={{
+                                    display: 'inline-block', padding: '0.15rem 0.5rem', borderRadius: '6px',
+                                    fontSize: '0.7rem', fontWeight: 700,
+                                    background: pick.result === 'won' ? 'rgba(34,197,94,0.15)' : pick.result === 'lost' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                                    color: pick.result === 'won' ? '#22c55e' : pick.result === 'lost' ? '#ef4444' : '#f59e0b',
+                                    border: `1px solid ${pick.result === 'won' ? 'rgba(34,197,94,0.3)' : pick.result === 'lost' ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                                  }}>
+                                    {pick.result === 'won' ? '✅ WON' : pick.result === 'lost' ? '❌ LOST' : '⏳ PENDING'}
+                                  </span>
+                                  <span style={{
+                                    padding: '0.15rem 0.4rem', borderRadius: '5px', fontSize: '0.65rem', fontWeight: 600,
+                                    background: pick.grade === 'S' ? 'rgba(34,197,94,0.12)' : pick.grade === 'A' ? 'rgba(99,102,241,0.12)' : 'rgba(245,158,11,0.12)',
+                                    color: pick.grade === 'S' ? '#22c55e' : pick.grade === 'A' ? '#6366f1' : '#f59e0b',
+                                  }}>
+                                    {pick.grade}
+                                  </span>
+                                  <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                                    {pick.numLegs}-leg @ {pick.combinedOdds}x
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  {pick.pnl != null && (
+                                    <span style={{
+                                      fontSize: '0.75rem', fontWeight: 700,
+                                      color: pick.pnl >= 0 ? '#22c55e' : '#ef4444',
+                                    }}>
+                                      {pick.pnl >= 0 ? '+' : ''}${pick.pnl.toFixed(2)}
+                                    </span>
+                                  )}
+                                  <span style={{ color: '#475569', fontSize: '0.65rem' }}>
+                                    {new Date(pick.savedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </span>
+                                </div>
+                              </div>
+                              {/* Legs */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                {pick.legs.map((leg, li) => (
+                                  <div key={li} style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.2rem 0',
+                                    fontSize: '0.7rem', color: '#94a3b8', flexWrap: 'wrap',
+                                  }}>
+                                    <span style={{ minWidth: '18px' }}>
+                                      {leg.result === 'won' ? '✅' : leg.result === 'lost' ? '❌' : leg.result === 'push' ? '➖' : '⏳'}
+                                    </span>
+                                    <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{leg.pick}</span>
+                                    <span style={{ color: '#64748b' }}>—</span>
+                                    <span>{leg.match}</span>
+                                    {leg.score && (
+                                      <span style={{
+                                        padding: '0.1rem 0.3rem', borderRadius: '4px', fontSize: '0.62rem',
+                                        background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+                                      }}>
+                                        {leg.score}
+                                      </span>
+                                    )}
+                                    <span style={{ color: '#475569' }}>@ {leg.odds?.toFixed(2)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* Progress bar for partly resolved */}
+                              {pick.result === 'pending' && pick.resolvedLegs > 0 && (
+                                <div style={{ marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <div style={{ flex: 1, height: '3px', background: 'rgba(148,163,184,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                                    <div style={{
+                                      height: '100%', borderRadius: '2px',
+                                      width: `${(pick.resolvedLegs / pick.numLegs) * 100}%`,
+                                      background: pick.wonLegs === pick.resolvedLegs ? '#22c55e' : '#f59e0b',
+                                    }} />
+                                  </div>
+                                  <span style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                                    {pick.resolvedLegs}/{pick.numLegs} settled ({pick.wonLegs} won)
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </Card>
             </FullWidthSection>

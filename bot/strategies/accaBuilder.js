@@ -824,6 +824,7 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
           line: l.line,
           legEV: l.legEV,
           dataQuality: l.dataQuality,
+          eventId: l.eventId,
         })),
         combinedOdds: round2(combinedOdds),
         trueCombinedProb: round4(trueCombinedProb),

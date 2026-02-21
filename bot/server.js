@@ -46,6 +46,9 @@ try { edgeResolver = require('./engine/edgeResolver'); } catch { /* optional */ 
 let accaBuilder = null;
 try { accaBuilder = require('./strategies/accaBuilder'); } catch { /* optional */ }
 
+let picksTracker = null;
+try { picksTracker = require('./engine/picksTracker'); } catch { /* optional */ }
+
 const app = express();
 
 // ─── Process Stability ─────────────────────────────────────────────
@@ -568,7 +571,12 @@ app.post('/api/accas/build', async (req, res) => {
   try {
     const { maxLegs, minLegs } = req.body || {};
     const accas = accaBuilder.buildAccas(maxLegs || 5, minLegs || 2);
-    res.json(accaBuilder.getAccas());
+    const result = accaBuilder.getAccas();
+    // Snapshot picks for track record
+    if (picksTracker && result.accas?.length > 0) {
+      picksTracker.snapshotAccas(result.accas);
+    }
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -641,6 +649,42 @@ app.get('/api/accas/movements', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Picks Track Record ──────────────────────────────────────────────
+app.get('/api/picks/track-record', (req, res) => {
+  if (!picksTracker) return res.json({ summary: { totalPicks: 0 }, recent: [], byGrade: {}, dailyPnl: [] });
+  res.json(picksTracker.getTrackRecord());
+});
+
+app.get('/api/picks/history', (req, res) => {
+  if (!picksTracker) return res.json({ picks: [], total: 0, page: 1, totalPages: 0 });
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  res.json(picksTracker.getHistory(page, limit));
+});
+
+app.post('/api/picks/resolve', async (req, res) => {
+  if (!picksTracker) return res.status(503).json({ error: 'Picks tracker not available' });
+  try {
+    const apiKey = oddsApi.hasApiKey() ? process.env.ODDS_API_KEY : null;
+    const result = await picksTracker.checkAndResolve(apiKey);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/public/picks/track-record', (req, res) => {
+  if (!picksTracker) return res.json({ summary: { totalPicks: 0 }, recent: [], byGrade: {}, dailyPnl: [] });
+  const record = picksTracker.getTrackRecord();
+  // Sanitize for public: limit recent to 10, remove internal IDs
+  record.recent = record.recent.slice(0, 10).map(p => ({
+    grade: p.grade, numLegs: p.numLegs, combinedOdds: p.combinedOdds,
+    result: p.result, pnl: p.pnl, savedAt: p.savedAt, wonLegs: p.wonLegs,
+    legs: p.legs.map(l => ({ match: l.match, pick: l.pick, sport: l.sport, result: l.result, score: l.score })),
+  }));
+  res.json(record);
 });
 
 // ─── Paper Trade Tracking ────────────────────────────────────────────
@@ -1396,6 +1440,7 @@ app.listen(PORT, () => {
   log.info('SERVER', `   🧠 LLM:       http://localhost:${PORT}/api/intel/independent/llm/status`);
   log.info('SERVER', `   🔬 Sources:   http://localhost:${PORT}/api/intel/independent/status`);
   log.info('SERVER', `   📊 Record:    http://localhost:${PORT}/api/intel/track-record`);
+  log.info('SERVER', `   🎯 Picks:     http://localhost:${PORT}/api/picks/track-record`);
 
   // ─── Start Auto-Scanner ──────────────────────────────────────────
   // Wait for markets to load, then run first scan
@@ -1450,5 +1495,28 @@ app.listen(PORT, () => {
         }
       } catch { /* non-critical */ }
     }, 10 * 60 * 1000);
+  }
+
+  // Auto-check picks resolutions every 30 minutes
+  if (picksTracker) {
+    // Also snapshot any existing cached accas on startup
+    if (accaBuilder) {
+      try {
+        const data = accaBuilder.getAccas();
+        if (data.accas?.length > 0) picksTracker.snapshotAccas(data.accas);
+      } catch { /* non-critical */ }
+    }
+    setInterval(async () => {
+      try {
+        const apiKey = process.env.ODDS_API_KEY;
+        if (apiKey) {
+          const result = await picksTracker.checkAndResolve(apiKey);
+          if (result.legsResolved > 0) {
+            log.info('SERVER', `Picks resolution: ${result.legsResolved} legs resolved, ${result.scoresFetched} scores fetched`);
+          }
+        }
+      } catch { /* non-critical */ }
+    }, 30 * 60 * 1000);
+    log.info('SERVER', '🎯 Picks tracker: auto-resolution every 30 min');
   }
 });
