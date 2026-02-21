@@ -937,18 +937,29 @@ const Polymarket = () => {
         {/* ── OVERVIEW TAB ──────────────────────────────────────── */}
         {activeTab === 'overview' && (
           <Grid>
+            {/* ── Hero KPI Strip ── */}
             <FullWidthSection>
               <div style={{
-                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.08) 100%)',
-                border: '1px solid rgba(99, 102, 241, 0.25)',
-                borderRadius: '12px',
-                padding: '1rem 1.25rem',
-                fontSize: '0.85rem',
-                color: '#c4b5fd',
-                lineHeight: '1.6',
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))',
+                gap: '0.4rem',
               }}>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '0.25rem', color: '#e2e8f0' }}>Welcome to MarketPlayMaker Intelligence</div>
-                Scan {status?.scanner?.platforms?.polymarket?.markets ? `${status.scanner.platforms.polymarket.markets}+` : ''} prediction markets across Polymarket &amp; Kalshi in real time. AI-powered independent probability estimation finds genuine edges — not circular market-derived signals.
+                {[
+                  { label: 'Active Edges', value: indEdges.filter(e => (e.edgeQuality || 0) >= 35).length || '—', icon: '🔬', color: '#a5b4fc' },
+                  { label: 'Markets', value: (status?.scanner?.platforms?.polymarket?.markets || 0) + (status?.scanner?.platforms?.kalshi?.markets || 0) || '—', icon: '🌐', color: '#818cf8' },
+                  { label: 'Win Rate', value: trackRecord?.summary?.winRate != null ? `${trackRecord.summary.winRate}%` : picksRecord?.summary?.winRate != null ? `${picksRecord.summary.winRate}%` : '—', icon: '🎯', color: ((trackRecord?.summary?.winRate || picksRecord?.summary?.winRate || 0) >= 50 ? '#22c55e' : '#f59e0b') },
+                  { label: 'P&L', value: trackRecord?.hypothetical?.totalReturn != null ? `${trackRecord.hypothetical.totalReturn >= 0 ? '+' : ''}$${trackRecord.hypothetical.totalReturn.toFixed(2)}` : performance?.totalPnL != null ? `$${performance.totalPnL.toFixed(2)}` : '—', icon: '💰', color: ((trackRecord?.hypothetical?.totalReturn || performance?.totalPnL || 0) >= 0 ? '#22c55e' : '#ef4444') },
+                  { label: 'Scans', value: status?.scanner?.scanCount || 0, icon: '📡', color: '#c084fc' },
+                  { label: 'Sources', value: `${[llmConfigured, connected, (status?.scanner?.platforms?.kalshi?.markets || 0) > 0, (indSourcesStatus?.polling?.sources || []).some(s => s.stats?.successes > 0), (indSourcesStatus?.expert?.sources || []).some(s => s.stats?.successes > 0)].filter(Boolean).length}/5`, icon: '🔗', color: '#34d399' },
+                ].map((kpi, i) => (
+                  <div key={i} style={{
+                    background: 'rgba(30, 30, 50, 0.9)', borderRadius: '10px', padding: '0.6rem 0.4rem',
+                    textAlign: 'center', border: '1px solid rgba(99, 102, 241, 0.12)',
+                  }}>
+                    <div style={{ fontSize: '0.75rem', marginBottom: '0.1rem' }}>{kpi.icon}</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
+                    <div style={{ fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '0.05rem' }}>{kpi.label}</div>
+                  </div>
+                ))}
               </div>
             </FullWidthSection>
 
@@ -994,75 +1005,67 @@ const Polymarket = () => {
               </Card>
             </FullWidthSection>
 
-            {/* Scanner Control Panel */}
+            {/* Scanner Control — Compact */}
             <Card $delay="0.1s" $glow={isRunning}>
-              <CardTitle>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                 <LiveDot $active={isRunning} />
-                Scanner Control
-                <Badge $type={isRunning ? 'running' : 'stopped'} style={{ marginLeft: 'auto' }}>
+                <span style={{ fontWeight: 700, color: '#c7d2fe', fontSize: '0.9rem' }}>Scanner</span>
+                <Badge $type={isRunning ? 'running' : 'stopped'}>
                   {isRunning ? 'RUNNING' : 'STOPPED'}
                 </Badge>
-              </CardTitle>
-
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
-                <label htmlFor="bankroll-input" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
-                  Bankroll $
-                </label>
+                <Badge $type="simulation" style={{ fontSize: '0.6rem' }}>{mode}</Badge>
+                {status?.scanner?.lastScan && (
+                  <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                    Last: {new Date(status.scanner.lastScan).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+                <div style={{ display: 'flex', gap: '0.3rem', marginLeft: 'auto' }}>
+                  {!isRunning ? (
+                    <Button $variant="primary" onClick={startBot} disabled={!connected} style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}>
+                      ▶ Start
+                    </Button>
+                  ) : (
+                    <Button $variant="danger" onClick={stopBot} style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}>
+                      ⏹ Stop
+                    </Button>
+                  )}
+                  <Button $variant="ghost" onClick={triggerScan} disabled={!connected || scanning} style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}>
+                    {scanning ? '⏳' : '🔍 Scan'}
+                  </Button>
+                  <Button $variant="ghost" onClick={resetBot} disabled={!connected} style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}>
+                    🔄
+                  </Button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(99,102,241,0.08)' }}>
+                <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Bankroll</span>
                 <Input
                   id="bankroll-input"
                   type="number"
                   value={bankrollInput}
                   onChange={(e) => setBankrollInput(e.target.value)}
-                  $width="100px"
+                  $width="80px"
                   min="10"
+                  style={{ padding: '0.3rem 0.5rem', fontSize: '0.78rem' }}
                   aria-label="Bankroll amount in USDC"
                 />
-                <Badge $type="simulation">{mode}</Badge>
-              </div>
-
-              <ButtonGroup>
-                {!isRunning ? (
-                  <Button $variant="primary" onClick={startBot} disabled={!connected}>
-                    ▶ Start Scanner
-                  </Button>
-                ) : (
-                  <Button $variant="danger" onClick={stopBot}>
-                    ⏹ Stop
-                  </Button>
+                <span style={{ color: '#64748b', fontSize: '0.7rem' }}>USDC</span>
+                {status?.scanner?.scanCount > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: '#94a3b8' }}>
+                    {status.scanner.scanCount} scans · {opportunities.length} opp{opportunities.length !== 1 ? 's' : ''}
+                  </span>
                 )}
-                <Button $variant="ghost" onClick={triggerScan} disabled={!connected || scanning}>
-                  {scanning ? '⏳ Scanning...' : '🔍 Scan Now'}
-                </Button>
-                <Button $variant="ghost" onClick={resetBot} disabled={!connected}>
-                  🔄 Reset
-                </Button>
-              </ButtonGroup>
-
-              {/* Scan result toast */}
+              </div>
               {scanResult && (
-                <div
-                  style={{
-                    marginTop: '0.75rem',
-                    padding: '0.6rem 1rem',
-                    borderRadius: '10px',
-                    fontSize: '0.85rem',
-                    background: scanResult.error
-                      ? 'rgba(239, 68, 68, 0.12)'
-                      : 'rgba(16, 185, 129, 0.12)',
-                    border: `1px solid ${scanResult.error ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
-                    color: scanResult.error ? '#f87171' : '#34d399',
-                  }}
-                  role="status"
-                  aria-live="polite"
-                >
+                <div style={{
+                  marginTop: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.78rem',
+                  background: scanResult.error ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)',
+                  border: `1px solid ${scanResult.error ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                  color: scanResult.error ? '#f87171' : '#34d399',
+                }} role="status" aria-live="polite">
                   {scanResult.error
-                    ? `❌ Scan failed: ${scanResult.error}`
-                    : `✅ Scanned ${scanResult.marketsScanned} markets — found ${scanResult.opportunitiesFound} opportunities`}
-                  {!scanResult.error && status?.scanner?.platforms && (
-                    <span style={{ color: '#94a3b8', marginLeft: '0.5rem', fontSize: '0.8rem' }}>
-                      (Poly: {status.scanner.platforms.polymarket?.markets || 0} | Kalshi: {status.scanner.platforms.kalshi?.markets || 0})
-                    </span>
-                  )}
+                    ? `❌ ${scanResult.error}`
+                    : `✅ ${scanResult.marketsScanned} markets — ${scanResult.opportunitiesFound} opportunities`}
                 </div>
               )}
             </Card>
@@ -1299,30 +1302,52 @@ const Polymarket = () => {
               )}
             </Card>
 
-            {/* Stats Overview */}
-            <Card $delay="0.15s" style={{ gridColumn: 'span 1' }}>
-              <CardTitle>📈 Performance</CardTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <StatCard>
-                  <StatValue $color="#34d399">
-                    {performance ? `$${performance.totalPnL?.toFixed(2) || '0.00'}` : '—'}
-                  </StatValue>
-                  <StatLabel>Total P&amp;L</StatLabel>
-                </StatCard>
-                <StatCard>
-                  <StatValue $color="#fbbf24">
-                    {performance ? `$${performance.dailyPnL?.toFixed(2) || '0.00'}` : '—'}
-                  </StatValue>
-                  <StatLabel>Daily P&amp;L</StatLabel>
-                </StatCard>
-                <StatCard>
-                  <StatValue>{performance?.totalTrades || 0}</StatValue>
-                  <StatLabel>Trades</StatLabel>
-                </StatCard>
-                <StatCard>
-                  <StatValue>{positions.length}</StatValue>
-                  <StatLabel>Open Positions</StatLabel>
-                </StatCard>
+            {/* Live Activity Feed */}
+            <Card $delay="0.15s">
+              <CardTitle>⚡ Live Activity</CardTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                {[
+                  status?.scanner?.lastScan && {
+                    icon: '🔍', color: '#a5b4fc',
+                    text: `Scanned ${(status?.scanner?.platforms?.polymarket?.markets || 0) + (status?.scanner?.platforms?.kalshi?.markets || 0)} markets`,
+                    detail: new Date(status.scanner.lastScan).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  },
+                  indEdges.filter(e => (e.edgeQuality || 0) >= 35).length > 0 && {
+                    icon: '🔬', color: '#22c55e',
+                    text: `${indEdges.filter(e => (e.edgeQuality || 0) >= 35).length} validated edge${indEdges.filter(e => (e.edgeQuality || 0) >= 35).length !== 1 ? 's' : ''} live`,
+                    detail: `${indEdges.filter(e => (e.edgeQuality || 0) >= 55).length} B+`,
+                  },
+                  opportunities.length > 0 && {
+                    icon: '🎯', color: '#c084fc',
+                    text: `${opportunities.length} opportunit${opportunities.length !== 1 ? 'ies' : 'y'} queued`,
+                    detail: `${opportunities.filter(o => o.strategy === 'NO_BETS').length} NO · ${opportunities.filter(o => o.strategy === 'ARBITRAGE').length} ARB`,
+                  },
+                  picksRecord?.summary?.totalPicks > 0 && {
+                    icon: '🏆', color: '#818cf8',
+                    text: `${picksRecord.summary.totalPicks} picks tracked`,
+                    detail: `${picksRecord.summary.won || 0}W-${picksRecord.summary.lost || 0}L`,
+                  },
+                  learningData?.totalResolved > 0 && {
+                    icon: '🧠', color: '#c084fc',
+                    text: `AI learned from ${learningData.totalResolved} picks`,
+                    detail: learningData.adjustments ? 'Active' : 'Training',
+                  },
+                  {
+                    icon: '💰', color: (performance?.totalPnL || 0) >= 0 ? '#22c55e' : '#ef4444',
+                    text: `P&L: ${performance?.totalPnL != null ? `$${performance.totalPnL.toFixed(2)}` : '$0.00'}`,
+                    detail: `${performance?.totalTrades || 0} trades · ${positions.length} open`,
+                  },
+                ].filter(Boolean).map((item, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.3rem 0.6rem', borderRadius: '8px',
+                    background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(99,102,241,0.06)',
+                  }}>
+                    <span style={{ fontSize: '0.75rem', flexShrink: 0 }}>{item.icon}</span>
+                    <span style={{ fontSize: '0.75rem', color: '#cbd5e1', flex: 1 }}>{item.text}</span>
+                    <span style={{ fontSize: '0.65rem', color: item.color, fontWeight: 600, flexShrink: 0 }}>{item.detail}</span>
+                  </div>
+                ))}
               </div>
             </Card>
 
@@ -1367,72 +1392,64 @@ const Polymarket = () => {
               </div>
             </Card>
 
-            {/* Strategy Breakdown */}
+            {/* Strategies & Quick Actions */}
             <FullWidthSection>
               <Card $delay="0.25s">
-                <CardTitle>⚡ Strategy Breakdown</CardTitle>
-                <StatGrid>
-                  <StatCard>
-                    <StatValue $color="#34d399">
-                      {opportunities.filter((o) => o.strategy === 'NO_BETS').length}
-                    </StatValue>
-                    <StatLabel>NO Bets</StatLabel>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      Risk underwriting
+                <CardTitle>⚡ Strategies &amp; Actions</CardTitle>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                  {[
+                    { name: 'NO Bets', count: opportunities.filter(o => o.strategy === 'NO_BETS').length, color: '#34d399', icon: '🛡️', desc: 'Risk underwriting' },
+                    { name: 'Arbitrage', count: opportunities.filter(o => o.strategy === 'ARBITRAGE').length, color: '#a5b4fc', icon: '🔄', desc: 'Cross-market' },
+                    { name: 'Statistical', count: opportunities.filter(o => o.strategy === 'SPORTS_EDGE').length, color: '#fbbf24', icon: '📐', desc: 'Odds vs prob' },
+                    { name: 'ICT', count: opportunities.filter(o => o.strategy === 'ICT').length, color: '#c084fc', icon: '🧊', desc: 'Smart money' },
+                  ].map((s, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      background: s.count > 0 ? `${s.color}12` : 'rgba(0,0,0,0.2)',
+                      border: `1px solid ${s.count > 0 ? `${s.color}30` : 'rgba(100,116,139,0.15)'}`,
+                      borderRadius: '10px', padding: '0.5rem 0.75rem', flex: '1 1 auto', minWidth: '130px',
+                    }}>
+                      <span style={{ fontSize: '1rem' }}>{s.icon}</span>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.3rem' }}>
+                          <span style={{ fontSize: '1.1rem', fontWeight: 800, color: s.count > 0 ? s.color : '#475569' }}>{s.count}</span>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: s.count > 0 ? '#e2e8f0' : '#64748b' }}>{s.name}</span>
+                        </div>
+                        <div style={{ fontSize: '0.6rem', color: '#64748b' }}>{s.desc}</div>
+                      </div>
                     </div>
-                  </StatCard>
-                  <StatCard>
-                    <StatValue $color="#a5b4fc">
-                      {opportunities.filter((o) => o.strategy === 'ARBITRAGE').length}
-                    </StatValue>
-                    <StatLabel>Arbitrage</StatLabel>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      Cross-market edge
-                    </div>
-                  </StatCard>
-                  <StatCard>
-                    <StatValue $color="#fbbf24">
-                      {opportunities.filter((o) => o.strategy === 'SPORTS_EDGE').length}
-                    </StatValue>
-                    <StatLabel>Statistical Edge</StatLabel>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      Odds vs probability
-                    </div>
-                  </StatCard>
-                  <StatCard>
-                    <StatValue $color="#c084fc">
-                      {opportunities.filter((o) => o.strategy === 'ICT').length}
-                    </StatValue>
-                    <StatLabel>ICT</StatLabel>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      Smart money
-                    </div>
-                  </StatCard>
-                  <StatCard>
-                    <StatValue>{status?.scanner?.scanCount || 0}</StatValue>
-                    <StatLabel>Scans Run</StatLabel>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      {status?.scanner?.lastScan
-                        ? new Date(status.scanner.lastScan).toLocaleTimeString()
-                        : 'Never'}
-                    </div>
-                  </StatCard>
-                  <StatCard>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
-                      <StatValue $color="#a78bfa">{status?.scanner?.platforms?.polymarket?.markets || 0}</StatValue>
-                      <span style={{ color: '#64748b', fontSize: '0.75rem' }}>+</span>
-                      <StatValue $color="#60a5fa">{status?.scanner?.platforms?.kalshi?.markets || 0}</StatValue>
-                    </div>
-                    <StatLabel>Markets (Poly + Kalshi)</StatLabel>
-                  </StatCard>
-                </StatGrid>
-
-                {/* Auto Execute */}
-                <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+                  ))}
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+                  padding: '0.5rem 0.75rem', borderRadius: '8px', background: 'rgba(0,0,0,0.15)',
+                  border: '1px solid rgba(99,102,241,0.08)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Markets:</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#a78bfa' }}>{status?.scanner?.platforms?.polymarket?.markets || 0}</span>
+                    <span style={{ fontSize: '0.6rem', color: '#475569' }}>poly</span>
+                    <span style={{ fontSize: '0.6rem', color: '#475569' }}>+</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#60a5fa' }}>{status?.scanner?.platforms?.kalshi?.markets || 0}</span>
+                    <span style={{ fontSize: '0.6rem', color: '#475569' }}>kalshi</span>
+                  </div>
+                  <div style={{ width: '1px', height: '16px', background: 'rgba(99,102,241,0.15)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Scans:</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#c084fc' }}>{status?.scanner?.scanCount || 0}</span>
+                  </div>
+                  <div style={{ width: '1px', height: '16px', background: 'rgba(99,102,241,0.15)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Last:</span>
+                    <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                      {status?.scanner?.lastScan ? new Date(status.scanner.lastScan).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                    </span>
+                  </div>
                   <Button
                     $variant="success"
                     onClick={autoExecute}
                     disabled={!connected || !isRunning || opportunities.length === 0}
+                    style={{ marginLeft: 'auto', padding: '0.3rem 0.7rem', fontSize: '0.72rem' }}
                   >
                     ⚡ Paper-Trade Top 3
                   </Button>
