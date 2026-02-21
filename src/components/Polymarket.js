@@ -828,11 +828,11 @@ const Polymarket = () => {
 
         {/* Navigation Tabs */}
         <TabBar>
-          {['overview', 'signals', 'accas', 'markets', 'watchlist', 'alerts', 'sources', 'trades'].map((tab) => (
+          {['overview', 'signals', 'picks', 'markets', 'watchlist', 'alerts', 'sources', 'trades'].map((tab) => (
             <Tab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
               {tab === 'overview' && '📊 '}
               {tab === 'signals' && '🎯 '}
-              {tab === 'accas' && '🎰 '}
+              {tab === 'picks' && '🏆 '}
               {tab === 'markets' && '🌐 '}
               {tab === 'watchlist' && '⭐ '}
               {tab === 'alerts' && '🔔 '}
@@ -1860,248 +1860,311 @@ const Polymarket = () => {
           </Card>
         )}
 
-        {/* ── ACCAS TAB ────────────────────────────────────────── */}
-        {activeTab === 'accas' && (
+        {/* ── PICKS TAB (redesigned) ─────────────────────────────── */}
+        {activeTab === 'picks' && (
           <Grid>
             <FullWidthSection>
               <Card $delay="0.05s">
-                <CardTitle style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>🎰 +EV Accumulators (Parlays)</span>
-                  <button
-                    onClick={async () => {
-                      setAccaBuilding(true);
-                      try {
-                        const result = await api('/polybot/accas/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-                        if (result) setAccaData(result);
-                      } catch { /* ignore */ }
-                      setAccaBuilding(false);
-                    }}
-                    disabled={accaBuilding}
-                    style={{
-                      background: accaBuilding ? 'rgba(100,116,139,0.2)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '8px',
-                      fontSize: '0.8rem', fontWeight: 600, cursor: accaBuilding ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {accaBuilding ? 'Building...' : '🔄 Build Accas'}
-                  </button>
-                </CardTitle>
-
-                {/* Stats summary */}
-                {accaData?.stats && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                    <StatCard>
-                      <StatValue $color="#a5b4fc">{accaData.stats.total}</StatValue>
-                      <StatLabel>Accas Found</StatLabel>
-                    </StatCard>
-                    <StatCard>
-                      <StatValue $color="#22c55e">{accaData.stats.byGrade?.S || 0}</StatValue>
-                      <StatLabel>S-Tier</StatLabel>
-                    </StatCard>
-                    <StatCard>
-                      <StatValue $color="#6366f1">{accaData.stats.byGrade?.A || 0}</StatValue>
-                      <StatLabel>A-Tier</StatLabel>
-                    </StatCard>
-                    <StatCard>
-                      <StatValue $color="#fbbf24">{accaData.stats.byGrade?.B || 0}</StatValue>
-                      <StatLabel>B-Tier</StatLabel>
-                    </StatCard>
-                    <StatCard>
-                      <StatValue $color="#f97316">{accaData.stats.avgEV || 0}%</StatValue>
-                      <StatLabel>Avg EV</StatLabel>
-                    </StatCard>
-                    <StatCard>
-                      <StatValue $color="#34d399">{accaData.stats.crossSportCount || 0}</StatValue>
-                      <StatLabel>Cross-Sport</StatLabel>
-                    </StatCard>
+                {/* Hero – plain English explainer */}
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08))',
+                  border: '1px solid rgba(99,102,241,0.2)', borderRadius: '14px',
+                  padding: '1.25rem 1.5rem', marginBottom: '1.25rem',
+                }}>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.4rem' }}>
+                    Smart Picks
                   </div>
-                )}
+                  <div style={{ fontSize: '0.9rem', color: '#94a3b8', lineHeight: 1.7 }}>
+                    We scan <strong style={{ color: '#a5b4fc' }}>30+ bookmakers</strong> in real-time to find bets where the odds are
+                    <strong style={{ color: '#22c55e' }}> better than the true probability</strong>.
+                    When bookmakers disagree, someone is wrong — and that&apos;s your edge.
+                  </div>
+                  <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
+                    {[
+                      { icon: '🔍', label: 'Live scanning', desc: 'Updated every 15 min' },
+                      { icon: '📊', label: `${accaData?.totalLegs || 0} events checked`, desc: `${accaData?.buildStats?.hygiene?.valid || '—'} qualify` },
+                      { icon: '🏦', label: 'Sharp bookmakers', desc: 'Pinnacle, Matchbook & more' },
+                    ].map((item, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '1.2rem' }}>{item.icon}</span>
+                        <div>
+                          <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.82rem' }}>{item.label}</div>
+                          <div style={{ color: '#64748b', fontSize: '0.72rem' }}>{item.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                {/* Build info bar */}
-                {accaData?.lastBuildTime && (
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <span>Built: {new Date(accaData.lastBuildTime).toLocaleString()}</span>
-                    <span>•</span>
-                    <span>{accaData.totalLegs || 0} legs available</span>
-                    {accaData.buildStats?.hygiene && (
-                      <>
-                        <span>•</span>
-                        <span style={{ color: '#94a3b8' }}>
-                          Filtered: {accaData.buildStats.hygiene.stale || 0} stale, {accaData.buildStats.hygiene.settled || 0} settled, {accaData.buildStats.hygiene.thinMarket || 0} thin
-                        </span>
-                      </>
-                    )}
-                    {accaData.stats?.avgDataQuality && accaData.stats.avgDataQuality !== 'n/a' && (
-                      <>
-                        <span>•</span>
-                        <span style={{ color: accaData.stats.avgDataQuality === 'excellent' ? '#22c55e' : accaData.stats.avgDataQuality === 'good' ? '#6366f1' : '#fbbf24' }}>
-                          Data: {accaData.stats.avgDataQuality}
-                        </span>
-                      </>
+                {/* Action bar */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <button
+                      onClick={async () => {
+                        setAccaBuilding(true);
+                        try {
+                          const result = await api('/polybot/accas/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                          if (result) setAccaData(result);
+                        } catch { /* ignore */ }
+                        setAccaBuilding(false);
+                      }}
+                      disabled={accaBuilding}
+                      style={{
+                        background: accaBuilding ? 'rgba(100,116,139,0.2)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        color: 'white', border: 'none', padding: '0.6rem 1.4rem', borderRadius: '10px',
+                        fontSize: '0.88rem', fontWeight: 600, cursor: accaBuilding ? 'wait' : 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {accaBuilding ? '⏳ Scanning...' : '🔄 Find New Picks'}
+                    </button>
+                    {accaData?.lastBuildTime && (
+                      <span style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        Last scan: {(() => {
+                          const mins = Math.floor((Date.now() - new Date(accaData.lastBuildTime).getTime()) / 60000);
+                          return mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+                        })()}
+                      </span>
                     )}
                   </div>
-                )}
+                  {accaData?.stats && (
+                    <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem' }}>
+                      <span style={{ color: '#22c55e', fontWeight: 600 }}>{accaData.stats.total} picks found</span>
+                    </div>
+                  )}
+                </div>
 
-                {/* Acca cards */}
+                {/* Pick cards */}
                 {(!accaData?.accas || accaData.accas.length === 0) ? (
                   <EmptyState>
-                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎰</div>
-                    No accumulators built yet. Click &ldquo;Build Accas&rdquo; to scan for +EV parlays across {accaData?.totalLegs || 0} bookmaker events.
-                    <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#475569' }}>
-                      Requires bookmaker odds data. Set your Odds API key in the Sources tab if not set.
+                    <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🏆</div>
+                    <div style={{ fontSize: '1rem', color: '#e2e8f0', fontWeight: 600, marginBottom: '0.4rem' }}>No picks yet</div>
+                    <div style={{ color: '#64748b', maxWidth: '400px' }}>
+                      Hit &ldquo;Find New Picks&rdquo; to scan live odds across 30+ bookmakers and find mispriced bets.
                     </div>
                   </EmptyState>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {accaData.accas.map((acca, idx) => {
-                      const gradeColors = { S: '#22c55e', A: '#6366f1', B: '#fbbf24', C: '#94a3b8' };
-                      const gradeColor = gradeColors[acca.grade] || '#64748b';
+                      // Translate grade to user-friendly confidence
+                      const confidenceMap = {
+                        S: { label: 'Excellent', color: '#22c55e', stars: 5, bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)' },
+                        A: { label: 'Strong', color: '#6366f1', stars: 4, bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.25)' },
+                        B: { label: 'Good', color: '#a5b4fc', stars: 3, bg: 'rgba(165,180,252,0.06)', border: 'rgba(165,180,252,0.2)' },
+                        C: { label: 'Fair', color: '#94a3b8', stars: 2, bg: 'rgba(148,163,184,0.06)', border: 'rgba(148,163,184,0.15)' },
+                      };
+                      const conf = confidenceMap[acca.grade] || confidenceMap.C;
+
+                      // Translate EV to plain English edge description
+                      const edgeDesc = acca.evPercent >= 8 ? 'Very strong edge'
+                        : acca.evPercent >= 4 ? 'Strong edge'
+                        : acca.evPercent >= 2 ? 'Good edge'
+                        : acca.evPercent >= 1 ? 'Slight edge'
+                        : 'Marginal edge';
+
+                      // Sport emoji helper
+                      const sportEmoji = (sport) => {
+                        if (!sport) return '🏅';
+                        const s = sport.toLowerCase();
+                        if (s.includes('soccer') || s.includes('football')) return '⚽';
+                        if (s.includes('basketball') || s.includes('nba')) return '🏀';
+                        if (s.includes('mma') || s.includes('ufc')) return '🥊';
+                        if (s.includes('baseball') || s.includes('mlb')) return '⚾';
+                        if (s.includes('hockey') || s.includes('nhl')) return '🏒';
+                        if (s.includes('tennis')) return '🎾';
+                        if (s.includes('rugby') || s.includes('nrl')) return '🏉';
+                        if (s.includes('cricket')) return '🏏';
+                        if (s.includes('golf')) return '⛳';
+                        return '🏅';
+                      };
+
                       return (
                         <div key={idx} style={{
-                          background: 'rgba(15, 15, 25, 0.6)',
-                          border: `1px solid ${acca.grade === 'S' ? 'rgba(34,197,94,0.3)' : acca.grade === 'A' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                          borderRadius: '12px', padding: '1rem', position: 'relative',
+                          background: conf.bg,
+                          border: `1px solid ${conf.border}`,
+                          borderRadius: '14px', padding: '0', overflow: 'hidden',
+                          transition: 'all 0.2s',
                         }}>
-                          {/* Header */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                              <span style={{
-                                background: `${gradeColor}22`, color: gradeColor,
-                                border: `1px solid ${gradeColor}44`, borderRadius: '6px',
-                                padding: '0.2rem 0.5rem', fontSize: '0.8rem', fontWeight: 700,
-                              }}>
-                                {acca.grade}-TIER
-                              </span>
-                              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
-                                {acca.numLegs}-Leg {acca.crossSport ? 'Cross-Sport ' : ''}Acca
-                              </span>
-                              {acca.dataQuality && (
+                          {/* Card header */}
+                          <div style={{
+                            padding: '1rem 1.25rem 0.75rem',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                          }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.3rem' }}>
                                 <span style={{
-                                  background: acca.dataQuality === 'excellent' ? 'rgba(34,197,94,0.1)' : acca.dataQuality === 'good' ? 'rgba(99,102,241,0.1)' : 'rgba(251,191,36,0.1)',
-                                  color: acca.dataQuality === 'excellent' ? '#22c55e' : acca.dataQuality === 'good' ? '#818cf8' : '#fbbf24',
-                                  border: `1px solid ${acca.dataQuality === 'excellent' ? 'rgba(34,197,94,0.2)' : acca.dataQuality === 'good' ? 'rgba(99,102,241,0.2)' : 'rgba(251,191,36,0.2)'}`,
-                                  borderRadius: '4px', padding: '0.1rem 0.4rem', fontSize: '0.7rem', fontWeight: 500,
+                                  background: `${conf.color}18`, color: conf.color,
+                                  border: `1px solid ${conf.color}35`,
+                                  borderRadius: '8px', padding: '0.2rem 0.6rem',
+                                  fontSize: '0.78rem', fontWeight: 700,
                                 }}>
-                                  {acca.dataQuality}
+                                  {conf.label}
                                 </span>
-                              )}
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                              <div style={{ textAlign: 'right' }}>
-                                <span style={{ color: acca.evPercent >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: '1.1rem' }}>
-                                  {acca.evPercent >= 0 ? '+' : ''}{acca.evPercent}% EV
+                                <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                                  {acca.numLegs}-leg combo{acca.crossSport ? ' • Multi-sport' : ''}
                                 </span>
-                                {acca.evConfidence && (
-                                  <div style={{ fontSize: '0.65rem', color: '#64748b' }}>
-                                    CI: {acca.evConfidence.low > 0 ? '+' : ''}{acca.evConfidence.low}% to {acca.evConfidence.high > 0 ? '+' : ''}{acca.evConfidence.high}%
-                                  </div>
-                                )}
                               </div>
-                              <span style={{ color: '#a5b4fc', fontWeight: 600, fontSize: '0.95rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginTop: '0.2rem' }}>
+                                {[...Array(5)].map((_, i) => (
+                                  <span key={i} style={{
+                                    color: i < conf.stars ? conf.color : '#1e293b',
+                                    fontSize: '0.85rem',
+                                  }}>★</span>
+                                ))}
+                                <span style={{ color: '#64748b', fontSize: '0.72rem', marginLeft: '0.4rem' }}>{edgeDesc}</span>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ color: '#e2e8f0', fontSize: '1.4rem', fontWeight: 700 }}>
                                 {acca.combinedOdds}x
-                              </span>
+                              </div>
+                              <div style={{ color: '#64748b', fontSize: '0.72rem' }}>combined odds</div>
                             </div>
                           </div>
 
-                          {/* EV skepticism warning */}
-                          {acca.evPercent > 15 && (
-                            <div style={{
-                              padding: '0.4rem 0.6rem', marginBottom: '0.6rem', borderRadius: '6px',
-                              background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
-                              fontSize: '0.72rem', color: '#fbbf24',
-                            }}>
-                              ⚠️ High EV ({acca.evPercent}%) — treat with caution. Sharp bettors typically see 3-8% EV. High EV may indicate stale lines or thin market data.
-                            </div>
-                          )}
-
-                          {/* Legs */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                          {/* Legs – clean list */}
+                          <div style={{ padding: '0 1.25rem' }}>
                             {acca.legs.map((leg, li) => (
                               <div key={li} style={{
-                                display: 'grid', gridTemplateColumns: '1.8fr 1.2fr 0.7fr 0.9fr',
-                                gap: '0.5rem', alignItems: 'center', padding: '0.4rem 0.6rem',
-                                background: 'rgba(255,255,255,0.02)', borderRadius: '6px',
-                                fontSize: '0.82rem',
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                padding: '0.65rem 0',
+                                borderBottom: li < acca.legs.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
                               }}>
-                                <span style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {leg.match}
-                                </span>
-                                <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
-                                  {leg.pick}
-                                </span>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                  <span style={{
-                                    color: leg.betType === 'MONEYLINE' ? '#a5b4fc' : leg.betType === 'SPREAD' ? '#fbbf24' : '#34d399',
-                                    fontSize: '0.72rem',
-                                  }}>
-                                    {leg.betType}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{sportEmoji(leg.sport)}</span>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.88rem' }}>
+                                      {leg.pick}
+                                      {leg.betType === 'SPREAD' && <span style={{ color: '#a5b4fc', fontWeight: 400, marginLeft: '0.3rem', fontSize: '0.8rem' }}>(spread)</span>}
+                                      {leg.betType === 'TOTAL' && <span style={{ color: '#34d399', fontWeight: 400, marginLeft: '0.3rem', fontSize: '0.8rem' }}>(total)</span>}
+                                    </div>
+                                    <div style={{ color: '#64748b', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {leg.match}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '0.75rem' }}>
+                                  <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.95rem' }}>
+                                    {leg.odds}
                                   </span>
-                                  {leg.sharpConfidence && (
-                                    <span style={{
-                                      width: '6px', height: '6px', borderRadius: '50%',
-                                      background: leg.sharpConfidence === 'high' ? '#22c55e' : leg.sharpConfidence === 'medium' ? '#fbbf24' : '#ef4444',
-                                    }} title={`${leg.sharpConfidence} confidence`} />
-                                  )}
-                                </span>
-                                <span style={{ textAlign: 'right' }}>
-                                  <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{leg.odds}</span>
-                                  <span style={{ color: '#475569', fontSize: '0.7rem', marginLeft: '0.3rem' }}>@ {leg.book}</span>
-                                </span>
+                                  <div style={{ color: '#475569', fontSize: '0.68rem' }}>
+                                    {leg.book}
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>
 
-                          {/* Footer: hypothetical */}
+                          {/* Footer – payout + simple edge indicator */}
                           <div style={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap',
-                            padding: '0.5rem 0.75rem', background: 'rgba(99,102,241,0.06)',
-                            borderRadius: '8px', fontSize: '0.8rem', gap: '0.5rem',
+                            margin: '0 1.25rem', marginTop: '0.25rem', marginBottom: '1rem',
+                            padding: '0.8rem 1rem', borderRadius: '10px',
+                            background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.1)',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem',
                           }}>
-                            <span style={{ color: '#64748b' }}>
-                              💰 {acca.kelly?.suggestedStake > 0
-                                ? <>Kelly: <strong style={{ color: '#a5b4fc' }}>${acca.kelly.suggestedStake}</strong> ({acca.kelly.bankrollPercent}% of $1k)</>
-                                : <>Min stake</>
-                              } → <strong style={{ color: '#22c55e' }}>${acca.hypothetical?.payout}</strong> payout
-                            </span>
-                            <span style={{ color: '#64748b' }}>
-                              E[profit]: <strong style={{ color: acca.hypothetical?.expectedProfit >= 0 ? '#22c55e' : '#ef4444' }}>
-                                {acca.hypothetical?.expectedProfit >= 0 ? '+' : ''}${acca.hypothetical?.expectedProfit}
-                              </strong>
-                            </span>
-                            <span style={{ color: '#475569', fontSize: '0.7rem' }}>
-                              Corr: {(acca.avgCorrelation * 100).toFixed(1)}%
-                            </span>
+                            <div>
+                              <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.15rem' }}>If you bet $10</div>
+                              <span style={{ color: '#22c55e', fontWeight: 700, fontSize: '1.1rem' }}>
+                                ${(10 * acca.combinedOdds).toFixed(2)} potential return
+                              </span>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.15rem' }}>Our edge</div>
+                              <div style={{
+                                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                              }}>
+                                <div style={{
+                                  width: '60px', height: '6px', borderRadius: '3px',
+                                  background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+                                }}>
+                                  <div style={{
+                                    width: `${Math.min(100, (acca.evPercent / 10) * 100)}%`,
+                                    height: '100%', borderRadius: '3px',
+                                    background: acca.evPercent >= 4 ? '#22c55e' : acca.evPercent >= 2 ? '#a5b4fc' : '#94a3b8',
+                                  }} />
+                                </div>
+                                <span style={{
+                                  color: acca.evPercent >= 4 ? '#22c55e' : acca.evPercent >= 2 ? '#a5b4fc' : '#94a3b8',
+                                  fontWeight: 700, fontSize: '0.95rem',
+                                }}>
+                                  +{acca.evPercent}%
+                                </span>
+                              </div>
+                            </div>
                           </div>
+
+                          {/* Expandable detail for advanced users */}
+                          <details style={{ margin: '0 1.25rem 1rem' }}>
+                            <summary style={{
+                              color: '#475569', fontSize: '0.72rem', cursor: 'pointer',
+                              padding: '0.3rem 0', listStyle: 'none',
+                              display: 'flex', alignItems: 'center', gap: '0.3rem',
+                            }}>
+                              <span style={{ fontSize: '0.65rem' }}>▶</span> Advanced stats
+                            </summary>
+                            <div style={{
+                              marginTop: '0.5rem', padding: '0.6rem 0.8rem',
+                              background: 'rgba(0,0,0,0.2)', borderRadius: '8px',
+                              fontSize: '0.72rem', color: '#64748b',
+                              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.4rem',
+                            }}>
+                              <span>Grade: <strong style={{ color: '#94a3b8' }}>{acca.grade}-tier</strong></span>
+                              <span>EV: <strong style={{ color: '#94a3b8' }}>{acca.evPercent >= 0 ? '+' : ''}{acca.evPercent}%</strong></span>
+                              {acca.evConfidence && (
+                                <span>CI: <strong style={{ color: '#94a3b8' }}>{acca.evConfidence.low}% to {acca.evConfidence.high}%</strong></span>
+                              )}
+                              <span>Correlation: <strong style={{ color: '#94a3b8' }}>{(acca.avgCorrelation * 100).toFixed(1)}%</strong></span>
+                              {acca.kelly?.suggestedStake > 0 && (
+                                <span>Kelly stake: <strong style={{ color: '#94a3b8' }}>${acca.kelly.suggestedStake}</strong> ({acca.kelly.bankrollPercent}%)</span>
+                              )}
+                              <span>Data: <strong style={{ color: acca.dataQuality === 'excellent' ? '#22c55e' : '#94a3b8' }}>{acca.dataQuality || 'n/a'}</strong></span>
+                              {acca.legs.map((l, i) => l.sharpSource && (
+                                <span key={i}>{l.pick.slice(0, 12)}: <strong style={{ color: '#94a3b8' }}>{l.sharpSource}</strong></span>
+                              ))}
+                            </div>
+                          </details>
                         </div>
                       );
                     })}
                   </div>
                 )}
 
-                {/* How it works */}
+                {/* How it works – simplified */}
                 <div style={{
-                  marginTop: '1.5rem', padding: '1rem', background: 'rgba(99,102,241,0.05)',
-                  borderRadius: '8px', border: '1px solid rgba(99,102,241,0.1)',
+                  marginTop: '1.5rem', padding: '1.25rem',
+                  background: 'rgba(99,102,241,0.04)', borderRadius: '12px',
+                  border: '1px solid rgba(99,102,241,0.08)',
                 }}>
-                  <div style={{ fontWeight: 600, color: '#a5b4fc', marginBottom: '0.5rem', fontSize: '0.85rem' }}>How +EV Accas Work (v2)</div>
-                  <div style={{ fontSize: '0.78rem', color: '#64748b', lineHeight: 1.6 }}>
-                    <strong style={{ color: '#94a3b8' }}>1. Data Hygiene</strong> — Filter stale/settled events. Only future matches with 3+ bookmakers qualify.{' '}
-                    <strong style={{ color: '#94a3b8' }}>2. Sharp Lines</strong> — Remove vig using Shin method (soccer) or multiplicative method (2-way), prioritizing Pinnacle/Matchbook.{' '}
-                    <strong style={{ color: '#94a3b8' }}>3. Correlation</strong> — Sport-specific coefficients with 30% safety margin (underestimating correlation = phantom +EV).{' '}
-                    <strong style={{ color: '#94a3b8' }}>4. Kelly Sizing</strong> — Quarter-Kelly stake sizing, capped at 3% of bankroll per acca.{' '}
-                    <strong style={{ color: '#94a3b8' }}>5. Confidence</strong> — Each EV shows a confidence interval. EV above 15% triggers a skepticism warning.{' '}
-                    <strong style={{ color: '#94a3b8' }}>6. CLV Tracking</strong> — Line snapshots saved for closing line value analysis over time.
-                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> High confidence
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#fbbf24' }} /> Medium confidence
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Low confidence
-                      </span>
-                    </div>
+                  <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '0.75rem', fontSize: '0.95rem' }}>
+                    How does this work?
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                    {[
+                      { step: '1', title: 'Scan the market', desc: 'We pull live odds from 30+ bookmakers every 15 minutes — including sharp books like Pinnacle that professional bettors use as the gold standard.' },
+                      { step: '2', title: 'Find the true price', desc: "When bookmakers disagree, we calculate the true probability by removing each book's built-in profit margin (the \"vig\"). Think of it like finding the wholesale price." },
+                      { step: '3', title: 'Spot the edge', desc: "If a bookmaker offers odds that are better than the true probability, that's a mispriced bet — you're being paid more than the risk is worth." },
+                      { step: '4', title: 'Build smart combos', desc: "We combine mispriced bets from different events into parlays, checking that the legs aren't correlated (e.g. same team, same game) which would reduce the edge." },
+                    ].map((item) => (
+                      <div key={item.step} style={{ display: 'flex', gap: '0.75rem' }}>
+                        <span style={{
+                          width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
+                          background: 'rgba(99,102,241,0.15)', color: '#a5b4fc',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '0.78rem', fontWeight: 700,
+                        }}>{item.step}</span>
+                        <div>
+                          <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.85rem' }}>{item.title}</div>
+                          <div style={{ color: '#64748b', fontSize: '0.78rem', lineHeight: 1.6 }}>{item.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{
+                    marginTop: '1rem', padding: '0.6rem 0.8rem', borderRadius: '8px',
+                    background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.1)',
+                    fontSize: '0.78rem', color: '#64748b',
+                  }}>
+                    💡 <strong style={{ color: '#94a3b8' }}>The star rating</strong> reflects how confident we are in the edge. More stars = more bookmaker agreement, sharper source data, and a bigger gap between odds offered and true probability.
                   </div>
                 </div>
               </Card>
