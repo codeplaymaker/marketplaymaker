@@ -1,12 +1,11 @@
 const noBets = require('./noBets');
 const arbitrage = require('./arbitrage');
 const sportsEdge = require('./sportsEdge');
-const ict = require('./ict');
 const log = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
-const strategies = [noBets, arbitrage, sportsEdge, ict];
+const strategies = [noBets, arbitrage, sportsEdge];
 
 const PERSISTENCE_FILE = path.join(__dirname, '..', 'logs', 'signal-persistence.json');
 
@@ -127,5 +126,4 @@ module.exports = {
   noBets,
   arbitrage,
   sportsEdge,
-  ict,
 };

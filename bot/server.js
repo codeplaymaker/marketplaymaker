@@ -778,7 +778,7 @@ app.get('/api/learning/insights', (req, res) => {
 
 app.get('/api/learning/thresholds', (req, res) => {
   try {
-    const strategies = ['NO_BETS', 'SPORTS_EDGE', 'ICT', 'ARBITRAGE'];
+    const strategies = ['NO_BETS', 'SPORTS_EDGE', 'ARBITRAGE'];
     const thresholds = {};
     for (const s of strategies) {
       const t = paperTrader.getLearnedThreshold ? paperTrader.getLearnedThreshold(s) : null;

@@ -43,16 +43,7 @@ module.exports = {
       meanReversionWindow: 20, // Lookback for mean-reversion detection
       minEdgeAfterFees: 0.003, // Min 0.3% net edge
     },
-    ict: {
-      enabled: true,
-      minVolume24h: 5000,      // Need volume for reliable structure
-      minLiquidity: 3000,      // Minimum orderbook depth
-      sweepThreshold: 0.03,    // 3% move = potential sweep
-      fvgMinGap: 0.02,         // 2% gap = fair value gap
-      orderBlockMinSize: 3000, // $3k+ = institutional order block
-      maxExposure: 0.03,       // Max 3% of bankroll per ICT trade
-      minScore: 20,            // Need decent signal confluence
-    },
+
   },
 
   // Risk management

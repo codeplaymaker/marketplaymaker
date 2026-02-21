@@ -21,7 +21,6 @@ let credibility = {
   NO_BETS: { total: 0, wins: 0, losses: 0, pending: 0, avgScore: 0, avgEdge: 0, scores: [] },
   ARBITRAGE: { total: 0, wins: 0, losses: 0, pending: 0, avgScore: 0, avgEdge: 0, scores: [] },
   SPORTS_EDGE: { total: 0, wins: 0, losses: 0, pending: 0, avgScore: 0, avgEdge: 0, scores: [] },
-  ICT: { total: 0, wins: 0, losses: 0, pending: 0, avgScore: 0, avgEdge: 0, scores: [] },
 };
 
 // By confidence level

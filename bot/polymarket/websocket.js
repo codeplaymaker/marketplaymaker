@@ -1,7 +1,7 @@
 /**
  * Polymarket WebSocket Client — Real-Time Orderbook Feed
  *
- * Instead of REST polling every 5 seconds (which is too slow for arb + ICT),
+ * Instead of REST polling every 5 seconds (which is too slow for arb),
  * this module maintains persistent WebSocket connections to the Polymarket
  * CLOB WebSocket API for real-time orderbook updates.
  *

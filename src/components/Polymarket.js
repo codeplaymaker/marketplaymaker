@@ -475,16 +475,12 @@ const Chip = styled.span`
       ? 'rgba(16, 185, 129, 0.15)'
       : props.$strategy === 'ARBITRAGE'
       ? 'rgba(99, 102, 241, 0.15)'
-      : props.$strategy === 'ICT'
-      ? 'rgba(168, 85, 247, 0.15)'
       : 'rgba(251, 191, 36, 0.15)'};
   color: ${(props) =>
     props.$strategy === 'NO_BETS'
       ? '#34d399'
       : props.$strategy === 'ARBITRAGE'
       ? '#a5b4fc'
-      : props.$strategy === 'ICT'
-      ? '#c084fc'
       : '#fbbf24'};
 `;
 
@@ -845,7 +841,7 @@ const Polymarket = () => {
     if (oppsFilter === 'TOP_5') {
       // Strategy-diverse Top 5: best from each active strategy, then fill by score
       const sorted = [...searchFiltered].sort((a, b) => (b.score || 0) - (a.score || 0));
-      const strategies = ['NO_BETS', 'ARBITRAGE', 'ICT', 'SPORTS_EDGE'];
+      const strategies = ['NO_BETS', 'ARBITRAGE', 'SPORTS_EDGE'];
       const picked = [];
       const usedIds = new Set();
       // 1. Pick best from each strategy
@@ -1390,7 +1386,6 @@ const Polymarket = () => {
                     { name: 'NO Bets', count: opportunities.filter(o => o.strategy === 'NO_BETS').length, color: '#34d399', icon: '🛡️', desc: 'Risk underwriting' },
                     { name: 'Arbitrage', count: opportunities.filter(o => o.strategy === 'ARBITRAGE').length, color: '#a5b4fc', icon: '🔄', desc: 'Cross-market' },
                     { name: 'Statistical', count: opportunities.filter(o => o.strategy === 'SPORTS_EDGE').length, color: '#fbbf24', icon: '📐', desc: 'Odds vs prob' },
-                    { name: 'ICT', count: opportunities.filter(o => o.strategy === 'ICT').length, color: '#c084fc', icon: '🧊', desc: 'Smart money' },
                   ].map((s, i) => (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'center', gap: '0.4rem',
@@ -1467,14 +1462,14 @@ const Polymarket = () => {
             </div>
 
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-              {['TOP_5', 'ALL', 'NO_BETS', 'ARBITRAGE', 'SPORTS_EDGE', 'ICT'].map((f) => (
+              {['TOP_5', 'ALL', 'NO_BETS', 'ARBITRAGE', 'SPORTS_EDGE'].map((f) => (
                 <Button
                   key={f}
                   $variant={oppsFilter === f ? 'primary' : 'ghost'}
                   onClick={() => setOppsFilter(f)}
                   style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
                 >
-                  {f === 'TOP_5' ? '🏆 Top 5' : f === 'ALL' ? '🌐 All' : f === 'NO_BETS' ? '🟢 NO Bets' : f === 'ARBITRAGE' ? '🔵 Arbitrage' : f === 'ICT' ? '🔮 ICT' : '🟡 Spread'}
+                  {f === 'TOP_5' ? '🏆 Top 5' : f === 'ALL' ? '🌐 All' : f === 'NO_BETS' ? '🟢 NO Bets' : f === 'ARBITRAGE' ? '🔵 Arbitrage' : '🟡 Spread'}
                 </Button>
               ))}
             </div>
@@ -1536,14 +1531,6 @@ const Polymarket = () => {
                   <div><strong style={{ color: '#cbd5e1' }}>How it works:</strong> Identifies markets where the spread is 2–15% and liquidity is sufficient. Places limit orders inside the spread to capture the difference. Also detects overbought/oversold conditions from recent price movement.</div>
                 </>
               )}
-              {oppsFilter === 'ICT' && (
-                <>
-                  <div style={{ fontWeight: 600, color: '#c084fc', marginBottom: '0.3rem' }}>🔮 ICT — Smart Money Concepts</div>
-                  <div style={{ marginBottom: '0.4rem' }}>Adapts <strong style={{ color: '#e2e8f0' }}>institutional trading concepts</strong> (Inner Circle Trader) to prediction markets. Detects liquidity sweeps (stop hunts), fair value gaps, order blocks, market structure shifts, and smart money accumulation/distribution.</div>
-                  <div style={{ marginBottom: '0.4rem' }}><strong style={{ color: '#cbd5e1' }}>Signals:</strong> <span style={{ color: '#c084fc' }}>BOS</span> = trend continuation confirmed · <span style={{ color: '#c084fc' }}>CHoCH</span> = trend reversal · <span style={{ color: '#c084fc' }}>Sweep</span> = price hunted stops then reversed · <span style={{ color: '#c084fc' }}>FVG</span> = price gap that tends to fill · <span style={{ color: '#c084fc' }}>OB</span> = large resting institutional orders</div>
-                  <div><strong style={{ color: '#cbd5e1' }}>How it works:</strong> Analyzes price history + live orderbook on top 30 markets by volume. Scores each by signal confluence (min 25 to qualify). Trades in the direction that most signals agree on — buying in discount zones, selling in premium zones.</div>
-                </>
-              )}
             </div>
 
             {/* ── Top 5 Detailed Cards ── */}
@@ -1553,12 +1540,11 @@ const Polymarket = () => {
                   const edge = opp.edge || {};
                   const model = opp.model || {};
                   const isArb = opp.strategy === 'ARBITRAGE';
-                  const isICT = opp.strategy === 'ICT';
                   const isNO = opp.strategy === 'NO_BETS';
                   const isSE = opp.strategy === 'SPORTS_EDGE';
                   const entryPrice = isArb
                     ? (opp.yesPrice || opp.noPrice || opp.markets?.[0]?.yesPrice || null)
-                    : isNO ? opp.noPrice : isICT ? opp.price : (opp.side === 'YES' ? opp.yesPrice : opp.noPrice);
+                    : isNO ? opp.noPrice : (opp.side === 'YES' ? opp.yesPrice : opp.noPrice);
                   const rankColors = ['#fcd34d', '#c0c0c0', '#cd7f32', '#a5b4fc', '#a5b4fc'];
                   return (
                     <div key={`top5-${i}`} style={{
@@ -1596,7 +1582,7 @@ const Polymarket = () => {
                               letterSpacing: '0.05em',
                             }}>{opp.platform === 'KALSHI' ? 'KALSHI' : 'POLY'}</span>
                             <Chip $strategy={opp.strategy}>
-                              {isNO ? 'NO BETS' : isArb ? 'ARBITRAGE' : isICT ? 'ICT' : 'SPORTS EDGE'}
+                              {isNO ? 'NO BETS' : isArb ? 'ARBITRAGE' : 'SPORTS EDGE'}
                             </Chip>
                             <Badge $type={opp.confidence?.toLowerCase()}>{opp.confidence || '—'}</Badge>
                             <span style={{ color: opp.score >= 70 ? '#34d399' : opp.score >= 50 ? '#fbbf24' : '#f87171', fontWeight: 700, fontSize: '0.85rem' }}>
@@ -1648,23 +1634,6 @@ const Polymarket = () => {
                             )}
                           </>
                         )}
-                        {isICT && (
-                          <>
-                            <div style={{ fontWeight: 700, color: '#34d399', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
-                              📋 Action: BUY {opp.side || '—'} shares @ ${entryPrice?.toFixed(4) || '—'} each
-                            </div>
-                            <div style={{ color: '#a7f3d0', fontSize: '0.82rem', lineHeight: 1.5 }}>
-                              Smart-money orderbook analysis detected {opp.signals?.length || 0} signal{(opp.signals?.length || 0) !== 1 ? 's' : ''} pointing <strong>{opp.side}</strong>:
-                              {opp.signals && opp.signals.length > 0 && (
-                                <span style={{ color: '#d8b4fe' }}> {opp.signals.slice(0, 2).join('; ')}</span>
-                              )}
-                              . Model estimates true probability at {((opp.estimatedProb || 0) * 100).toFixed(1)}% vs market price {((opp.price || 0) * 100).toFixed(1)}¢ — edge of {((opp.edgeAfterCosts || 0) * 100).toFixed(1)}% after costs.
-                            </div>
-                            <div style={{ color: '#86efac', fontSize: '0.82rem', marginTop: '0.35rem', lineHeight: 1.5 }}>
-                              💰 Position: ${opp.positionSize?.toFixed(2) || '—'} → if {opp.side} resolves correct, each share pays $1.00 (profit: ${(1 - (opp.price || 0)).toFixed(2)}/share). Net EV: <strong style={{ color: '#34d399' }}>${(opp.netEV || 0).toFixed(2)}</strong> per $100.
-                            </div>
-                          </>
-                        )}
                         {isSE && (
                           <>
                             <div style={{ fontWeight: 700, color: '#34d399', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
@@ -1712,7 +1681,7 @@ const Polymarket = () => {
                         display: 'grid',
                         gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
                         gap: '0.5rem',
-                        marginBottom: isICT && opp.signals ? '0.75rem' : '0',
+                        marginBottom: '0',
                       }}>
                         {isArb && (
                           <>
@@ -1754,26 +1723,6 @@ const Polymarket = () => {
                             </div>
                           </>
                         )}
-                        {isICT && (
-                          <>
-                            <div style={{ background: 'rgba(192,132,252,0.06)', borderRadius: '8px', padding: '0.5rem 0.7rem' }}>
-                              <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Edge After Costs</div>
-                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#c084fc' }}>{((opp.edgeAfterCosts || 0) * 100).toFixed(1)}%</div>
-                            </div>
-                            <div style={{ background: 'rgba(52,211,153,0.06)', borderRadius: '8px', padding: '0.5rem 0.7rem' }}>
-                              <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Net EV</div>
-                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#34d399' }}>${(opp.netEV || 0).toFixed(2)}</div>
-                            </div>
-                            <div style={{ background: 'rgba(99,102,241,0.06)', borderRadius: '8px', padding: '0.5rem 0.7rem' }}>
-                              <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Est. True Prob</div>
-                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#a5b4fc' }}>{((opp.estimatedProb || 0) * 100).toFixed(1)}%</div>
-                            </div>
-                            <div style={{ background: 'rgba(148,163,184,0.06)', borderRadius: '8px', padding: '0.5rem 0.7rem' }}>
-                              <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Volume 24h</div>
-                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#94a3b8' }}>${(opp.volume24hr || 0) >= 1000000 ? ((opp.volume24hr / 1000000).toFixed(1) + 'M') : (opp.volume24hr || 0) >= 1000 ? ((opp.volume24hr / 1000).toFixed(1) + 'K') : (opp.volume24hr || 0).toFixed(0)}</div>
-                            </div>
-                          </>
-                        )}
                         {isSE && (
                           <>
                             <div style={{ background: 'rgba(251,191,36,0.06)', borderRadius: '8px', padding: '0.5rem 0.7rem' }}>
@@ -1795,24 +1744,6 @@ const Polymarket = () => {
                           </>
                         )}
                       </div>
-
-                      {/* ICT signals */}
-                      {isICT && opp.signals && opp.signals.length > 0 && (
-                        <div style={{
-                          background: 'rgba(192, 132, 252, 0.06)',
-                          border: '1px solid rgba(192, 132, 252, 0.15)',
-                          borderRadius: '8px',
-                          padding: '0.5rem 0.8rem',
-                          fontSize: '0.78rem',
-                          color: '#d8b4fe',
-                        }}>
-                          <span style={{ fontWeight: 600 }}>Signals: </span>
-                          {opp.signals.join(' · ')}
-                          {opp.bullishVotes != null && (
-                            <span style={{ marginLeft: '0.5rem', color: '#94a3b8' }}>(Bull: {opp.bullishVotes} / Bear: {opp.bearishVotes})</span>
-                          )}
-                        </div>
-                      )}
 
                       {/* Bookmaker Comparison */}
                       {opp.bookmaker && (
@@ -1935,7 +1866,7 @@ const Polymarket = () => {
                     </span>
                     <span>
                       <Chip $strategy={opp.strategy}>
-                        {opp.strategy === 'NO_BETS' ? 'NO' : opp.strategy === 'ARBITRAGE' ? 'ARB' : opp.strategy === 'ICT' ? 'ICT' : 'SPREAD'}
+                        {opp.strategy === 'NO_BETS' ? 'NO' : opp.strategy === 'ARBITRAGE' ? 'ARB' : 'SPREAD'}
                       </Chip>
                     </span>
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -3354,7 +3285,7 @@ const Polymarket = () => {
 
                 {/* Strategy Breakdown Bar */}
                 <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                  {[{ k: 'NO_BETS', l: 'NO', c: '#34d399' }, { k: 'ARBITRAGE', l: 'ARB', c: '#a5b4fc' }, { k: 'SPORTS_EDGE', l: 'SPREAD', c: '#fbbf24' }, { k: 'ICT', l: 'ICT', c: '#c084fc' }].map(s => {
+                  {[{ k: 'NO_BETS', l: 'NO', c: '#34d399' }, { k: 'ARBITRAGE', l: 'ARB', c: '#a5b4fc' }, { k: 'SPORTS_EDGE', l: 'SPREAD', c: '#fbbf24' }].map(s => {
                     const count = trades.filter(t => t.strategy === s.k).length;
                     return (
                       <div key={s.k} style={{ background: count > 0 ? `${s.c}10` : 'rgba(0,0,0,0.2)', border: `1px solid ${count > 0 ? `${s.c}30` : 'rgba(100,116,139,0.15)'}`, borderRadius: '8px', padding: '0.3rem 0.55rem', fontSize: '0.7rem', display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -3407,7 +3338,7 @@ const Polymarket = () => {
                             <span style={{ fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.25rem', borderRadius: '3px', background: t.platform === 'KALSHI' ? 'rgba(59,130,246,0.15)' : 'rgba(139,92,246,0.15)', color: t.platform === 'KALSHI' ? '#60a5fa' : '#a78bfa', flexShrink: 0 }}>{t.platform === 'KALSHI' ? 'K' : 'P'}</span>
                             <span>{t.market?.length > 48 ? t.market.slice(0, 45) + '...' : t.market}</span>
                           </span>
-                          <span><Chip $strategy={t.strategy}>{t.strategy === 'NO_BETS' ? 'NO' : t.strategy === 'ARBITRAGE' ? 'ARB' : t.strategy === 'ICT' ? 'ICT' : 'SPRD'}</Chip></span>
+                          <span><Chip $strategy={t.strategy}>{t.strategy === 'NO_BETS' ? 'NO' : t.strategy === 'ARBITRAGE' ? 'ARB' : 'SPRD'}</Chip></span>
                           <span style={{ color: t.side === 'NO' ? '#f87171' : '#34d399', fontWeight: 600, fontSize: '0.82rem' }}>{t.side || '—'}</span>
                           <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>${t.positionSize?.toFixed(2) || '0.00'}</span>
                           <span><Badge $type={t.status === 'FILLED' ? 'running' : 'stopped'}>{t.status || '—'}</Badge></span>
