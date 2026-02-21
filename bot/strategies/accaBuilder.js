@@ -453,9 +453,9 @@ function buildLegs() {
       const impliedByBest = 1 / best.odds;
       const legEV = (trueProb * best.odds) - 1;
 
-      // FILTER: Individual leg must be at least break-even
-      // (In v1 we allowed -8%; that's too loose — breaks acca EV math)
-      if (legEV < 0) continue;
+      // FILTER: Individual leg must have meaningful edge (2%+)
+      // Zero-EV filler legs drag down acca quality — no passenger legs allowed.
+      if (legEV < 0.02) continue;
 
       // FILTER: Cap individual leg EV at 10%
       // In real sharp betting, consistent 5% edges are exceptional.
@@ -577,7 +577,7 @@ function buildSpreadLegs(event, legs) {
     else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
     const legEV = trueProb * best.price - 1;
-    if (legEV < 0 || legEV > 0.10) continue;
+    if (legEV < 0.02 || legEV > 0.10) continue;
 
     legs.push({
       eventId: event.id,
@@ -670,7 +670,7 @@ function buildTotalLegs(event, legs) {
     else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
     const legEV = trueProb * best.price - 1;
-    if (legEV < 0 || legEV > 0.10) continue;
+    if (legEV < 0.02 || legEV > 0.10) continue;
 
     legs.push({
       eventId: event.id,
@@ -882,8 +882,8 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
     });
     if (isDup) continue;
 
-    // Check leg reuse: no leg should appear in more than 2 accas
-    const wouldExceedReuse = picks.some(p => (legUsageCount[p] || 0) >= 2);
+    // Check leg reuse: no leg should appear in more than 3 accas
+    const wouldExceedReuse = picks.some(p => (legUsageCount[p] || 0) >= 3);
     if (wouldExceedReuse) continue;
 
     deduped.push(acca);
@@ -975,6 +975,12 @@ function gradeAcca(ev, legs, avgCorrelation, dataQuality) {
   if (highConf >= 2) score += 10;
   else if (highConf >= 1 || medConf >= legs.length / 2) score += 6;
   else if (medConf >= 1) score += 3;
+
+  // ── Bet-type diversity (max 5 pts) ──
+  // Accas mixing moneyline + spread/total show deeper market analysis
+  const betTypes = new Set(legs.map(l => l.betType));
+  if (betTypes.size >= 3) score += 5;
+  else if (betTypes.size >= 2) score += 3;
 
   if (score >= 80) return 'S';
   if (score >= 60) return 'A';
