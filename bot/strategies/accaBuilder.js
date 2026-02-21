@@ -421,6 +421,9 @@ function buildLegs() {
     const h2h = refBm?.markets?.find(m => m.key === 'h2h');
     if (!h2h?.outcomes) continue;
 
+    // ── Try power devig for events with both h2h and spread data from sharps ──
+    const powerDevigResult = powerDevig(event);
+
     // ── H2H (Moneyline) legs ──
     for (const outcome of h2h.outcomes) {
       const sharp = getSharpProb(event, outcome.name);
@@ -432,11 +435,23 @@ function buildLegs() {
       // FILTER: Acca-suitable odds range (1.20 to 4.50)
       if (best.odds < 1.20 || best.odds > 4.50) continue;
 
+      // If power devig is available, use it to cross-validate/override
+      let trueProb = sharp.prob;
+      let usedPowerDevig = false;
+      if (powerDevigResult && powerDevigResult[outcome.name]) {
+        const pd = powerDevigResult[outcome.name];
+        // If spread-implied prob diverges significantly from h2h, use power devig
+        if (pd.divergence > 0.03) {
+          trueProb = pd.powerProb;
+          usedPowerDevig = true;
+        }
+      }
+
       // FILTER: True probability between 15% and 85%
-      if (sharp.prob < 0.15 || sharp.prob > 0.85) continue;
+      if (trueProb < 0.15 || trueProb > 0.85) continue;
 
       const impliedByBest = 1 / best.odds;
-      const legEV = (sharp.prob * best.odds) - 1;
+      const legEV = (trueProb * best.odds) - 1;
 
       // FILTER: Individual leg must be at least break-even
       // (In v1 we allowed -8%; that's too loose — breaks acca EV math)
@@ -448,7 +463,7 @@ function buildLegs() {
       // Exception: MMA undercards can have legitimate 8-10% edges.
       if (legEV > 0.10) continue;
 
-      const probDiff = sharp.consensusProb ? Math.abs(sharp.prob - sharp.consensusProb) : 0;
+      const probDiff = sharp.consensusProb ? Math.abs(trueProb - sharp.consensusProb) : 0;
       const dataQuality = calculateDataQuality(sharp, best, event);
 
       legs.push({
@@ -459,9 +474,9 @@ function buildLegs() {
         awayTeam: event.away_team,
         commenceTime: event.commence_time,
         pick: outcome.name,
-        trueProb: round4(sharp.prob),
-        sharpSource: sharp.source,
-        sharpConfidence: sharp.confidence,
+        trueProb: round4(trueProb),
+        sharpSource: usedPowerDevig ? `power:${sharp.source}` : sharp.source,
+        sharpConfidence: usedPowerDevig ? 'high' : sharp.confidence,
         bestOdds: best.odds,
         bestBook: best.book,
         bestBookKey: best.bookKey,
@@ -484,13 +499,37 @@ function buildLegs() {
     buildTotalLegs(event, legs);
   }
 
-  return { legs, hygiene: { total: cachedOdds.length, ...filtered } };
+  // Track line movements for all legs (detects steam moves, RLM)
+  const lineMovements = trackLineMovements(legs);
+  if (lineMovements.length > 0) {
+    log.info('ACCA', `Line movements detected: ${lineMovements.length} (${lineMovements.filter(m => m.isSteamMove).length} steam, ${lineMovements.filter(m => m.reverseLineMove).length} RLM)`);
+  }
+
+  return { legs, hygiene: { total: cachedOdds.length, ...filtered }, lineMovements };
 }
 
 /**
  * Build spread (handicap) legs for an event.
+ * Uses proper paired-outcome devig instead of hardcoded margin.
  */
 function buildSpreadLegs(event, legs) {
+  // Group spread outcomes by bookmaker and point value
+  // so we can pair complementary outcomes for proper devig
+  const spreadByBook = {};
+  for (const bm of event.bookmakers) {
+    const spreads = bm.markets?.find(m => m.key === 'spreads');
+    if (!spreads?.outcomes) continue;
+    // Group by point value (opposing sides share same absolute point)
+    for (const o of spreads.outcomes) {
+      const absPoint = Math.abs(o.point);
+      const pairKey = `${absPoint}`;
+      if (!spreadByBook[pairKey]) spreadByBook[pairKey] = {};
+      if (!spreadByBook[pairKey][bm.key]) spreadByBook[pairKey][bm.key] = { book: bm.title || bm.key, bookKey: bm.key, outcomes: [] };
+      spreadByBook[pairKey][bm.key].outcomes.push(o);
+    }
+  }
+
+  // For each spread line, compute true prob via proper devig
   const spreadLines = {};
   for (const bm of event.bookmakers) {
     const spreads = bm.markets?.find(m => m.key === 'spreads');
@@ -498,7 +537,21 @@ function buildSpreadLegs(event, legs) {
     for (const o of spreads.outcomes) {
       const key = `${o.name}|${o.point}`;
       if (!spreadLines[key]) spreadLines[key] = [];
-      spreadLines[key].push({ price: o.price, book: bm.title || bm.key, bookKey: bm.key });
+      // Find the complementary outcome for this book
+      const complement = spreads.outcomes.find(c => c.name !== o.name || (c.name === o.name && c.point !== o.point));
+      let trueProb = null;
+      if (complement) {
+        // Proper 2-way devig
+        const pair = [{ price: o.price }, { price: complement.price }];
+        const devigged = removeVigMultiplicative(pair);
+        if (devigged) trueProb = devigged[0];
+      }
+      spreadLines[key].push({
+        price: o.price,
+        book: bm.title || bm.key,
+        bookKey: bm.key,
+        trueProb,
+      });
     }
   }
 
@@ -510,11 +563,18 @@ function buildSpreadLegs(event, legs) {
     const best = entries.reduce((a, b) => a.price > b.price ? a : b);
     if (best.price < 1.40 || best.price > 3.50) continue;
 
-    const prices = entries.map(e => e.price).sort((a, b) => a - b);
-    const medianPrice = prices[Math.floor(prices.length / 2)];
-    const trueProb = 1 / medianPrice / 1.02;
+    // Use median of properly-devigged true probs (not naive 1/price/1.02)
+    const validProbs = entries.filter(e => e.trueProb && e.trueProb > 0.05 && e.trueProb < 0.95).map(e => e.trueProb);
+    if (validProbs.length < 2) continue;
+    const trueProb = median(validProbs);
 
     if (trueProb < 0.20 || trueProb > 0.80) continue;
+
+    // Determine sharp confidence
+    const sharpEntries = entries.filter(e => SHARP_BOOKS.includes(e.bookKey) && e.trueProb);
+    let sharpConfidence = 'low';
+    if (sharpEntries.length >= 2) sharpConfidence = 'high';
+    else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
     const legEV = trueProb * best.price - 1;
     if (legEV < 0 || legEV > 0.10) continue;
@@ -528,8 +588,8 @@ function buildSpreadLegs(event, legs) {
       commenceTime: event.commence_time,
       pick: `${name} ${point > 0 ? '+' : ''}${point}`,
       trueProb: round4(trueProb),
-      sharpSource: 'consensus-spread',
-      sharpConfidence: entries.length >= 5 ? 'medium' : 'low',
+      sharpSource: sharpEntries.length > 0 ? sharpEntries.map(e => e.bookKey).join('+') : 'consensus-spread',
+      sharpConfidence,
       bestOdds: best.price,
       bestBook: best.book,
       bestBookKey: best.bookKey,
@@ -540,24 +600,51 @@ function buildSpreadLegs(event, legs) {
       matchLabel: `${event.home_team} vs ${event.away_team}`,
       betType: 'SPREAD',
       line: point,
-      dataQuality: entries.length >= 5 ? 'good' : 'fair',
-      probSpread: round4(Math.abs(1 / prices[0] - 1 / prices[prices.length - 1])),
+      dataQuality: sharpConfidence === 'high' ? 'excellent' : (sharpConfidence === 'medium' ? 'good' : (entries.length >= 5 ? 'good' : 'fair')),
+      probSpread: round4(validProbs.length > 0 ? Math.max(...validProbs) - Math.min(...validProbs) : 0),
     });
   }
 }
 
 /**
  * Build over/under (totals) legs.
+ * Uses proper paired-outcome devig (Over vs Under at same point).
  */
 function buildTotalLegs(event, legs) {
+  // For each book, pair Over/Under at the same point for proper devig
   const totalLines = {};
   for (const bm of event.bookmakers) {
     const totals = bm.markets?.find(m => m.key === 'totals');
     if (!totals?.outcomes) continue;
+
+    // Group by point value to find Over/Under pairs
+    const byPoint = {};
+    for (const o of totals.outcomes) {
+      if (!byPoint[o.point]) byPoint[o.point] = {};
+      byPoint[o.point][o.name] = o.price;
+    }
+
     for (const o of totals.outcomes) {
       const key = `${o.name}|${o.point}`;
       if (!totalLines[key]) totalLines[key] = [];
-      totalLines[key].push({ price: o.price, book: bm.title || bm.key, bookKey: bm.key });
+
+      // Find complement (Over↔Under at same point)
+      const complementName = o.name === 'Over' ? 'Under' : 'Over';
+      const complementPrice = byPoint[o.point]?.[complementName];
+
+      let trueProb = null;
+      if (complementPrice) {
+        const pair = [{ price: o.price }, { price: complementPrice }];
+        const devigged = removeVigMultiplicative(pair);
+        if (devigged) trueProb = devigged[0];
+      }
+
+      totalLines[key].push({
+        price: o.price,
+        book: bm.title || bm.key,
+        bookKey: bm.key,
+        trueProb,
+      });
     }
   }
 
@@ -569,11 +656,18 @@ function buildTotalLegs(event, legs) {
     const best = entries.reduce((a, b) => a.price > b.price ? a : b);
     if (best.price < 1.40 || best.price > 3.00) continue;
 
-    const prices = entries.map(e => e.price).sort((a, b) => a - b);
-    const medianPrice = prices[Math.floor(prices.length / 2)];
-    const trueProb = 1 / medianPrice / 1.02;
+    // Use median of properly-devigged probs
+    const validProbs = entries.filter(e => e.trueProb && e.trueProb > 0.05 && e.trueProb < 0.95).map(e => e.trueProb);
+    if (validProbs.length < 2) continue;
+    const trueProb = median(validProbs);
 
     if (trueProb < 0.25 || trueProb > 0.75) continue;
+
+    // Determine sharp confidence
+    const sharpEntries = entries.filter(e => SHARP_BOOKS.includes(e.bookKey) && e.trueProb);
+    let sharpConfidence = 'low';
+    if (sharpEntries.length >= 2) sharpConfidence = 'high';
+    else if (sharpEntries.length === 1) sharpConfidence = 'medium';
 
     const legEV = trueProb * best.price - 1;
     if (legEV < 0 || legEV > 0.10) continue;
@@ -587,8 +681,8 @@ function buildTotalLegs(event, legs) {
       commenceTime: event.commence_time,
       pick: `${name} ${point}`,
       trueProb: round4(trueProb),
-      sharpSource: 'consensus-total',
-      sharpConfidence: entries.length >= 5 ? 'medium' : 'low',
+      sharpSource: sharpEntries.length > 0 ? sharpEntries.map(e => e.bookKey).join('+') : 'consensus-total',
+      sharpConfidence,
       bestOdds: best.price,
       bestBook: best.book,
       bestBookKey: best.bookKey,
@@ -599,8 +693,8 @@ function buildTotalLegs(event, legs) {
       matchLabel: `${event.home_team} vs ${event.away_team}`,
       betType: 'TOTAL',
       line: point,
-      dataQuality: entries.length >= 5 ? 'good' : 'fair',
-      probSpread: round4(Math.abs(1 / prices[0] - 1 / prices[prices.length - 1])),
+      dataQuality: sharpConfidence === 'high' ? 'excellent' : (sharpConfidence === 'medium' ? 'good' : (entries.length >= 5 ? 'good' : 'fair')),
+      probSpread: round4(validProbs.length > 0 ? Math.max(...validProbs) - Math.min(...validProbs) : 0),
     });
   }
 }
@@ -628,7 +722,7 @@ function calculateDataQuality(sharp, best, event) {
 // ─── Acca Combination Engine ─────────────────────────────────────────
 
 function buildAccas(maxLegs = 5, minLegs = 2) {
-  const { legs: allLegs, hygiene } = buildLegs();
+  const { legs: allLegs, hygiene, lineMovements } = buildLegs();
 
   if (allLegs.length < minLegs) {
     log.info('ACCA', `Only ${allLegs.length} viable legs (need ${minLegs}). Raw events: ${hygiene.total}, valid: ${hygiene.valid || 0}`);
@@ -786,6 +880,15 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
       B: cachedAccas.filter(a => a.grade === 'B').length,
       C: cachedAccas.filter(a => a.grade === 'C').length,
     },
+    lineMovements: lineMovements?.length || 0,
+    steamMoves: lineMovements?.filter(m => m.isSteamMove).length || 0,
+    powerDevigLegs: allLegs.filter(l => l.sharpSource?.startsWith('power:')).length,
+    sharpBookLegs: allLegs.filter(l => l.sharpConfidence === 'high').length,
+    betTypes: {
+      moneyline: allLegs.filter(l => l.betType === 'MONEYLINE').length,
+      spread: allLegs.filter(l => l.betType === 'SPREAD').length,
+      total: allLegs.filter(l => l.betType === 'TOTAL').length,
+    },
   };
   save();
   saveCLVSnapshot(cachedAccas);
@@ -931,6 +1034,270 @@ function saveCLVSnapshot(accas) {
   } catch { /* non-critical */ }
 }
 
+/**
+ * Analyze CLV (Closing Line Value) from historical snapshots.
+ * Compares the odds at time of pick vs the last recorded odds before event start.
+ * CLV > 0 means we consistently beat closing lines → long-term profit indicator.
+ *
+ * This is THE single most important metric in sports betting.
+ * A +2% CLV bettor will profit long-term regardless of short-term variance.
+ */
+function analyzeCLV() {
+  try {
+    if (!fs.existsSync(CLV_FILE)) return { error: 'No CLV data yet', snapshots: 0 };
+    const clvData = JSON.parse(fs.readFileSync(CLV_FILE, 'utf8'));
+    if (clvData.length < 2) return { error: 'Need at least 2 snapshots for CLV analysis', snapshots: clvData.length };
+
+    const legCLVs = [];
+    const now = new Date();
+
+    // For each leg across all snapshots, find the earliest and latest odds
+    const legHistory = {}; // key: match+pick → [{timestamp, odds}]
+
+    for (const snap of clvData) {
+      for (const acca of snap.accas) {
+        for (const leg of acca.legs) {
+          const key = `${leg.match}|${leg.pick}`;
+          if (!legHistory[key]) legHistory[key] = [];
+          legHistory[key].push({
+            timestamp: new Date(snap.timestamp),
+            odds: leg.odds,
+            commenceTime: leg.commenceTime ? new Date(leg.commenceTime) : null,
+          });
+        }
+      }
+    }
+
+    // For events that have started (closing time passed), calculate CLV
+    for (const [key, history] of Object.entries(legHistory)) {
+      if (history.length < 2) continue;
+      history.sort((a, b) => a.timestamp - b.timestamp);
+
+      const firstRecord = history[0];
+      const lastRecord = history[history.length - 1];
+      const commence = firstRecord.commenceTime;
+
+      // Only analyze events that have already started (closing line available)
+      if (commence && commence > now) continue;
+
+      const openingOdds = firstRecord.odds;
+      const closingOdds = lastRecord.odds;
+
+      if (openingOdds > 0 && closingOdds > 0) {
+        // CLV = (closingProb - openingProb) / openingProb
+        // Positive = we got better odds than the closing line → edge was real
+        const openingProb = 1 / openingOdds;
+        const closingProb = 1 / closingOdds;
+        const clv = (openingProb - closingProb) / closingProb;
+        legCLVs.push({
+          match: key.split('|')[0],
+          pick: key.split('|')[1],
+          openingOdds,
+          closingOdds,
+          clvPercent: round2(clv * 100),
+          beatClosing: clv > 0,
+          snapshots: history.length,
+        });
+      }
+    }
+
+    const beatCount = legCLVs.filter(l => l.beatClosing).length;
+    const avgCLV = legCLVs.length > 0
+      ? round2(legCLVs.reduce((s, l) => s + l.clvPercent, 0) / legCLVs.length)
+      : 0;
+
+    return {
+      totalLegsAnalyzed: legCLVs.length,
+      beatClosingRate: legCLVs.length > 0 ? round2(beatCount / legCLVs.length * 100) : 0,
+      avgCLVPercent: avgCLV,
+      snapshots: clvData.length,
+      interpretation: avgCLV > 2 ? 'Strong edge — consistently beating closing lines'
+        : avgCLV > 0 ? 'Slight positive CLV — edge is real but thin'
+        : avgCLV > -1 ? 'Break-even CLV — no clear edge'
+        : 'Negative CLV — model is weaker than the market',
+      legs: legCLVs.slice(0, 20),
+    };
+  } catch (err) {
+    return { error: `CLV analysis failed: ${err.message}` };
+  }
+}
+
+// ─── Line Movement Detection ─────────────────────────────────────────
+const LINE_HISTORY_FILE = path.join(__dirname, '..', 'logs', 'line-history.json');
+
+/**
+ * Track line movements for all current legs.
+ * Detects steam moves (sharp money), reverse line movement, etc.
+ * Returns movement analysis for each event/outcome.
+ */
+function trackLineMovements(currentLegs) {
+  let history = {};
+  try {
+    if (fs.existsSync(LINE_HISTORY_FILE)) {
+      history = JSON.parse(fs.readFileSync(LINE_HISTORY_FILE, 'utf8'));
+    }
+  } catch { /* fresh */ }
+
+  const now = new Date().toISOString();
+  const movements = [];
+
+  for (const leg of currentLegs) {
+    const key = `${leg.eventId}|${leg.pick}`;
+    if (!history[key]) history[key] = [];
+
+    // Record current line
+    const lastEntry = history[key][history[key].length - 1];
+    const currentOdds = leg.bestOdds;
+
+    // Only record if odds changed or first entry
+    if (!lastEntry || Math.abs(lastEntry.odds - currentOdds) > 0.01) {
+      history[key].push({
+        timestamp: now,
+        odds: currentOdds,
+        book: leg.bestBook,
+        trueProb: leg.trueProb,
+      });
+    }
+
+    // Analyze movement if we have history
+    if (history[key].length >= 2) {
+      const entries = history[key];
+      const oldest = entries[0];
+      const newest = entries[entries.length - 1];
+      const totalMove = newest.odds - oldest.odds;
+      const totalMovePercent = round2((totalMove / oldest.odds) * 100);
+
+      // Detect steam move: >3% swing in one direction across multiple snapshots
+      const isSteamMove = Math.abs(totalMovePercent) > 3 && entries.length >= 3;
+
+      // Detect reverse line movement: odds moving AGAINST public action
+      // (simplified: if our true prob suggests value but odds are shortening, sharp money agrees)
+      const oddsShortening = totalMove < 0; // lower odds = higher implied prob
+      const weThinkValueExists = leg.legEV > 0;
+      const reverseLineMove = oddsShortening && weThinkValueExists;
+
+      if (isSteamMove || reverseLineMove) {
+        movements.push({
+          match: leg.matchLabel,
+          pick: leg.pick,
+          direction: totalMove > 0 ? 'drifting' : 'shortening',
+          movePercent: totalMovePercent,
+          isSteamMove,
+          reverseLineMove,
+          snapshots: entries.length,
+          firstOdds: oldest.odds,
+          currentOdds: newest.odds,
+          signal: isSteamMove
+            ? (totalMove < 0 ? 'SHARP_BACKING' : 'SHARP_FADING')
+            : (reverseLineMove ? 'REVERSE_LINE' : 'NORMAL'),
+        });
+      }
+    }
+
+    // Cap history per key to last 20 entries
+    if (history[key].length > 20) history[key] = history[key].slice(-20);
+  }
+
+  // Save updated history
+  try {
+    // Prune old events (>7 days)
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    for (const key of Object.keys(history)) {
+      history[key] = history[key].filter(e => e.timestamp > cutoff);
+      if (history[key].length === 0) delete history[key];
+    }
+    fs.writeFileSync(LINE_HISTORY_FILE, JSON.stringify(history, null, 2));
+  } catch { /* non-critical */ }
+
+  return movements;
+}
+
+// ─── Power Devig ─────────────────────────────────────────────────────
+
+/**
+ * Power devig method: uses the relationship between spread/total odds
+ * and moneyline odds to cross-validate true probabilities.
+ *
+ * The intuition: if a team is -7.5 at 1.91, that implies they're a strong
+ * favorite. The moneyline should be ~1.25. If it's at 1.35, the moneyline
+ * is relatively soft → there's edge.
+ *
+ * This is a simplified implementation using the Pinnacle-style approach:
+ * implied ML prob = f(spread, sport_specific_coefficient)
+ */
+function powerDevig(event) {
+  const h2h = {}; // outcome → best sharp h2h odds
+  const spreads = {}; // outcome → { point, odds }
+
+  for (const bm of (event.bookmakers || [])) {
+    const h2hMarket = bm.markets?.find(m => m.key === 'h2h');
+    const spreadMarket = bm.markets?.find(m => m.key === 'spreads');
+
+    if (h2hMarket?.outcomes && SHARP_BOOKS.includes(bm.key)) {
+      for (const o of h2hMarket.outcomes) {
+        if (!h2h[o.name] || o.price < h2h[o.name].price) {
+          h2h[o.name] = { price: o.price, book: bm.key };
+        }
+      }
+    }
+
+    if (spreadMarket?.outcomes && SHARP_BOOKS.includes(bm.key)) {
+      for (const o of spreadMarket.outcomes) {
+        if (!spreads[o.name]) {
+          spreads[o.name] = { point: o.point, price: o.price, book: bm.key };
+        }
+      }
+    }
+  }
+
+  // Need both h2h and spread data from sharp books
+  const teams = Object.keys(h2h);
+  if (teams.length < 2 || Object.keys(spreads).length < 2) return null;
+
+  const sport = getSportGroup(event.sport_key);
+  // Sport-specific spread → win probability coefficient
+  // These are empirically calibrated values
+  const spreadCoeff = {
+    basketball: 0.035,      // Each point of spread ≈ 3.5% win prob in NBA
+    americanfootball: 0.025, // Each point ≈ 2.5% in NFL
+    soccer: 0.10,            // Each goal ≈ 10% (rough)
+    icehockey: 0.08,         // Each goal ≈ 8%
+    baseball: 0.06,          // Each run ≈ 6%
+    default: 0.04,
+  }[sport] || 0.04;
+
+  const result = {};
+  for (const team of teams) {
+    const spread = spreads[team];
+    if (!spread) continue;
+
+    // Implied probability from spread
+    const spreadImpliedProb = 0.5 + (-spread.point * spreadCoeff);
+    // Clamp to reasonable range
+    const clampedSpreadProb = Math.max(0.10, Math.min(0.90, spreadImpliedProb));
+
+    // Devigged h2h probability
+    const h2hOutcomes = teams.map(t => ({ price: h2h[t].price }));
+    const h2hDevig = removeVigMultiplicative(h2hOutcomes);
+    const h2hProb = h2hDevig ? h2hDevig[teams.indexOf(team)] : null;
+
+    if (h2hProb) {
+      // Power devig = weighted average of h2h and spread-implied prob
+      // Gives more weight to spread-implied as it's harder to manipulate
+      const powerProb = h2hProb * 0.4 + clampedSpreadProb * 0.6;
+      result[team] = {
+        h2hProb: round4(h2hProb),
+        spreadImpliedProb: round4(clampedSpreadProb),
+        powerProb: round4(powerProb),
+        spreadLine: spread.point,
+        divergence: round4(Math.abs(h2hProb - clampedSpreadProb)),
+      };
+    }
+  }
+
+  return Object.keys(result).length >= 2 ? result : null;
+}
+
 // ─── Combination Generator ───────────────────────────────────────────
 
 function getCombinations(arr, k) {
@@ -1007,4 +1374,7 @@ module.exports = {
   getAccas,
   getTopAccas,
   buildLegs,
+  analyzeCLV,
+  trackLineMovements,
+  powerDevig,
 };

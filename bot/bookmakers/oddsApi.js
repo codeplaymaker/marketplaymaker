@@ -57,7 +57,7 @@ const SPORT_KEYS = [
   'basketball_wnba',
   'baseball_mlb',
   'icehockey_nhl',
-  // Soccer
+  // Soccer — expanded for cross-sport acca diversity
   'soccer_epl',
   'soccer_usa_mls',
   'soccer_uefa_champs_league',
@@ -65,9 +65,27 @@ const SPORT_KEYS = [
   'soccer_germany_bundesliga',
   'soccer_italy_serie_a',
   'soccer_france_ligue_one',
+  'soccer_netherlands_eredivisie',
+  'soccer_portugal_primeira_liga',
+  'soccer_brazil_campeonato',
+  'soccer_australia_aleague',
+  'soccer_turkey_super_league',
+  'soccer_spl',
+  'soccer_efl_champ',
+  'soccer_england_league1',
+  'soccer_england_league2',
   // Combat
   'mma_mixed_martial_arts',
   'boxing_boxing',
+  // Tennis
+  'tennis_atp_french_open',
+  'tennis_atp_us_open',
+  'tennis_atp_wimbledon',
+  'tennis_atp_aus_open',
+  // Rugby
+  'rugbyleague_nrl',
+  // Cricket
+  'cricket_ipl',
 ];
 
 // Championship/outright sport keys — for futures matching
@@ -176,7 +194,7 @@ function hasApiKey() {
 async function fetchSportOdds(sportKey, markets = 'h2h,spreads,totals') {
   if (!apiKey) return [];
 
-  const url = `${BASE_URL}/sports/${sportKey}/odds/?apiKey=${apiKey}&regions=us,uk&markets=${markets}&oddsFormat=decimal`;
+  const url = `${BASE_URL}/sports/${sportKey}/odds/?apiKey=${apiKey}&regions=us,uk,eu,au&markets=${markets}&oddsFormat=decimal`;
   
   try {
     const resp = await fetch(url);
@@ -213,7 +231,7 @@ async function fetchAllOdds() {
   const allEvents = [];
 
   // Fetch upcoming (all sports in one call — costs 1 request per region)
-  const upcomingUrl = `${BASE_URL}/sports/upcoming/odds/?apiKey=${apiKey}&regions=us,uk&markets=h2h,spreads,totals&oddsFormat=decimal`;
+  const upcomingUrl = `${BASE_URL}/sports/upcoming/odds/?apiKey=${apiKey}&regions=us,uk,eu,au&markets=h2h,spreads,totals&oddsFormat=decimal`;
   
   try {
     const resp = await fetch(upcomingUrl);
@@ -238,7 +256,7 @@ async function fetchAllOdds() {
 
   // Also fetch specific sport pages for more coverage
   // Only fetch NFL/NBA/MLB as they overlap most with Polymarket
-  const prioritySports = ['americanfootball_nfl', 'basketball_nba', 'baseball_mlb', 'mma_mixed_martial_arts'];
+  const prioritySports = ['americanfootball_nfl', 'basketball_nba', 'baseball_mlb', 'mma_mixed_martial_arts', 'soccer_epl', 'icehockey_nhl'];
   
   for (const sport of prioritySports) {
     try {
@@ -260,7 +278,7 @@ async function fetchAllOdds() {
   const outrightEvents = [];
   for (const sport of OUTRIGHT_SPORT_KEYS) {
     try {
-      const url = `${BASE_URL}/sports/${sport}/odds/?apiKey=${apiKey}&regions=us,uk&markets=outrights&oddsFormat=decimal`;
+      const url = `${BASE_URL}/sports/${sport}/odds/?apiKey=${apiKey}&regions=us,uk,eu,au&markets=outrights&oddsFormat=decimal`;
       const resp = await fetch(url);
       requestsRemaining = resp.headers.get('x-requests-remaining') || requestsRemaining;
       requestsUsed = resp.headers.get('x-requests-used') || requestsUsed;

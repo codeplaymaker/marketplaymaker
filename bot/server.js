@@ -609,6 +609,40 @@ app.get('/api/public/accas', (req, res) => {
   res.json({ accas: publicAccas, stats: data.stats, lastBuildTime: data.lastBuildTime });
 });
 
+// ─── CLV Analysis Endpoint ───────────────────────────────────────────
+app.get('/api/accas/clv', (req, res) => {
+  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
+  try {
+    const clv = accaBuilder.analyzeCLV();
+    res.json(clv);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Line Movement Endpoint ──────────────────────────────────────────
+app.get('/api/accas/movements', (req, res) => {
+  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
+  try {
+    const data = accaBuilder.getAccas();
+    const movements = data.stats?.lineMovements || 0;
+    const steamMoves = data.stats?.steamMoves || 0;
+    // Also read line-history.json for detailed movements
+    let lineHistory = {};
+    try {
+      lineHistory = JSON.parse(fs.readFileSync(path.join(__dirname, 'logs', 'line-history.json'), 'utf-8'));
+    } catch { /* no history yet */ }
+    const recentMoves = Object.entries(lineHistory)
+      .map(([key, snapshots]) => ({ key, snapshots: snapshots.slice(-5), count: snapshots.length }))
+      .filter(m => m.count > 1)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+    res.json({ movements, steamMoves, recentMoves });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Paper Trade Tracking ────────────────────────────────────────────
 app.get('/api/paper-trades', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
