@@ -765,6 +765,14 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
       const combinedOdds = combo.reduce((acc, leg) => acc * leg.bestOdds, 1);
       if (combinedOdds < 3 || combinedOdds > 50) continue;
 
+      // ── Cross-sport diversity enforcement ──────────────────────
+      // For 3+ leg accas, require at least 2 different sports when enough
+      // sport diversity exists in the leg pool
+      const comboSports = new Set(combo.map(l => getSportGroup(l.sportKey)));
+      const availableSports = new Set(sortedLegs.map(l => getSportGroup(l.sportKey)));
+      if (combo.length >= 3 && availableSports.size >= 3 && comboSports.size < 2) continue;
+      if (combo.length >= 4 && availableSports.size >= 4 && comboSports.size < 2) continue;
+
       const trueCombinedProb = adjustedCombinedProb(combo);
       const bookImpliedProb = 1 / combinedOdds;
       const ev = (trueCombinedProb * combinedOdds) - 1;
@@ -848,23 +856,38 @@ function buildAccas(maxLegs = 5, minLegs = 2) {
     }
   }
 
-  // Sort: grade first, then EV
+  // Sort: grade first, then cross-sport diversity, then EV
   const gradeOrder = { 'S': 0, 'A': 1, 'B': 2, 'C': 3 };
   accas.sort((a, b) => {
     if (gradeOrder[a.grade] !== gradeOrder[b.grade]) return gradeOrder[a.grade] - gradeOrder[b.grade];
+    if (b.uniqueSports !== a.uniqueSports) return b.uniqueSports - a.uniqueSports;
     return b.ev - a.ev;
   });
 
-  // Deduplicate
+  // ── Deduplicate + Leg Reuse Limits ─────────────────────────
+  // Max 2 accas can share the same leg pick. This prevents
+  // "Dan Ige appears in all 5 accas" syndrome.
   const deduped = [];
+  const legUsageCount = {};  // track how many accas each leg appears in
+
   for (const acca of accas) {
-    const picks = new Set(acca.legs.map(l => `${l.match}:${l.pick}`));
+    const picks = acca.legs.map(l => `${l.match}:${l.pick}`);
+    const picksSet = new Set(picks);
+
+    // Check overlap with existing accas (40% threshold, down from 60%)
     const isDup = deduped.some(existing => {
       const ePicks = new Set(existing.legs.map(l => `${l.match}:${l.pick}`));
-      const overlap = [...picks].filter(p => ePicks.has(p)).length;
-      return overlap / Math.max(picks.size, ePicks.size) > 0.6;
+      const overlap = [...picksSet].filter(p => ePicks.has(p)).length;
+      return overlap / Math.max(picksSet.size, ePicks.size) > 0.4;
     });
-    if (!isDup) deduped.push(acca);
+    if (isDup) continue;
+
+    // Check leg reuse: no leg should appear in more than 2 accas
+    const wouldExceedReuse = picks.some(p => (legUsageCount[p] || 0) >= 2);
+    if (wouldExceedReuse) continue;
+
+    deduped.push(acca);
+    picks.forEach(p => { legUsageCount[p] = (legUsageCount[p] || 0) + 1; });
   }
 
   cachedAccas = deduped.slice(0, 30);
