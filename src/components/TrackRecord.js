@@ -28,10 +28,14 @@ const Page = styled.div`
 `;
 
 const HeroSection = styled.section`
-  padding: 4rem 2rem 3rem;
+  padding: 2.5rem 1rem 2rem;
   text-align: center;
   background: linear-gradient(180deg, rgba(99,102,241,0.08) 0%, transparent 100%);
   border-bottom: 1px solid rgba(99,102,241,0.1);
+
+  @media (min-width: 768px) {
+    padding: 4rem 2rem 3rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -79,15 +83,24 @@ const LiveBadge = styled.span`
 const Container = styled.div`
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem 0.75rem;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+  }
 `;
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
   margin-bottom: 2rem;
   animation: ${fadeIn} 0.6s ease-out 0.3s backwards;
+
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+  }
 `;
 
 const StatCard = styled.div`
@@ -138,8 +151,12 @@ const Card = styled.div`
   background: rgba(15, 15, 25, 0.8);
   border: 1px solid rgba(99, 102, 241, 0.12);
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1rem;
   overflow: hidden;
+
+  @media (min-width: 768px) {
+    padding: 1.5rem;
+  }
 `;
 
 const GradeBar = styled.div`
@@ -187,6 +204,7 @@ const BarTrack = styled.div`
 
 const EdgeTable = styled.div`
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 `;
 
 const Table = styled.table`

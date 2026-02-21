@@ -132,12 +132,12 @@ const ModernTradingDashboard = ({ userDetails }) => {
   }, [userDetails, fetchTrades]);
 
   return (
-    <Box p={3}>
-      <Typography variant="h4" gutterBottom>
+    <Box p={{ xs: 1.5, sm: 2, md: 3 }}>
+      <Typography variant="h4" gutterBottom sx={{ fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' } }}>
         Trading Dashboard
       </Typography>
 
-      <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 3 }}>
         <Button variant="contained" onClick={() => setFilteredTrades(trades)}>
           All Trades
         </Button>
@@ -196,7 +196,7 @@ const ModernTradingDashboard = ({ userDetails }) => {
               <Typography variant="h6" gutterBottom>
                 Trading Calendar
               </Typography>
-              <Box sx={{ height: 500 }}>
+              <Box sx={{ height: { xs: 350, sm: 400, md: 500 } }}>
                 <FullCalendar
                   plugins={[dayGridPlugin]}
                   initialView="dayGridMonth"

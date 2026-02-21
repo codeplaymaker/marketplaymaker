@@ -4,8 +4,13 @@ import TradeInfo from './TradeInfo';
 
 const Container = styled.div`
   max-width: 500px;
-  margin: 2rem auto;
-  padding: 2rem;
+  margin: 1.5rem auto;
+  padding: 1.5rem 1rem;
+
+  @media (min-width: 768px) {
+    margin: 2rem auto;
+    padding: 2rem;
+  }
 `;
 
 const Title = styled.h2`
@@ -34,8 +39,10 @@ const Input = styled.input`
   padding: 0.75rem;
   border: 1px solid #ccc;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: 16px;
   font-family: monospace;
+  width: 100%;
+  box-sizing: border-box;
 
   &:focus {
     border-color: #000;

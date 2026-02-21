@@ -4,26 +4,50 @@ import styled from 'styled-components';
 const Container = styled.div`
   max-width: 600px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 1rem 0.75rem;
+
+  @media (min-width: 768px) {
+    padding: 20px;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+
+    @media (min-width: 768px) {
+      font-size: 1.75rem;
+    }
+  }
 `;
 
 const TradePlanWrapper = styled.div`
   border: 1px solid #ddd;
-  padding: 15px;
-  margin-bottom: 20px;
+  padding: 10px;
+  margin-bottom: 15px;
   border-radius: 8px;
   background-color: #f9f9f9;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+
+  @media (min-width: 768px) {
+    padding: 15px;
+    margin-bottom: 20px;
+  }
 `;
 
 const TaskInput = styled.input`
-  width: 80%;
-  padding: 8px;
+  width: 100%;
+  padding: 10px;
   border: 1px solid #ccc;
   border-radius: 4px;
   outline: none;
+  font-size: 16px;
+  box-sizing: border-box;
+
+  @media (min-width: 480px) {
+    width: 80%;
+  }
 
   &:focus {
     border-color: #007bff;
@@ -45,6 +69,8 @@ const TaskItem = styled.li`
   border: 1px solid ${props => (props.completed ? '#c3e6cb' : '#ddd')};
   border-radius: 4px;
   transition: background-color 0.3s, border-color 0.3s;
+  gap: 8px;
+  flex-wrap: wrap;
 `;
 
 const TaskText = styled.span`

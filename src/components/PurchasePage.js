@@ -5,12 +5,21 @@ import styled from 'styled-components';
 const Container = styled.div`
   text-align: center;
   margin-top: 20px;
-  padding: 2rem;
+  padding: 1.5rem 1rem;
   min-height: 80vh;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+  }
 `;
 
 const Title = styled.h1`
   margin-bottom: 1rem;
+  font-size: 1.5rem;
+
+  @media (min-width: 768px) {
+    font-size: 2rem;
+  }
 `;
 
 const Description = styled.p`

@@ -12,22 +12,39 @@ import {
 
 // Styled components
 const Section = styled.section`
-  padding: 2rem;
+  padding: 1rem 0.75rem;
   text-align: center;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+  }
 `;
 
 const StyledCalendar = styled(Calendar)`
   width: 100%;
   max-width: 400px;
-  margin: 2rem auto;
+  margin: 1.5rem auto;
   background-color: #fff;
   border-radius: 8px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   border: none;
+  font-size: 0.85rem;
+
+  @media (min-width: 768px) {
+    margin: 2rem auto;
+    font-size: 1rem;
+  }
 
   .react-calendar__tile {
-    padding: 0.5rem 0.25rem;
+    padding: 0.4rem 0.15rem;
     border-radius: 8px;
+    font-size: 0.7rem;
+
+    @media (min-width: 768px) {
+      padding: 0.5rem 0.25rem;
+      font-size: inherit;
+    }
+
     &:hover {
       background-color:rgb(255, 255, 255);
     }
@@ -45,15 +62,24 @@ const EntriesContainer = styled.div`
   text-align: left;
   max-width: 600px;
   margin: 0 auto;
+  padding: 0 0.25rem;
+
+  @media (min-width: 768px) {
+    padding: 0;
+  }
 `;
 
 const EntryCard = styled.div`
   background-color: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 1rem;
+  padding: 0.75rem;
   margin-bottom: 0.5rem;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+
+  @media (min-width: 768px) {
+    padding: 1rem;
+  }
 `;
 
 const EntryField = styled.p`
@@ -73,19 +99,46 @@ const StatCard = styled.div`
   background-color: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 1rem;
-  margin: 0.5rem;
-  width: 100%;
+  padding: 0.75rem 0.5rem;
+  margin: 0.25rem;
+  width: calc(50% - 0.5rem);
   max-width: 150px;
   text-align: center;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   transition: transform 0.3s, background-color 0.3s;
   cursor: pointer;
+
+  @media (min-width: 480px) {
+    width: auto;
+    min-width: 120px;
+    padding: 1rem;
+    margin: 0.5rem;
+    font-size: 0.8rem;
+  }
 
   &:hover {
     transform: translateY(-10px);
     background-color: #f0f0f0;
+  }
+
+  h3 {
+    font-size: 0.7rem;
+    margin: 0 0 0.25rem;
+
+    @media (min-width: 480px) {
+      font-size: 0.85rem;
+    }
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+
+    @media (min-width: 480px) {
+      font-size: 1rem;
+    }
   }
 `;
 
@@ -93,6 +146,7 @@ const CardsContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  padding: 0 0.25rem;
 `;
 
 const Form = styled.form`
@@ -102,14 +156,20 @@ const Form = styled.form`
   margin-top: 1rem;
   max-width: 400px;
   margin: 0 auto;
+  padding: 0 0.25rem;
+
+  @media (min-width: 768px) {
+    padding: 0;
+  }
 `;
 
 const Input = styled.input`
-  padding: 0.5rem;
+  padding: 0.6rem;
   width: 100%;
-  font-size: 0.8rem;
+  font-size: 16px;
   border: 1px solid #ccc;
   border-radius: 4px;
+  box-sizing: border-box;
 `;
 
 const Button = styled.button`
@@ -170,11 +230,18 @@ const ModalOverlay = styled.div`
 const ModalContent = styled.div`
   background: #fff;
   border-radius: 8px;
-  padding: 2rem;
+  padding: 1.25rem;
   max-width: 600px;
-  width: 100%;
+  width: calc(100% - 2rem);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+    width: 100%;
+  }
 `;
 
 const ModalCloseButton = styled.button`

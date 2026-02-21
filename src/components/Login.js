@@ -5,13 +5,17 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import styled from 'styled-components';
 
 const Section = styled.section`
-  padding: 2rem;
+  padding: 1.5rem 1rem;
   text-align: center;
   min-height: 80vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+  }
 `;
 
 const Form = styled.form`
@@ -22,14 +26,19 @@ const Form = styled.form`
   margin-top: 2rem;
   width: 100%;
   max-width: 400px;
+  padding: 0 0.5rem;
 `;
 
 const FormGroup = styled.div`
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 300px;
+  max-width: 340px;
   text-align: left;
+
+  @media (min-width: 480px) {
+    max-width: 300px;
+  }
 `;
 
 const Label = styled.label`
@@ -44,7 +53,7 @@ const Input = styled.input`
   width: 100%;
   border: 1px solid #ccc;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: 16px;
   transition: border-color 0.2s;
   box-sizing: border-box;
 
@@ -81,13 +90,18 @@ const Button = styled.button`
 const ErrorMessage = styled.p`
   color: #d32f2f;
   margin-top: 0.5rem;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   background-color: #ffeef0;
   padding: 0.5rem 1rem;
   border-radius: 4px;
   width: 100%;
-  max-width: 300px;
+  max-width: 340px;
   text-align: center;
+  word-break: break-word;
+
+  @media (min-width: 480px) {
+    max-width: 300px;
+  }
 `;
 
 const SuccessMessage = styled.p`

@@ -15,35 +15,53 @@ const MainContainer = styled.div`
 `;
 
 const Section = styled.section`
-  padding: 4rem 2rem;
+  padding: 2rem 1rem;
   text-align: center;
   background-color: #000;
   color: #fff;
-  margin: 1rem 0;
+  margin: 0.5rem 0;
   border-radius: 8px;
   box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
+
+  @media (min-width: 768px) {
+    padding: 4rem 2rem;
+    margin: 1rem 0;
+  }
 `;
 
 const Heading = styled.h1`
-  font-size: 2.5rem;
-  margin-bottom: 2rem;
+  font-size: 1.75rem;
+  margin-bottom: 1.5rem;
   color: #fff;
+
+  @media (min-width: 768px) {
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+  }
 `;
 
 const CardContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 2rem;
+  gap: 1rem;
+  padding: 0 0.5rem;
+
+  @media (min-width: 768px) {
+    gap: 2rem;
+    padding: 0;
+  }
 `;
 
 const Card = styled.div`
   background-color: #222;
   border: 1px solid #444;
   border-radius: 15px;
-  padding: 2rem;
-  width: 250px;
-  height: 250px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 250px;
+  height: auto;
+  min-height: 200px;
   box-shadow: 0 4px 8px rgba(255, 255, 255, 0.2);
   text-align: center;
   display: flex;
@@ -55,6 +73,12 @@ const Card = styled.div`
 
   @media (prefers-reduced-motion: reduce) {
     transition: none;
+  }
+
+  @media (min-width: 768px) {
+    width: 250px;
+    height: 250px;
+    padding: 2rem;
   }
 
   &:hover {
@@ -142,10 +166,16 @@ const BenefitsSection = styled(Section)`
 `;
 
 const BenefitCard = styled(Card)`
-  width: 300px;
+  width: 100%;
+  max-width: 300px;
   height: auto;
-  padding: 2.5rem;
+  padding: 1.5rem;
   text-align: left;
+
+  @media (min-width: 768px) {
+    width: 300px;
+    padding: 2.5rem;
+  }
 `;
 
 const FEATURES = [

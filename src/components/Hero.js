@@ -8,10 +8,14 @@ const HeroSection = styled.section`
 
   background-color: #000;
   color: #fff;
-  padding: 4rem 2rem;
+  padding: 2.5rem 1.25rem;
   text-align: left;
   position: relative;
   overflow: hidden;
+
+  @media (min-width: 768px) {
+    padding: 4rem 2rem;
+  }
 `;
 
 const HeroLogo = styled.img`
@@ -33,17 +37,25 @@ const HeroContent = styled.div`
 `;
 
 const HeroHeading = styled.h1`
-  font-size: 3rem;
+  font-size: 2rem;
   margin-bottom: 1rem;
   color: #f0f0f0;
   font-family: 'Inter', sans-serif;
+
+  @media (min-width: 768px) {
+    font-size: 3rem;
+  }
 `;
 
 const HeroSubheading = styled.p`
-  font-size: 2rem;
+  font-size: 1.25rem;
   margin-bottom: 2rem;
   color: #c0c0c0;
   font-family: 'DM Sans', sans-serif;
+
+  @media (min-width: 768px) {
+    font-size: 2rem;
+  }
 `;
 
 const HeroButton = styled.button`

@@ -9,31 +9,47 @@ import { faDesktop } from '@fortawesome/free-solid-svg-icons';
 import LoadingScreen from './LoadingScreen';
 
 const Section = styled.section`
-  padding: 4rem 2rem;
+  padding: 2rem 1rem;
   text-align: center;
   background-color: white;
   min-height: 80vh;
+
+  @media (min-width: 768px) {
+    padding: 4rem 2rem;
+  }
 `;
 
 const Heading = styled.h1`
-  font-size: 3rem;
-  margin-bottom: 2rem;
+  font-size: 2rem;
+  margin-bottom: 1.5rem;
   color: #333;
+
+  @media (min-width: 768px) {
+    font-size: 3rem;
+    margin-bottom: 2rem;
+  }
 `;
 
 const CardContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 2rem;
+  gap: 1rem;
+  padding: 0 0.25rem;
+
+  @media (min-width: 768px) {
+    gap: 2rem;
+    padding: 0;
+  }
 `;
 
 const Card = styled.div`
   background-color: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 15px;
-  padding: 1.5rem;
-  width: 300px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 340px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   text-align: left;
   display: flex;
@@ -45,6 +61,11 @@ const Card = styled.div`
 
   @media (prefers-reduced-motion: reduce) {
     transition: none;
+  }
+
+  @media (min-width: 768px) {
+    width: 300px;
+    padding: 1.5rem;
   }
 
   &:hover {

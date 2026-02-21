@@ -7,29 +7,45 @@ import { LazyLoadImage } from 'react-lazy-load-image-component';
 import useModal from '../hooks/useModal';
 
 const Section = styled.section`
-  padding: 4rem 2rem;
+  padding: 2rem 1rem;
   text-align: center;
   background-color: #f9f9f9;
+
+  @media (min-width: 768px) {
+    padding: 4rem 2rem;
+  }
 `;
 
 const Heading = styled.h1`
-  font-size: 2.5rem;
-  margin-bottom: 2rem;
+  font-size: 1.75rem;
+  margin-bottom: 1.5rem;
+
+  @media (min-width: 768px) {
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+  }
 `;
 
 const BlogContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 2rem;
+  gap: 1rem;
+  padding: 0 0.25rem;
+
+  @media (min-width: 768px) {
+    gap: 2rem;
+    padding: 0;
+  }
 `;
 
 const BlogCard = styled.div`
   background-color: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 1.5rem;
-  width: 300px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 400px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   text-align: left;
   display: flex;
@@ -42,9 +58,9 @@ const BlogCard = styled.div`
     transform: translateY(-5px);
   }
 
-  @media (max-width: 600px) {
-    width: 100%;
-    max-width: 400px;
+  @media (min-width: 768px) {
+    width: 300px;
+    padding: 1.5rem;
   }
 `;
 
@@ -100,24 +116,34 @@ const Modal = styled.div`
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.8);
-  padding: 2rem;
+  padding: 1rem;
   z-index: 1000;
-  overflow-y: auto; /* Allow scrolling if content overflows */
+  overflow-y: auto;
+
+  @media (min-width: 768px) {
+    padding: 2rem;
+  }
 `;
 
 const ModalContent = styled.div`
   background-color: #fff;
-  padding: 2rem;
+  padding: 1.25rem;
   border-radius: 8px;
   max-width: 90%;
   max-height: 90%;
   margin: auto;
   text-align: left;
-  overflow-y: auto; /* Allow scrolling within the modal if needed */
+  overflow-y: auto;
 
   @media (max-width: 600px) {
     max-width: 100%;
     margin: 0;
+    border-radius: 8px 8px 0 0;
+    max-height: 100%;
+  }
+
+  @media (min-width: 768px) {
+    padding: 2rem;
   }
 `;
 

@@ -32,8 +32,12 @@ const PageWrapper = styled.div`
   min-height: 100vh;
   background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
   color: #e2e8f0;
-  padding: 2rem 1rem;
+  padding: 1rem 0.5rem;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  @media (min-width: 480px) {
+    padding: 1.5rem 0.75rem;
+  }
 
   @media (min-width: 768px) {
     padding: 2rem;
@@ -47,18 +51,26 @@ const Container = styled.div`
 
 const Header = styled.header`
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
   animation: ${slideUp} 0.6s ease-out;
+
+  @media (min-width: 768px) {
+    margin-bottom: 2rem;
+  }
 `;
 
 const Title = styled.h1`
-  font-size: 2.5rem;
+  font-size: 1.75rem;
   font-weight: 800;
   background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   margin-bottom: 0.5rem;
+
+  @media (min-width: 480px) {
+    font-size: 2rem;
+  }
 
   @media (min-width: 768px) {
     font-size: 3rem;
@@ -67,17 +79,23 @@ const Title = styled.h1`
 
 const Subtitle = styled.p`
   color: #94a3b8;
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   max-width: 600px;
   margin: 0 auto;
+  padding: 0 0.5rem;
+
+  @media (min-width: 768px) {
+    font-size: 1.1rem;
+  }
 `;
 
 const Grid = styled.div`
   display: grid;
-  gap: 1.5rem;
+  gap: 1rem;
   grid-template-columns: 1fr;
 
   @media (min-width: 768px) {
+    gap: 1.5rem;
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -93,13 +111,19 @@ const FullWidthSection = styled.div`
 const Card = styled.div`
   background: rgba(30, 30, 50, 0.8);
   border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 16px;
-  padding: 1.5rem;
+  border-radius: 12px;
+  padding: 1rem;
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
   animation: ${slideUp} 0.6s ease-out;
   animation-delay: ${(props) => props.$delay || '0s'};
   animation-fill-mode: both;
+  overflow: hidden;
+
+  @media (min-width: 768px) {
+    border-radius: 16px;
+    padding: 1.5rem;
+  }
 
   &:hover {
     border-color: rgba(99, 102, 241, 0.4);
@@ -126,26 +150,40 @@ const CardTitle = styled.h2`
 const StatGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
+  gap: 0.5rem;
+
+  @media (min-width: 480px) {
+    gap: 0.75rem;
+  }
 
   @media (min-width: 768px) {
     grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
   }
 `;
 
 const StatCard = styled.div`
   background: rgba(99, 102, 241, 0.08);
   border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: 10px;
+  padding: 0.75rem 0.5rem;
   text-align: center;
+
+  @media (min-width: 768px) {
+    border-radius: 12px;
+    padding: 1rem;
+  }
 `;
 
 const StatValue = styled.div`
-  font-size: 1.5rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: ${(props) => props.$color || '#818cf8'};
   font-variant-numeric: tabular-nums;
+
+  @media (min-width: 768px) {
+    font-size: 1.5rem;
+  }
 `;
 
 const StatLabel = styled.div`
@@ -220,6 +258,11 @@ const ButtonGroup = styled.div`
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  width: 100%;
+
+  @media (min-width: 480px) {
+    width: auto;
+  }
 `;
 
 const Badge = styled.span`
@@ -277,11 +320,16 @@ const Input = styled.input`
   background: rgba(15, 15, 26, 0.8);
   border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 10px;
-  padding: 0.6rem 1rem;
+  padding: 0.6rem 0.75rem;
   color: #e2e8f0;
   font-size: 0.9rem;
-  width: ${(props) => props.$width || '120px'};
+  width: ${(props) => props.$width || '100%'};
+  max-width: 100%;
   font-variant-numeric: tabular-nums;
+
+  @media (min-width: 480px) {
+    width: ${(props) => props.$width || '120px'};
+  }
 
   &:focus {
     outline: none;
@@ -293,17 +341,25 @@ const Input = styled.input`
 const Table = styled.div`
   width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 `;
 
 const TableRow = styled.div`
   display: grid;
   grid-template-columns: ${(props) => props.$columns || '2fr 1fr 1fr 1fr 1fr'};
-  gap: 0.75rem;
-  padding: 0.75rem 0;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
   border-bottom: 1px solid rgba(99, 102, 241, 0.08);
   align-items: center;
-  font-size: 0.85rem;
-  min-width: 600px;
+  font-size: 0.75rem;
+  min-width: 500px;
+
+  @media (min-width: 768px) {
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+    font-size: 0.85rem;
+    min-width: 600px;
+  }
 
   &:last-child {
     border-bottom: none;
@@ -314,9 +370,13 @@ const TableRow = styled.div`
     css`
       color: #64748b;
       font-weight: 600;
-      font-size: 0.75rem;
+      font-size: 0.65rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+
+      @media (min-width: 768px) {
+        font-size: 0.75rem;
+      }
     `}
 
   &:not(:first-child):hover {
@@ -382,25 +442,47 @@ const LoadingFill = styled.div`
 
 const TabBar = styled.div`
   display: flex;
-  gap: 0.25rem;
+  gap: 0.15rem;
   background: rgba(15, 15, 26, 0.5);
   border-radius: 12px;
   padding: 0.25rem;
   margin-bottom: 1rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (min-width: 768px) {
+    gap: 0.25rem;
+  }
 `;
 
 const Tab = styled.button`
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 10px;
   border: none;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 600;
   white-space: nowrap;
   transition: all 0.2s;
   background: ${(props) => (props.$active ? 'rgba(99, 102, 241, 0.2)' : 'transparent')};
   color: ${(props) => (props.$active ? '#a5b4fc' : '#64748b')};
+  flex-shrink: 0;
+
+  @media (min-width: 480px) {
+    font-size: 0.78rem;
+    padding: 0.5rem 0.9rem;
+  }
+
+  @media (min-width: 768px) {
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+  }
 
   &:hover {
     color: #a5b4fc;
@@ -1869,17 +1951,17 @@ const Polymarket = () => {
                 <div style={{
                   background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08))',
                   border: '1px solid rgba(99,102,241,0.2)', borderRadius: '14px',
-                  padding: '1.25rem 1.5rem', marginBottom: '1.25rem',
+                  padding: '1rem', marginBottom: '1rem',
                 }}>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.4rem' }}>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.4rem' }}>
                     Smart Picks
                   </div>
-                  <div style={{ fontSize: '0.9rem', color: '#94a3b8', lineHeight: 1.7 }}>
+                  <div style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.7 }}>
                     We scan <strong style={{ color: '#a5b4fc' }}>30+ bookmakers</strong> in real-time to find bets where the odds are
                     <strong style={{ color: '#22c55e' }}> better than the true probability</strong>.
                     When bookmakers disagree, someone is wrong — and that&apos;s your edge.
                   </div>
-                  <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
                     {[
                       { icon: '🔍', label: 'Live scanning', desc: 'Updated every 15 min' },
                       { icon: '📊', label: `${accaData?.totalLegs || 0} events checked`, desc: `${accaData?.buildStats?.hygiene?.valid || '—'} qualify` },
@@ -1987,8 +2069,9 @@ const Polymarket = () => {
                         }}>
                           {/* Card header */}
                           <div style={{
-                            padding: '1rem 1.25rem 0.75rem',
+                            padding: '0.75rem 1rem',
                             display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                            flexWrap: 'wrap', gap: '0.5rem',
                           }}>
                             <div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.3rem' }}>
@@ -2023,14 +2106,14 @@ const Polymarket = () => {
                           </div>
 
                           {/* Legs – clean list */}
-                          <div style={{ padding: '0 1.25rem' }}>
+                          <div style={{ padding: '0 0.75rem' }}>
                             {acca.legs.map((leg, li) => (
                               <div key={li} style={{
                                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                padding: '0.65rem 0',
+                                padding: '0.55rem 0',
                                 borderBottom: li < acca.legs.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
                               }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
                                   <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{sportEmoji(leg.sport)}</span>
                                   <div style={{ minWidth: 0 }}>
                                     <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.88rem' }}>
@@ -2057,10 +2140,10 @@ const Polymarket = () => {
 
                           {/* Footer – payout + simple edge indicator */}
                           <div style={{
-                            margin: '0 1.25rem', marginTop: '0.25rem', marginBottom: '1rem',
-                            padding: '0.8rem 1rem', borderRadius: '10px',
+                            margin: '0 0.75rem', marginTop: '0.25rem', marginBottom: '0.75rem',
+                            padding: '0.7rem 0.75rem', borderRadius: '10px',
                             background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.1)',
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem',
                           }}>
                             <div>
                               <div style={{ color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.15rem' }}>If you bet $10</div>
@@ -2094,7 +2177,7 @@ const Polymarket = () => {
                           </div>
 
                           {/* Expandable detail for advanced users */}
-                          <details style={{ margin: '0 1.25rem 1rem' }}>
+                          <details style={{ margin: '0 0.75rem 0.75rem' }}>
                             <summary style={{
                               color: '#475569', fontSize: '0.72rem', cursor: 'pointer',
                               padding: '0.3rem 0', listStyle: 'none',

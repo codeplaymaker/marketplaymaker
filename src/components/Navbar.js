@@ -8,12 +8,16 @@ const Nav = styled.nav`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
+  padding: 0.75rem 1rem;
   background-color: #000;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 100;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+
+  @media (min-width: 768px) {
+    padding: 1rem 2rem;
+  }
 `;
 
 const LogoImage = styled.img`
@@ -136,13 +140,17 @@ const MobileMenu = styled.div`
   display: ${props => (props.$open ? 'flex' : 'none')};
   flex-direction: column;
   background-color: #000;
-  position: absolute;
-  top: 60px;
+  position: fixed;
+  top: 56px;
+  left: 0;
   right: 0;
-  width: 100%;
-  padding: 1rem;
-  gap: 1rem;
+  bottom: 0;
+  padding: 1.5rem 1rem;
+  gap: 0.5rem;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 99;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 
   @media (min-width: 769px) {
     display: none;
@@ -151,15 +159,19 @@ const MobileMenu = styled.div`
   a {
     color: #fff;
     text-decoration: none;
-    font-size: 1rem;
-    padding: 0.5rem 0;
+    font-size: 1.1rem;
+    padding: 0.75rem 0.5rem;
+    border-radius: 8px;
+    transition: background-color 0.2s;
 
     &.active {
       color: #ff4136;
+      background-color: rgba(255, 65, 54, 0.1);
     }
 
     &:hover {
       color: #ff4136;
+      background-color: rgba(255, 65, 54, 0.05);
     }
   }
 `;
