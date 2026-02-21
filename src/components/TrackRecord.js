@@ -14,11 +14,6 @@ const pulse = keyframes`
   50% { opacity: 0.6; }
 `;
 
-const shimmer = keyframes`
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-`;
-
 const glow = keyframes`
   0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.1); }
   50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.25); }
@@ -389,7 +384,7 @@ export default function TrackRecord() {
   if (loading) return <Page><Loader>Loading track record</Loader></Page>;
   if (error) return <Page><EmptyState>Unable to load track record. Try again later.</EmptyState></Page>;
 
-  const { summary, hypothetical, gradeDistribution, sourceCountDist, activeEdges, resolvedEdges, timeline } = data;
+  const { summary, hypothetical, gradeDistribution, activeEdges, resolvedEdges, timeline } = data;
   const totalEdges = summary?.totalEdges || 0;
   const resolvedCount = summary?.resolvedEdges || resolvedEdges?.length || 0;
   const pendingCount = summary?.pending || activeEdges?.length || 0;
