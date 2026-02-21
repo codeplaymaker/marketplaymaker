@@ -147,21 +147,6 @@ const CardTitle = styled.h2`
   gap: 0.5rem;
 `;
 
-const StatGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-
-  @media (min-width: 480px) {
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 768px) {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-  }
-`;
-
 const StatCard = styled.div`
   background: rgba(99, 102, 241, 0.08);
   border: 1px solid rgba(99, 102, 241, 0.15);
@@ -252,17 +237,6 @@ const Button = styled.button`
         background: rgba(99, 102, 241, 0.2);
       }
     `}
-`;
-
-const ButtonGroup = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  width: 100%;
-
-  @media (min-width: 480px) {
-    width: auto;
-  }
 `;
 
 const Badge = styled.span`
