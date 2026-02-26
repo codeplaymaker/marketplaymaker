@@ -236,46 +236,244 @@ function getDynamicRiskMultiplier(bankroll) {
 }
 
 /**
- * Simple portfolio Value-at-Risk estimate.
- * Based on current positions and their individual risk (1 - trueProb).
- * Assumes worst-case: all correlated positions fail together.
+ * Monte Carlo Value-at-Risk Engine
+ * 
+ * Runs N simulations of portfolio outcomes using per-position win probabilities
+ * and intra-group correlation. Returns percentile-based VaR at 95% and 99%.
  */
-function estimatePortfolioVaR(bankroll) {
-  if (positions.length === 0) return { vaR95: 0, maxLoss: 0, riskLevel: 'NONE' };
+const MC_SIMULATIONS = 10000;
+const INTRA_GROUP_CORRELATION = 0.6; // correlated positions move together 60% of the time
 
-  let totalRisk = 0;
-  let maxSingleLoss = 0;
+function monteCarloVaR(bankroll, { simulations = MC_SIMULATIONS, confidence = 0.95 } = {}) {
+  if (positions.length === 0) {
+    return { vaR95: 0, vaR99: 0, expectedLoss: 0, maxLoss: 0, cvar95: 0, riskLevel: 'NONE', simulations: 0 };
+  }
 
-  // Group by correlation
-  const groups = {};
+  // Build correlation groups
+  const groupMap = {};
   for (const pos of positions) {
     const group = getCorrelationGroup(pos.market, pos.slug);
-    if (!groups[group]) groups[group] = [];
-    groups[group].push(pos);
+    if (!groupMap[group]) groupMap[group] = [];
+    groupMap[group].push(pos);
+  }
+  const groupNames = Object.keys(groupMap);
+
+  // Run Monte Carlo
+  const pnlDistribution = new Float64Array(simulations);
+
+  for (let sim = 0; sim < simulations; sim++) {
+    let portfolioPnL = 0;
+
+    for (const gName of groupNames) {
+      const groupPositions = groupMap[gName];
+      // Generate a shared group shock (for correlated positions)
+      const groupShock = Math.random();
+
+      for (const pos of groupPositions) {
+        const winProb = pos.edge ? Math.min(0.95, pos.avgPrice + pos.edge) : pos.avgPrice;
+        // Blend individual randomness with group shock for correlation
+        const blended = gName === 'uncorrelated'
+          ? Math.random()
+          : INTRA_GROUP_CORRELATION * groupShock + (1 - INTRA_GROUP_CORRELATION) * Math.random();
+
+        const shares = pos.size / pos.avgPrice;
+        let payout;
+        if (pos.side === 'YES') {
+          payout = blended < winProb ? 1.0 : 0.0;
+        } else {
+          payout = blended >= (1 - winProb) ? 1.0 : 0.0;
+        }
+        portfolioPnL += (payout - pos.avgPrice) * shares;
+      }
+    }
+    pnlDistribution[sim] = portfolioPnL;
   }
 
-  // For each group: assume all positions fail together (worst case)
-  for (const [, groupPositions] of Object.entries(groups)) {
-    const groupLoss = groupPositions.reduce((sum, p) => sum + p.size, 0);
-    totalRisk += groupLoss;
-    if (groupLoss > maxSingleLoss) maxSingleLoss = groupLoss;
-  }
+  // Sort ascending (worst to best)
+  pnlDistribution.sort();
 
-  // 95% VaR approximation: ~30% of max theoretical loss for uncorrelated,
-  // up to ~60% for concentrated portfolios
-  const concentration = maxSingleLoss / (totalRisk || 1);
-  const vaR95 = totalRisk * (0.3 + concentration * 0.3);
+  const vaR95Idx = Math.floor(simulations * 0.05);
+  const vaR99Idx = Math.floor(simulations * 0.01);
+  const vaR95 = -pnlDistribution[vaR95Idx]; // Positive number = loss
+  const vaR99 = -pnlDistribution[vaR99Idx];
 
+  // CVaR (Expected Shortfall) — average of losses worse than VaR95
+  let cvarSum = 0;
+  for (let i = 0; i < vaR95Idx; i++) cvarSum += pnlDistribution[i];
+  const cvar95 = vaR95Idx > 0 ? -(cvarSum / vaR95Idx) : vaR95;
+
+  // Expected P&L
+  let totalPnLSim = 0;
+  for (let i = 0; i < simulations; i++) totalPnLSim += pnlDistribution[i];
+  const expectedPnL = totalPnLSim / simulations;
+
+  const maxLoss = -pnlDistribution[0];
   const riskPct = bankroll > 0 ? vaR95 / bankroll : 0;
   const riskLevel = riskPct > 0.10 ? 'HIGH' : riskPct > 0.05 ? 'MEDIUM' : 'LOW';
 
   return {
     vaR95: Math.round(vaR95 * 100) / 100,
-    maxLoss: Math.round(totalRisk * 100) / 100,
+    vaR99: Math.round(vaR99 * 100) / 100,
+    cvar95: Math.round(cvar95 * 100) / 100,
+    expectedPnL: Math.round(expectedPnL * 100) / 100,
+    maxLoss: Math.round(maxLoss * 100) / 100,
     riskLevel,
-    concentration: Math.round(concentration * 100) / 100,
     riskPct: Math.round(riskPct * 10000) / 100,
+    simulations,
+    positionCount: positions.length,
   };
+}
+
+/** Backward-compatible wrapper */
+function estimatePortfolioVaR(bankroll) {
+  const mc = monteCarloVaR(bankroll, { simulations: 5000 });
+  return {
+    vaR95: mc.vaR95,
+    maxLoss: mc.maxLoss,
+    riskLevel: mc.riskLevel,
+    concentration: 0, // deprecated, use heatmap instead
+    riskPct: mc.riskPct,
+    // v4 additions
+    vaR99: mc.vaR99,
+    cvar95: mc.cvar95,
+    expectedPnL: mc.expectedPnL,
+    simulations: mc.simulations,
+  };
+}
+
+// ─── Stress Testing Engine ───────────────────────────────────────────
+/**
+ * Pre-defined stress scenarios. Each scenario describes a market shock:
+ * - affectedCategories: which correlation categories are hit
+ * - lossMultiplier: 1.0 = all affected positions lose fully
+ * - unaffectedImpact: spillover to non-affected positions
+ */
+const STRESS_SCENARIOS = {
+  'politics-shock': {
+    name: 'Political Earthquake',
+    description: 'Major unexpected political event — all politics markets reset',
+    affectedCategories: ['politics'],
+    lossMultiplier: 1.0,
+    unaffectedImpact: 0.15,
+  },
+  'crypto-crash': {
+    name: 'Crypto Flash Crash',
+    description: '30%+ crypto drawdown — all crypto markets move adversely',
+    affectedCategories: ['crypto'],
+    lossMultiplier: 0.9,
+    unaffectedImpact: 0.10,
+  },
+  'correlated-unwind': {
+    name: 'Correlated Unwind',
+    description: 'Largest correlation group blows up, panic spreads',
+    affectedCategories: ['__largest_group__'],
+    lossMultiplier: 1.0,
+    unaffectedImpact: 0.25,
+  },
+  'black-swan': {
+    name: 'Black Swan',
+    description: 'Extreme tail event — all positions lose simultaneously',
+    affectedCategories: ['__all__'],
+    lossMultiplier: 1.0,
+    unaffectedImpact: 1.0,
+  },
+  'liquidity-crisis': {
+    name: 'Liquidity Crisis',
+    description: 'All positions hit 50% adverse move, inability to exit',
+    affectedCategories: ['__all__'],
+    lossMultiplier: 0.5,
+    unaffectedImpact: 0.5,
+  },
+  'macro-shift': {
+    name: 'Macro Regime Shift',
+    description: 'Fed surprise + recession signal — macro & crypto correlated',
+    affectedCategories: ['macro', 'crypto'],
+    lossMultiplier: 0.8,
+    unaffectedImpact: 0.20,
+  },
+};
+
+function runStressTest(bankroll) {
+  if (positions.length === 0) return { scenarios: {}, summary: 'No open positions' };
+
+  // Find largest correlation group for correlated-unwind scenario
+  const heatmap = getCorrelationHeatmap();
+  let largestGroupCategory = 'uncorrelated';
+  let largestExposure = 0;
+  for (const [, info] of Object.entries(heatmap)) {
+    if (info.exposure > largestExposure) {
+      largestExposure = info.exposure;
+      largestGroupCategory = info.category;
+    }
+  }
+
+  const results = {};
+
+  for (const [scenarioId, scenario] of Object.entries(STRESS_SCENARIOS)) {
+    let scenarioLoss = 0;
+
+    for (const pos of positions) {
+      const groups = getCorrelationGroups(pos.market, pos.slug);
+      const categories = groups.map(g => g.category);
+
+      let isAffected = false;
+      if (scenario.affectedCategories.includes('__all__')) {
+        isAffected = true;
+      } else if (scenario.affectedCategories.includes('__largest_group__')) {
+        isAffected = categories.includes(largestGroupCategory);
+      } else {
+        isAffected = categories.some(c => scenario.affectedCategories.includes(c));
+      }
+
+      if (isAffected) {
+        scenarioLoss += pos.size * scenario.lossMultiplier;
+      } else {
+        scenarioLoss += pos.size * scenario.unaffectedImpact;
+      }
+    }
+
+    const lossPct = bankroll > 0 ? (scenarioLoss / bankroll) * 100 : 0;
+    const severity = lossPct > 15 ? 'CRITICAL' : lossPct > 10 ? 'SEVERE' : lossPct > 5 ? 'WARNING' : 'OK';
+
+    results[scenarioId] = {
+      name: scenario.name,
+      description: scenario.description,
+      estimatedLoss: Math.round(scenarioLoss * 100) / 100,
+      lossPct: Math.round(lossPct * 100) / 100,
+      severity,
+      survivable: lossPct < 25,
+    };
+  }
+
+  // Worst-case summary
+  const worstCase = Object.values(results).reduce(
+    (worst, r) => (r.lossPct > worst.lossPct ? r : worst),
+    { lossPct: 0 }
+  );
+
+  return {
+    scenarios: results,
+    worstCase: {
+      scenario: worstCase.name,
+      lossPct: worstCase.lossPct,
+      severity: worstCase.severity,
+    },
+    portfolioResilience: worstCase.lossPct < 15 ? 'STRONG' : worstCase.lossPct < 25 ? 'MODERATE' : 'FRAGILE',
+    totalDeployed: Math.round(totalDeployed * 100) / 100,
+    positionCount: positions.length,
+  };
+}
+
+// ─── Max Drawdown Circuit Breaker ────────────────────────────────────
+const MAX_DRAWDOWN_HALT = 0.20; // 20% from peak → full halt
+
+function isDrawdownHalted(bankroll) {
+  const dd = getCurrentDrawdown(bankroll);
+  if (dd >= MAX_DRAWDOWN_HALT) {
+    log.warn('RISK', `DRAWDOWN HALT: ${(dd * 100).toFixed(1)}% drawdown from peak $${peakBankroll.toFixed(2)}. All trading suspended.`);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -289,6 +487,11 @@ function checkTrade(trade, bankroll) {
 
   // Update peak bankroll tracking
   if (bankroll > peakBankroll) peakBankroll = bankroll;
+
+  // Max drawdown hard halt (20% from peak)
+  if (isDrawdownHalted(bankroll)) {
+    return { allowed: false, reason: `DRAWDOWN HALT: ${(getCurrentDrawdown(bankroll) * 100).toFixed(1)}% from peak. All trading suspended until recovery.` };
+  }
 
   // Dynamic risk multiplier (reduce exposure during drawdowns)
   const riskMult = getDynamicRiskMultiplier(bankroll);
@@ -493,6 +696,9 @@ function getStats(bankroll) {
     peakBankroll: Math.round(peakBankroll * 100) / 100,
     dynamicRiskMultiplier: riskMult,
     consecutiveLosses,
+    // v4 fields
+    stressTest: runStressTest(bankroll),
+    drawdownHalted: isDrawdownHalted(bankroll),
   };
 }
 
@@ -519,6 +725,9 @@ module.exports = {
   getCorrelatedExposure,
   getCorrelationHeatmap,
   estimatePortfolioVaR,
+  monteCarloVaR,
+  runStressTest,
+  isDrawdownHalted,
   getDynamicRiskMultiplier,
   reset,
 };

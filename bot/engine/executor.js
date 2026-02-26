@@ -451,12 +451,60 @@ function cancelOrder(orderId) {
 }
 
 async function executeLiveTrade(trade) {
-  log.warn('EXECUTOR', 'Live trading not yet configured. Set up your private key and USDC balance first.');
-  return {
-    ...trade,
-    status: 'REJECTED',
-    reason: 'Live trading requires private key configuration. Use SIMULATION mode for now.',
-  };
+  let clobExecutor = null;
+  try { clobExecutor = require('../polymarket/clobExecutor'); } catch { /* not available */ }
+
+  if (!clobExecutor || !clobExecutor.getStatus().initialized) {
+    log.warn('EXECUTOR', 'Live CLOB executor not initialized. Set POLYGON_PRIVATE_KEY in .env');
+    return {
+      ...trade,
+      status: 'REJECTED',
+      reason: 'Live trading requires POLYGON_PRIVATE_KEY. Run in DRY_RUN mode first.',
+    };
+  }
+
+  try {
+    // Map trade to CLOB parameters
+    const tokenId = trade.side === 'YES' ? trade.yesTokenId : trade.noTokenId;
+    if (!tokenId) {
+      return { ...trade, status: 'REJECTED', reason: 'No token ID for this market' };
+    }
+
+    const result = await clobExecutor.placeTrade({
+      tokenId,
+      side: 'BUY',
+      price: trade.price,
+      size: trade.positionSize,
+      maxSlippage: 0.02,
+    });
+
+    if (result.status === 'SLIPPAGE_EXCEEDED' || result.status === 'INSUFFICIENT_FUNDS') {
+      return { ...trade, status: 'REJECTED', reason: result.status, detail: result };
+    }
+
+    const executedTrade = {
+      ...trade,
+      status: result.status === 'DRY_RUN' ? 'DRY_RUN' : 'SUBMITTED',
+      orderId: result.orderId,
+      clobResult: result,
+      fillPrice: trade.price,
+      shares: trade.positionSize / trade.price,
+      pnlStatus: 'PENDING_RESOLUTION',
+    };
+
+    executedTrades.push(executedTrade);
+    saveTrades();
+
+    if (result.status !== 'DRY_RUN') {
+      riskManager.addPosition(executedTrade);
+    }
+
+    log.info('EXECUTOR', `[${result.status}] ${trade.side} $${trade.positionSize} @ ${trade.price} "${trade.market}"`);
+    return executedTrade;
+  } catch (err) {
+    log.error('EXECUTOR', `Live trade failed: ${err.message}`);
+    return { ...trade, status: 'REJECTED', reason: err.message };
+  }
 }
 
 /**

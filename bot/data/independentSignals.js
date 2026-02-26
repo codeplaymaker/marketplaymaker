@@ -21,6 +21,14 @@ const bookmakerSignal = require('./bookmakerSignal');
 const cryptoData = require('./cryptoData');
 const espnData = require('./espnData');
 const stockData = require('./stockData');
+
+// Social / cultural signal sources
+let youtubeTracker = null;
+let twitterTracker = null;
+let culturalEvents = null;
+try { youtubeTracker = require('./youtubeTracker'); } catch { /* optional */ }
+try { twitterTracker = require('./twitterTracker'); } catch { /* optional */ }
+try { culturalEvents = require('./culturalEvents'); } catch { /* optional */ }
 const { crossPlatformLikelihood } = require('./searchUtils');
 const log = require('../utils/logger');
 const fs = require('fs');
@@ -37,6 +45,8 @@ const SOURCE_WEIGHTS = {
   bookmaker: { weight: 0.28, label: 'Bookmaker Consensus (Sharp Lines)' },
   crypto:    { weight: 0.25, label: 'Crypto Market Data' },
   stock:     { weight: 0.25, label: 'Stock/Index Market Data' },
+  youtube:   { weight: 0.26, label: 'YouTube View Velocity' },
+  twitter:   { weight: 0.26, label: 'Twitter/X Post Tracker' },
   polling:   { weight: 0.18, label: 'Metaculus Superforecasters' },
   expert:    { weight: 0.18, label: 'Manifold Markets' },
   kalshi:    { weight: 0.18, label: 'Kalshi Cross-Reference' },
@@ -269,6 +279,81 @@ async function getIndependentSignal(market, options = {}) {
       .catch(err => log.warn('INDSIG', `Stock data failed: ${err.message}`))
   );
 
+  // YouTube view velocity — real-time view tracking for video markets
+  if (youtubeTracker) {
+    tasks.push(
+      youtubeTracker.getYouTubeSignal(market)
+        .then(async r => {
+          if (r?.prob != null) {
+            // Apply cultural events modifier if available
+            let culturalDetail = '';
+            if (culturalEvents && r.channel) {
+              try {
+                const impact = await culturalEvents.getYouTubeImpact(r.channel);
+                if (impact.modifier !== 1.0 && r.projectedViews) {
+                  r.prob = Math.max(0.02, Math.min(0.98, r.prob * (impact.modifier > 1 ? 1.1 : 0.9)));
+                  culturalDetail = ` | Cultural: ${impact.detail}`;
+                }
+              } catch { /* non-critical */ }
+            }
+            results.youtube = {
+              prob: r.prob,
+              confidence: r.confidence || 'MEDIUM',
+              sources: ['YouTube View Velocity'],
+              detail: (r.detail || '') + culturalDetail,
+              cached: false,
+              matchQuality: r.matchQuality ?? 0.85,
+              matchValidated: r.matchValidated ?? true,
+              currentViews: r.currentViews,
+              projectedViews: r.projectedViews,
+              targetViews: r.targetViews,
+              velocity: r.velocity,
+              videoId: r.videoId,
+            };
+          }
+        })
+        .catch(err => log.warn('INDSIG', `YouTube tracker failed: ${err.message}`))
+    );
+  }
+
+  // Twitter/X tweet tracker — real-time tweet counting for posting markets
+  if (twitterTracker) {
+    tasks.push(
+      twitterTracker.getTwitterSignal(market)
+        .then(async r => {
+          if (r?.prob != null) {
+            // Apply cultural events modifier for Elon-specific markets
+            let culturalDetail = '';
+            if (culturalEvents && r.username === 'elonmusk') {
+              try {
+                const impact = await culturalEvents.getElonTweetImpact();
+                if (impact.multiplier !== 1.0) {
+                  // Adjust expected tweets by cultural multiplier
+                  // Higher multiplier = more tweets expected = higher prob of hitting "over" target
+                  const adjustment = impact.multiplier > 1.2 ? 0.08 : impact.multiplier > 1.0 ? 0.04 : -0.05;
+                  r.prob = Math.max(0.02, Math.min(0.98, r.prob + adjustment));
+                  culturalDetail = ` | Cultural: ${impact.detail}`;
+                }
+              } catch { /* non-critical */ }
+            }
+            results.twitter = {
+              prob: r.prob,
+              confidence: r.confidence || 'MEDIUM',
+              sources: ['Twitter/X Post Tracker'],
+              detail: (r.detail || '') + culturalDetail,
+              cached: false,
+              matchQuality: r.matchQuality ?? 0.85,
+              matchValidated: r.matchValidated ?? true,
+              currentCount: r.currentCount,
+              targetCount: r.targetCount,
+              username: r.username,
+            };
+          }
+        })
+        .catch(err => log.warn('INDSIG', `Twitter tracker failed: ${err.message}`))
+    );
+  }
+
   await Promise.allSettled(tasks);
 
   // ─── 2. Compute weighted consensus ───────────────────────────────
@@ -356,7 +441,7 @@ async function getIndependentSignal(market, options = {}) {
   let edgeQuality = 0;
 
   // Data source quality tiers
-  const HARD_DATA_SOURCES = ['bookmaker', 'crypto', 'espn', 'stock']; // Real market data
+  const HARD_DATA_SOURCES = ['bookmaker', 'crypto', 'espn', 'stock', 'youtube', 'twitter']; // Real market data
   const VALIDATED_SOURCES = ['polling', 'expert', 'kalshi']; // Cross-platform matches
   const SOFT_SOURCES = ['llm']; // AI analysis
 
@@ -417,6 +502,39 @@ async function getIndependentSignal(market, options = {}) {
     .every(s => s.matchQuality < 0.5);
   if (allExternalLowQuality && sourceBreakdown.some(s => s.key !== 'llm' && s.matchQuality != null)) {
     edgeQuality = Math.min(edgeQuality, 30);
+  }
+
+  // ─── Long-Tail Market Protection ────────────────────────────────
+  // Markets trading at extreme prices (<5% or >95%) have strong market
+  // consensus. Declaring a huge edge against extreme consensus requires
+  // extraordinary evidence (hard data from 2+ validated sources).
+  // Without that, the "edge" is almost certainly model error.
+  const isExtremeLowPrice = marketPrice != null && marketPrice < 0.05;
+  const isExtremeHighPrice = marketPrice != null && marketPrice > 0.95;
+  const isExtremeMarket = isExtremeLowPrice || isExtremeHighPrice;
+
+  if (isExtremeMarket) {
+    // For extreme markets, require hard data to declare any edge
+    if (hardDataCount === 0) {
+      // LLM/soft sources can't override strong market consensus on long-tail events
+      edgeQuality = Math.min(edgeQuality, 15);
+    } else if (hardDataCount === 1 && validatedCount === 0) {
+      // Single hard source on extreme market = still risky
+      edgeQuality = Math.min(edgeQuality, 35);
+    }
+    // Also dampen the divergence to prevent 20%+ "edges" on 1% markets
+    // unless we have extraordinary hard data evidence
+    if (hardDataCount < 2 && absDivergence > 0.15) {
+      // Clamp effective divergence for grading purposes
+      edgeQuality = Math.min(edgeQuality, 25);
+    }
+  }
+
+  // ─── LLM-Only Divergence Clamp ──────────────────────────────────
+  // If the ONLY source is LLM, clamp max edge quality AND limit
+  // divergence impact. LLM is structured guessing, not evidence.
+  if (hardDataCount === 0 && validatedCount === 0 && softCount >= 1) {
+    edgeQuality = Math.min(edgeQuality, 20); // D grade max for LLM-only
   }
 
   // Determine edge grade
@@ -583,6 +701,8 @@ async function batchAnalyze(markets, options = {}) {
       else if (/trump|biden|election|congress|senate|tariff|sanction/i.test(q)) category = 'politics';
       else if (/gdp|inflation|interest rate|fed|recession|economic/i.test(q)) category = 'economics';
       else if (/olympics|gold medal|medal/i.test(q)) category = 'olympics';
+      else if (/youtube|video|views|mrbeast|pewdiepie|subscriber|upload/i.test(q)) category = 'youtube';
+      else if (/tweet|twitter|elon.*post|post.*on x|x\.com/i.test(q)) category = 'twitter';
       else category = 'other';
     }
 
@@ -632,6 +752,9 @@ function getStatus() {
     crypto: cryptoData.getStatus(),
     espn: espnData.getStatus(),
     stock: stockData.getStatus(),
+    youtube: youtubeTracker ? youtubeTracker.getStatus() : { available: false },
+    twitter: twitterTracker ? twitterTracker.getStatus() : { available: false },
+    culturalEvents: culturalEvents ? culturalEvents.getStatus() : { available: false },
     history: {
       total: signalHistory.length,
       last24h: signalHistory.filter(s => Date.now() - s.timestamp < 86400000).length,
@@ -698,4 +821,7 @@ module.exports = {
   kalshi: kalshiCrossRef,
   bookmaker: bookmakerSignal,
   crypto: cryptoData,
+  youtube: youtubeTracker,
+  twitter: twitterTracker,
+  culturalEvents,
 };

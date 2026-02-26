@@ -9,6 +9,15 @@ module.exports = function(app) {
       changeOrigin: true,
       pathRewrite: { '^/polybot': '' },
       logger: console,
+      proxyTimeout: 30000,    // 30s timeout to prevent hanging
+      timeout: 30000,
+      onError: (err, req, res) => {
+        console.error('[Proxy Error]', err.message);
+        if (!res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Bot server unavailable' }));
+        }
+      },
     })
   );
 

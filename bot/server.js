@@ -20,6 +20,22 @@ const alerts = require('./engine/alerts');
 const watchlist = require('./engine/watchlist');
 const signalTracker = require('./engine/signalTracker');
 
+// SQLite database — optional (install better-sqlite3 for full persistence)
+let database = null;
+try {
+  database = require('./engine/database');
+  if (database.initialize()) {
+    log.info('SERVER', 'SQLite database initialized');
+    // Auto-migrate from JSON on first run
+    const migrationResult = database.migrateFromJSON();
+    if (migrationResult.migrated) {
+      log.info('SERVER', `DB migration: ${JSON.stringify(migrationResult.stats)}`);
+    }
+  }
+} catch (err) {
+  log.warn('SERVER', `SQLite not available: ${err.message}`);
+}
+
 // Kalshi integration — optional
 let kalshiClient = null;
 let kalshiMarkets = null;
@@ -34,11 +50,22 @@ try {
 // New modules — optional
 let wsClient = null;
 let newsSignal = null;
+let eventPush = null;
 try { wsClient = require('./polymarket/websocket'); } catch { /* optional */ }
 try { newsSignal = require('./data/newsSignal'); } catch { /* optional */ }
+try { eventPush = require('./engine/eventPush'); } catch { /* optional */ }
 
 let independentSignals = null;
 try { independentSignals = require('./data/independentSignals'); } catch { /* optional */ }
+
+let youtubeTracker = null;
+try { youtubeTracker = require('./data/youtubeTracker'); } catch { /* optional */ }
+
+let twitterTracker = null;
+try { twitterTracker = require('./data/twitterTracker'); } catch { /* optional */ }
+
+let culturalEvents = null;
+try { culturalEvents = require('./data/culturalEvents'); } catch { /* optional */ }
 
 let edgeResolver = null;
 try { edgeResolver = require('./engine/edgeResolver'); } catch { /* optional */ }
@@ -250,6 +277,48 @@ if (process.env.OPENAI_API_KEY && independentSignals) {
   }
 }
 
+// Auto-load YouTube API key from environment variable
+if (process.env.YOUTUBE_API_KEY) {
+  try {
+    if (independentSignals?.youtube?.setApiKey) independentSignals.youtube.setApiKey(process.env.YOUTUBE_API_KEY);
+    if (youtubeTracker?.setApiKey) youtubeTracker.setApiKey(process.env.YOUTUBE_API_KEY);
+    log.info('SERVER', 'YouTube tracker API key loaded from env');
+  } catch (err) {
+    log.warn('SERVER', `Failed to set YouTube API key: ${err.message}`);
+  }
+}
+
+// Twitter tracker — FREE (Nitter scraping, no API key needed)
+// Optional: RapidAPI key for fallback
+if (process.env.RAPIDAPI_KEY) {
+  if (independentSignals?.twitter) {
+    try {
+      independentSignals.twitter.setApiKey(process.env.RAPIDAPI_KEY);
+      log.info('SERVER', 'Twitter independentSignals RapidAPI key loaded');
+    } catch (err) {
+      log.warn('SERVER', `Failed to set RapidAPI key (independentSignals): ${err.message}`);
+    }
+  }
+  if (twitterTracker?.setApiKey) {
+    try {
+      twitterTracker.setApiKey(process.env.RAPIDAPI_KEY);
+      log.info('SERVER', 'Twitter tracker RapidAPI fallback key loaded');
+    } catch (err) {
+      log.warn('SERVER', `Failed to set RapidAPI key (twitterTracker): ${err.message}`);
+    }
+  }
+} else if (twitterTracker) {
+  log.info('SERVER', 'Twitter tracker running FREE (Nitter scraping) — no API key needed');
+}
+
+// Share news API key with cultural events engine
+if (process.env.NEWSDATA_API_KEY && independentSignals?.culturalEvents) {
+  try {
+    independentSignals.culturalEvents.setNewsApiKey(process.env.NEWSDATA_API_KEY);
+    log.info('SERVER', 'Cultural events engine using NewsData API key');
+  } catch { /* optional */ }
+}
+
 // Auto-fetch Polymarket markets on startup (non-blocking)
 markets.refreshMarkets().then(mktList => {
   log.info('SERVER', `Auto-fetched ${mktList.length} Polymarket markets on startup`);
@@ -281,6 +350,14 @@ app.use(authMiddleware);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
+
+// ─── Server-Sent Events (real-time push) ─────────────────────────────
+if (eventPush) {
+  app.get('/api/events', eventPush.sseHandler);
+  app.get('/api/events/status', (req, res) => {
+    res.json({ clients: eventPush.getClientCount(), available: true });
+  });
+}
 
 // ─── Auth ────────────────────────────────────────────────────────────
 app.get('/api/auth/key', (req, res) => {
@@ -529,6 +606,78 @@ app.get('/api/risk/heatmap', (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Monte Carlo VaR ─────────────────────────────────────────────────
+app.get('/api/risk/var', (req, res) => {
+  try {
+    const sims = parseInt(req.query.simulations) || 10000;
+    const mc = riskManager.monteCarloVaR
+      ? riskManager.monteCarloVaR(scanner.getBankroll(), { simulations: sims })
+      : {};
+    res.json(mc);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Stress Testing ──────────────────────────────────────────────────
+app.get('/api/risk/stress', (req, res) => {
+  try {
+    const results = riskManager.runStressTest
+      ? riskManager.runStressTest(scanner.getBankroll())
+      : { scenarios: {}, summary: 'Stress test not available' };
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Database Analytics API ──────────────────────────────────────────
+app.get('/api/db/trades', (req, res) => {
+  try {
+    if (!database || !database.isReady()) return res.json({ available: false, trades: [] });
+    const { limit, offset, strategy, status } = req.query;
+    const trades = database.getTradeHistory({
+      limit: parseInt(limit) || 100,
+      offset: parseInt(offset) || 0,
+      strategy, status,
+    });
+    res.json({ available: true, trades });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/db/stats', (req, res) => {
+  try {
+    if (!database || !database.isReady()) return res.json({ available: false });
+    const stats = database.getTradeStats();
+    const byStrategy = database.getStrategyBreakdown();
+    const calibration = database.getCalibrationCurve();
+    const edgeAccuracy = database.getEdgeAccuracy();
+    res.json({ available: true, stats, byStrategy, calibration, edgeAccuracy });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/db/pnl', (req, res) => {
+  try {
+    if (!database || !database.isReady()) return res.json({ available: false, series: [] });
+    const { days, mode } = req.query;
+    const series = database.getPnlTimeseries({ days: parseInt(days) || 30, mode });
+    // Build cumulative P&L
+    let cumulative = 0;
+    const cumSeries = series.map(d => {
+      cumulative += d.daily_pnl;
+      return { ...d, cumulative_pnl: Math.round(cumulative * 100) / 100 };
+    });
+    res.json({ available: true, series: cumSeries });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Bookmaker Odds API ──────────────────────────────────────────
 app.post('/api/odds/key', (req, res) => {
   try {
@@ -1196,6 +1345,282 @@ app.get('/api/intel/calibration', (req, res) => {
     },
     systemStatus: independentSignals.getStatus(),
   });
+});
+
+// ─── YouTube Tracker ──────────────────────────────────────────────────
+app.get('/api/intel/youtube/status', (req, res) => {
+  if (!youtubeTracker) return res.json({ available: false });
+  res.json({
+    available: true,
+    ...youtubeTracker.getStatus(),
+    trackedVideos: youtubeTracker.getTrackedVideos(),
+  });
+});
+
+app.post('/api/intel/youtube/analyze', async (req, res) => {
+  if (!youtubeTracker) return res.status(400).json({ error: 'YouTube tracker not available' });
+  const { question, endDate } = req.body;
+  try {
+    const signal = await youtubeTracker.getYouTubeSignal({ question, endDate, conditionId: 'manual-' + Date.now() });
+    res.json({ signal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/intel/youtube/creators', (req, res) => {
+  // Return known creator database info
+  const CREATORS = {
+    'mrbeast':       { name: 'MrBeast', avgFirst24h: 80000000, avgFirst48h: 120000000 },
+    'pewdiepie':     { name: 'PewDiePie', avgFirst24h: 8000000, avgFirst48h: 15000000 },
+    'markrober':     { name: 'Mark Rober', avgFirst24h: 20000000, avgFirst48h: 35000000 },
+    'mkbhd':         { name: 'MKBHD', avgFirst24h: 5000000, avgFirst48h: 10000000 },
+    'loganpaul':     { name: 'Logan Paul', avgFirst24h: 10000000, avgFirst48h: 18000000 },
+    'ksi':           { name: 'KSI', avgFirst24h: 8000000, avgFirst48h: 14000000 },
+    'ishowspeed':    { name: 'IShowSpeed', avgFirst24h: 12000000, avgFirst48h: 20000000 },
+    'airrack':       { name: 'Airrack', avgFirst24h: 15000000, avgFirst48h: 25000000 },
+    'dude perfect':  { name: 'Dude Perfect', avgFirst24h: 15000000, avgFirst48h: 25000000 },
+    'ryan trahan':   { name: 'Ryan Trahan', avgFirst24h: 10000000, avgFirst48h: 18000000 },
+  };
+  res.json({ creators: CREATORS });
+});
+
+// ─── Trending YouTube Markets (auto-discover + analyze) ──────────────
+app.get('/api/intel/youtube/trending', async (req, res) => {
+  if (!youtubeTracker) return res.json({ markets: [], error: 'YouTube tracker not available' });
+  try {
+    const allMarkets = markets.getCachedMarkets();
+    // Filter to YouTube-related markets
+    const ytRegex = /youtube|video|views|watch|stream|subscriber|upload|MrBeast|PewDiePie|Mark Rober|MKBHD|Logan Paul|KSI|IShowSpeed|Airrack|Dude Perfect|Ryan Trahan/i;
+    const ytMarkets = allMarkets.filter(m => ytRegex.test(m.question));
+
+    // Analyze each market with the YouTube tracker
+    const analyzed = [];
+    for (const mkt of ytMarkets.slice(0, 20)) {
+      try {
+        const signal = await youtubeTracker.getYouTubeSignal({
+          question: mkt.question,
+          endDate: mkt.endDate,
+          conditionId: mkt.conditionId,
+          yesPrice: mkt.yesPrice,
+        });
+
+        const edge = signal?.prob != null ? (signal.prob - mkt.yesPrice) : null;
+        const absEdge = edge != null ? Math.abs(edge) : 0;
+        const suggestion = edge != null
+          ? (edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : 'HOLD')
+          : 'NO DATA';
+
+        analyzed.push({
+          conditionId: mkt.conditionId,
+          question: mkt.question,
+          slug: mkt.slug,
+          yesPrice: mkt.yesPrice,
+          noPrice: mkt.noPrice,
+          volume24hr: mkt.volume24hr,
+          liquidity: mkt.liquidity,
+          endDate: mkt.endDate,
+          signal: signal ? {
+            prob: signal.prob,
+            confidence: signal.confidence,
+            detail: signal.detail,
+            currentViews: signal.currentViews,
+            projectedViews: signal.projectedViews,
+            targetViews: signal.targetViews,
+            velocity: signal.velocity,
+            channel: signal.channel,
+            videoTitle: signal.videoTitle,
+            isBaseline: signal.isBaseline || false,
+          } : null,
+          edge: edge != null ? Math.round(edge * 1000) / 1000 : null,
+          absEdge: Math.round(absEdge * 1000) / 1000,
+          suggestion,
+          suggestedSide: edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : null,
+          suggestedPrice: edge > 0.05 ? mkt.yesPrice : edge < -0.05 ? mkt.noPrice : null,
+          edgePct: edge != null ? Math.round(edge * 10000) / 100 : null,
+        });
+      } catch (err) {
+        analyzed.push({
+          conditionId: mkt.conditionId,
+          question: mkt.question,
+          slug: mkt.slug,
+          yesPrice: mkt.yesPrice,
+          volume24hr: mkt.volume24hr,
+          endDate: mkt.endDate,
+          signal: null,
+          edge: null,
+          suggestion: 'ERROR',
+          error: err.message,
+        });
+      }
+    }
+
+    // Sort by absolute edge descending (best opportunities first)
+    analyzed.sort((a, b) => (b.absEdge || 0) - (a.absEdge || 0));
+
+    res.json({
+      markets: analyzed,
+      total: ytMarkets.length,
+      analyzed: analyzed.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Twitter Tracker ──────────────────────────────────────────────────
+app.get('/api/intel/twitter/status', (req, res) => {
+  if (!twitterTracker) return res.json({ available: false });
+  res.json({
+    available: true,
+    ...twitterTracker.getStatus(),
+    trackedAccounts: twitterTracker.getTrackedAccounts(),
+  });
+});
+
+app.post('/api/intel/twitter/analyze', async (req, res) => {
+  if (!twitterTracker) return res.status(400).json({ error: 'Twitter tracker not available' });
+  const { question, endDate } = req.body;
+  try {
+    const signal = await twitterTracker.getTwitterSignal({ question, endDate, conditionId: 'manual-' + Date.now() });
+    res.json({ signal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/intel/twitter/simulate', (req, res) => {
+  if (!twitterTracker) return res.status(400).json({ error: 'Twitter tracker not available' });
+  const { username, currentCount, targetCount, hoursRemaining } = req.body;
+  try {
+    const result = twitterTracker.calculateTweetProbability(
+      username || 'elonmusk',
+      Number(currentCount) || 0,
+      Number(targetCount) || 120,
+      Number(hoursRemaining) || 168
+    );
+    const pattern = twitterTracker.buildPattern(username || 'elonmusk');
+    res.json({ result, pattern });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/intel/twitter/accounts', (req, res) => {
+  if (!twitterTracker) return res.json({ accounts: {} });
+  const TRACKED_ACCOUNTS = {
+    'elonmusk':        { name: 'Elon Musk', avgDailyTweets: 35, stdDev: 12, topics: ['tech', 'space', 'politics', 'crypto', 'ai'] },
+    'realdonaldtrump': { name: 'Donald Trump', avgDailyTweets: 15, stdDev: 8, topics: ['politics'] },
+    'joebiden':        { name: 'Joe Biden', avgDailyTweets: 5, stdDev: 3, topics: ['politics'] },
+    'vaborehim':       { name: 'Vitalik Buterin', avgDailyTweets: 8, stdDev: 5, topics: ['crypto', 'tech'] },
+    'caborehim':       { name: 'CZ (Binance)', avgDailyTweets: 10, stdDev: 6, topics: ['crypto'] },
+  };
+  res.json({ accounts: TRACKED_ACCOUNTS });
+});
+
+app.get('/api/intel/twitter/trending', async (req, res) => {
+  if (!twitterTracker) return res.json({ markets: [], error: 'Twitter tracker not available' });
+  try {
+    const allMarkets = markets.getCachedMarkets();
+    const twRegex = /tweet|twitter|post.*on x|elon.*tweet|trump.*tweet|@\w+.*tweet|post.*x\.com|weekly.*tweet|daily.*tweet/i;
+    const twMarkets = allMarkets.filter(m => twRegex.test(m.question));
+
+    const analyzed = [];
+    for (const mkt of twMarkets.slice(0, 20)) {
+      try {
+        const signal = await twitterTracker.getTwitterSignal({
+          question: mkt.question,
+          endDate: mkt.endDate,
+          conditionId: mkt.conditionId,
+          yesPrice: mkt.yesPrice,
+        });
+
+        const edge = signal?.prob != null ? (signal.prob - mkt.yesPrice) : null;
+        const absEdge = edge != null ? Math.abs(edge) : 0;
+        const suggestion = edge != null
+          ? (edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : 'HOLD')
+          : 'NO DATA';
+
+        analyzed.push({
+          conditionId: mkt.conditionId,
+          question: mkt.question,
+          slug: mkt.slug,
+          yesPrice: mkt.yesPrice,
+          noPrice: mkt.noPrice,
+          volume24hr: mkt.volume24hr,
+          liquidity: mkt.liquidity,
+          endDate: mkt.endDate,
+          signal: signal ? {
+            prob: signal.prob,
+            confidence: signal.confidence,
+            detail: signal.detail,
+            currentCount: signal.currentCount,
+            targetCount: signal.targetCount,
+            username: signal.username,
+            hoursRemaining: signal.hoursRemaining,
+            dataSource: signal.dataSource,
+            isBaseline: signal.isBaseline || false,
+          } : null,
+          edge: edge != null ? Math.round(edge * 1000) / 1000 : null,
+          absEdge: Math.round(absEdge * 1000) / 1000,
+          suggestion,
+          suggestedSide: edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : null,
+          edgePct: edge != null ? Math.round(edge * 10000) / 100 : null,
+        });
+      } catch (err) {
+        analyzed.push({
+          conditionId: mkt.conditionId,
+          question: mkt.question,
+          slug: mkt.slug,
+          yesPrice: mkt.yesPrice,
+          volume24hr: mkt.volume24hr,
+          endDate: mkt.endDate,
+          signal: null,
+          edge: null,
+          suggestion: 'ERROR',
+          error: err.message,
+        });
+      }
+    }
+
+    analyzed.sort((a, b) => (b.absEdge || 0) - (a.absEdge || 0));
+
+    res.json({
+      markets: analyzed,
+      total: twMarkets.length,
+      analyzed: analyzed.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Cultural Events ──────────────────────────────────────────────────
+app.get('/api/intel/cultural/status', (req, res) => {
+  if (!culturalEvents) return res.json({ available: false });
+  res.json({ available: true, ...culturalEvents.getStatus() });
+});
+
+app.get('/api/intel/cultural/youtube-impact/:creator', async (req, res) => {
+  if (!culturalEvents) return res.json({ available: false });
+  try {
+    const impact = await culturalEvents.getYouTubeImpact(req.params.creator);
+    res.json(impact);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/intel/cultural/elon-impact', async (req, res) => {
+  if (!culturalEvents) return res.json({ available: false });
+  try {
+    const impact = await culturalEvents.getElonTweetImpact();
+    res.json(impact);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Public Track Record (no auth) ───────────────────────────────────

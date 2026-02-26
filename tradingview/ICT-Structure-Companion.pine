@@ -1,0 +1,235 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © MarketPlaymaker — ICT Structure Companion v1.0
+// Designed to pair with Nephew_Sam_ Algo Market Structure
+// Adds: Killzone sessions, key liquidity levels, FVGs, opens, SMT
+
+//@version=5
+indicator("ICT Structure Companion", overlay=true, max_bars_back=500,
+     max_labels_count=200, max_lines_count=100, max_boxes_count=200)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── INPUTS ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Sessions ──
+grp_sess = "•••••••• Sessions ••••••••"
+i_showSessions   = input.bool(true, "Highlight Killzones", group=grp_sess)
+i_sessLondon     = input.bool(true, "London (02:00–05:00)", inline="s1", group=grp_sess)
+i_sessLondonCol  = input.color(color.new(#818cf8, 93), "", inline="s1", group=grp_sess)
+i_sessNYAM       = input.bool(true, "NY AM (08:30–11:00)", inline="s2", group=grp_sess)
+i_sessNYAMCol    = input.color(color.new(#22d3ee, 93), "", inline="s2", group=grp_sess)
+i_sessNYPM       = input.bool(false, "NY PM (13:30–16:00)", inline="s3", group=grp_sess)
+i_sessNYPMCol    = input.color(color.new(#f59e0b, 93), "", inline="s3", group=grp_sess)
+i_sessMacro      = input.bool(true, "ICT Macro Windows", inline="s4", group=grp_sess)
+i_sessMacroCol   = input.color(color.new(#fbbf24, 92), "", inline="s4", group=grp_sess)
+i_sessLunch      = input.bool(true, "NY Lunch (12:00–13:30)", inline="s5", group=grp_sess)
+i_sessLunchCol   = input.color(color.new(#f87171, 95), "", inline="s5", group=grp_sess)
+
+// ── Liquidity Levels ──
+grp_liq = "•••••••• Liquidity Levels ••••••••"
+i_showPDHL       = input.bool(true, "Previous Day H/L", inline="l1", group=grp_liq)
+i_pdhlCol        = input.color(color.new(#f59e0b, 40), "", inline="l1", group=grp_liq)
+i_showPWHL       = input.bool(true, "Previous Week H/L", inline="l2", group=grp_liq)
+i_pwhlCol        = input.color(color.new(#c084fc, 40), "", inline="l2", group=grp_liq)
+
+// ── Key Opens ──
+grp_opens = "•••••••• Key Opens ••••••••"
+i_showDailyOpen  = input.bool(true, "Daily Open", inline="o1", group=grp_opens)
+i_doCol          = input.color(color.new(#94a3b8, 50), "", inline="o1", group=grp_opens)
+i_showWeeklyOpen = input.bool(true, "Weekly Open", inline="o2", group=grp_opens)
+i_woCol          = input.color(color.new(#60a5fa, 40), "", inline="o2", group=grp_opens)
+i_showMonthlyOpen = input.bool(false, "Monthly Open", inline="o3", group=grp_opens)
+i_moCol          = input.color(color.new(#f472b6, 40), "", inline="o3", group=grp_opens)
+
+// ── Fair Value Gaps ──
+grp_fvg = "•••••••• Fair Value Gaps ••••••••"
+i_showFVG        = input.bool(true, "Show FVGs", group=grp_fvg)
+i_fvgBullCol     = input.color(color.new(#4ade80, 88), "Bull", inline="f1", group=grp_fvg)
+i_fvgBearCol     = input.color(color.new(#f87171, 88), "Bear", inline="f1", group=grp_fvg)
+i_fvgMinATR      = input.float(0.2, "Min Size (× ATR)", minval=0.05, maxval=2.0, step=0.05, group=grp_fvg)
+i_fvgMaxAge      = input.int(60, "Max Age (bars)", minval=10, maxval=300, group=grp_fvg)
+i_fvgMidline     = input.bool(true, "Show CE Midline", group=grp_fvg, tooltip="Consequent Encroachment — the 50% of the FVG, key ICT entry level")
+
+// ── SMT Divergence ──
+grp_smt = "•••••••• SMT Divergence ••••••••"
+i_showSMT        = input.bool(true, "Show SMT Signals", group=grp_smt)
+i_smtSymbol      = input.symbol("NQ1!", "Correlated Symbol", group=grp_smt, tooltip="ES↔NQ, EUR/USD↔GBP/USD, BTC↔ETH")
+i_smtInverse     = input.bool(false, "Inverse Correlation", group=grp_smt, tooltip="For pairs like EUR/USD↔DXY")
+i_smtLookback    = input.int(10, "Lookback", minval=3, maxval=30, group=grp_smt)
+i_smtBullCol     = input.color(color.new(#22d3ee, 10), "Bull", inline="smt1", group=grp_smt)
+i_smtBearCol     = input.color(color.new(#f472b6, 10), "Bear", inline="smt1", group=grp_smt)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── SESSION HIGHLIGHTS ─────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+f_inSession(_startH, _startM, _endH, _endM) =>
+    h = hour(time, "America/New_York")
+    m = minute(time, "America/New_York")
+    t = h * 60 + m
+    t >= _startH * 60 + _startM and t < _endH * 60 + _endM
+
+isLondon = f_inSession(2, 0, 5, 0)
+isNYAM   = f_inSession(8, 30, 11, 0)
+isNYPM   = f_inSession(13, 30, 16, 0)
+isLunch  = f_inSession(12, 0, 13, 30)
+isMacro1 = f_inSession(9, 50, 10, 10)
+isMacro2 = f_inSession(10, 50, 11, 10)
+isMacro3 = f_inSession(13, 50, 14, 10)
+isMacro  = isMacro1 or isMacro2 or isMacro3
+
+bgcolor(i_showSessions and i_sessLondon and isLondon ? i_sessLondonCol : na, title="London KZ")
+bgcolor(i_showSessions and i_sessNYAM and isNYAM ? i_sessNYAMCol : na, title="NY AM KZ")
+bgcolor(i_showSessions and i_sessNYPM and isNYPM ? i_sessNYPMCol : na, title="NY PM KZ")
+bgcolor(i_showSessions and i_sessMacro and isMacro ? i_sessMacroCol : na, title="ICT Macro")
+bgcolor(i_showSessions and i_sessLunch and isLunch ? i_sessLunchCol : na, title="NY Lunch")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── LIQUIDITY LEVELS ───────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_on)
+
+// Persistent lines + labels (redraw on last bar only)
+var line lnPDH = na, var line lnPDL = na
+var line lnPWH = na, var line lnPWL = na
+var label lblPDH = na, var label lblPDL = na
+var label lblPWH = na, var label lblPWL = na
+
+if barstate.islast
+    // Clean up
+    for l in array.from(lnPDH, lnPDL, lnPWH, lnPWL)
+        line.delete(l)
+    for l in array.from(lblPDH, lblPDL, lblPWH, lblPWL)
+        label.delete(l)
+
+    if i_showPDHL and not na(pdh)
+        lnPDH  := line.new(bar_index - 40, pdh, bar_index + 8, pdh, color=i_pdhlCol, style=line.style_dotted, width=1)
+        lblPDH := label.new(bar_index + 8, pdh, "PDH", style=label.style_none, textcolor=i_pdhlCol, size=size.tiny)
+    if i_showPDHL and not na(pdl)
+        lnPDL  := line.new(bar_index - 40, pdl, bar_index + 8, pdl, color=i_pdhlCol, style=line.style_dotted, width=1)
+        lblPDL := label.new(bar_index + 8, pdl, "PDL", style=label.style_none, textcolor=i_pdhlCol, size=size.tiny)
+    if i_showPWHL and not na(pwh)
+        lnPWH  := line.new(bar_index - 40, pwh, bar_index + 8, pwh, color=i_pwhlCol, style=line.style_dotted, width=1)
+        lblPWH := label.new(bar_index + 8, pwh, "PWH", style=label.style_none, textcolor=i_pwhlCol, size=size.tiny)
+    if i_showPWHL and not na(pwl)
+        lnPWL  := line.new(bar_index - 40, pwl, bar_index + 8, pwl, color=i_pwhlCol, style=line.style_dotted, width=1)
+        lblPWL := label.new(bar_index + 8, pwl, "PWL", style=label.style_none, textcolor=i_pwhlCol, size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── KEY OPENS ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+dailyOpen   = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+weeklyOpen  = request.security(syminfo.tickerid, "W", open, lookahead=barmerge.lookahead_on)
+monthlyOpen = request.security(syminfo.tickerid, "M", open, lookahead=barmerge.lookahead_on)
+
+plot(i_showDailyOpen ? dailyOpen : na, "Daily Open", color=i_doCol, style=plot.style_stepline, linewidth=1)
+plot(i_showWeeklyOpen ? weeklyOpen : na, "Weekly Open", color=i_woCol, style=plot.style_stepline, linewidth=2)
+plot(i_showMonthlyOpen ? monthlyOpen : na, "Monthly Open", color=i_moCol, style=plot.style_stepline, linewidth=2)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── FAIR VALUE GAPS ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+atr14 = ta.atr(14)
+
+var float[] fvgTop    = array.new_float(0)
+var float[] fvgBot    = array.new_float(0)
+var int[]   fvgBar    = array.new_int(0)
+var int[]   fvgDir    = array.new_int(0)
+var box[]   fvgBox    = array.new_box(0)
+var line[]  fvgMid    = array.new_line(0)
+
+bullFVG = i_showFVG and low > high[2] and (low - high[2]) > atr14 * i_fvgMinATR
+bearFVG = i_showFVG and high < low[2] and (low[2] - high) > atr14 * i_fvgMinATR
+
+if bullFVG
+    t = low
+    b = high[2]
+    array.push(fvgTop, t)
+    array.push(fvgBot, b)
+    array.push(fvgBar, bar_index)
+    array.push(fvgDir, 1)
+    array.push(fvgBox, box.new(bar_index - 2, t, bar_index, b, bgcolor=i_fvgBullCol, border_color=color.new(#4ade80, 70), border_width=1))
+    array.push(fvgMid, i_fvgMidline ? line.new(bar_index - 2, (t + b) / 2, bar_index, (t + b) / 2, color=color.new(#4ade80, 60), style=line.style_dotted, width=1) : na)
+
+if bearFVG
+    t = low[2]
+    b = high
+    array.push(fvgTop, t)
+    array.push(fvgBot, b)
+    array.push(fvgBar, bar_index)
+    array.push(fvgDir, -1)
+    array.push(fvgBox, box.new(bar_index - 2, t, bar_index, b, bgcolor=i_fvgBearCol, border_color=color.new(#f87171, 70), border_width=1))
+    array.push(fvgMid, i_fvgMidline ? line.new(bar_index - 2, (t + b) / 2, bar_index, (t + b) / 2, color=color.new(#f87171, 60), style=line.style_dotted, width=1) : na)
+
+// Manage FVG lifecycle
+if array.size(fvgTop) > 0
+    for i = array.size(fvgTop) - 1 to 0
+        fT = array.get(fvgTop, i)
+        fB = array.get(fvgBot, i)
+        fD = array.get(fvgDir, i)
+        age = bar_index - array.get(fvgBar, i)
+
+        filled = (fD == 1 and low <= fB) or (fD == -1 and high >= fT)
+
+        if filled or age > i_fvgMaxAge
+            bx = array.get(fvgBox, i)
+            ml = array.get(fvgMid, i)
+            if not na(bx)
+                box.delete(bx)
+            if not na(ml)
+                line.delete(ml)
+            array.remove(fvgTop, i)
+            array.remove(fvgBot, i)
+            array.remove(fvgBar, i)
+            array.remove(fvgDir, i)
+            array.remove(fvgBox, i)
+            array.remove(fvgMid, i)
+        else
+            bx = array.get(fvgBox, i)
+            ml = array.get(fvgMid, i)
+            if not na(bx)
+                box.set_right(bx, bar_index)
+            if not na(ml)
+                line.set_x2(ml, bar_index)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── SMT DIVERGENCE ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+smtHigh     = request.security(i_smtSymbol, timeframe.period, ta.highest(high, i_smtLookback), lookahead=barmerge.lookahead_off)
+smtLow      = request.security(i_smtSymbol, timeframe.period, ta.lowest(low, i_smtLookback), lookahead=barmerge.lookahead_off)
+smtPrevHigh = request.security(i_smtSymbol, timeframe.period, ta.highest(high, i_smtLookback)[i_smtLookback], lookahead=barmerge.lookahead_off)
+smtPrevLow  = request.security(i_smtSymbol, timeframe.period, ta.lowest(low, i_smtLookback)[i_smtLookback], lookahead=barmerge.lookahead_off)
+
+ourNewLow   = ta.lowest(low, i_smtLookback) < ta.lowest(low, i_smtLookback)[i_smtLookback]
+ourNewHigh  = ta.highest(high, i_smtLookback) > ta.highest(high, i_smtLookback)[i_smtLookback]
+smtNewLow   = not na(smtLow) and not na(smtPrevLow) and smtLow < smtPrevLow
+smtNewHigh  = not na(smtHigh) and not na(smtPrevHigh) and smtHigh > smtPrevHigh
+
+bullSMT_pos = ourNewLow and not smtNewLow
+bearSMT_pos = ourNewHigh and not smtNewHigh
+bullSMT_inv = ourNewLow and smtNewHigh
+bearSMT_inv = ourNewHigh and smtNewLow
+
+bullishSMT = i_showSMT and (i_smtInverse ? bullSMT_inv : bullSMT_pos)
+bearishSMT = i_showSMT and (i_smtInverse ? bearSMT_inv : bearSMT_pos)
+
+plotshape(bullishSMT, "Bull SMT", shape.diamond, location.belowbar, i_smtBullCol, size=size.tiny, text="SMT")
+plotshape(bearishSMT, "Bear SMT", shape.diamond, location.abovebar, i_smtBearCol, size=size.tiny, text="SMT")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── ALERTS ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(bullFVG, "Bullish FVG", "New Bullish Fair Value Gap detected.")
+alertcondition(bearFVG, "Bearish FVG", "New Bearish Fair Value Gap detected.")
+alertcondition(bullishSMT, "Bullish SMT", "SMT Divergence — Bullish. Correlated pair diverged at low.")
+alertcondition(bearishSMT, "Bearish SMT", "SMT Divergence — Bearish. Correlated pair diverged at high.")
+alertcondition(isMacro, "ICT Macro Window", "ICT Macro window active — watch for reversals.")

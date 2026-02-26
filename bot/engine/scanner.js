@@ -245,6 +245,21 @@ function start(initialBankroll) {
   paperTrader.startResolutionChecker();
   log.info('SCANNER', 'Self-learning paper trade system started');
 
+  // Start edge resolution tracker — checks if recorded edges resolved profitably
+  const edgeResolver = require('./edgeResolver');
+  const polyClient = require('../polymarket/client');
+  setInterval(async () => {
+    try {
+      const result = await edgeResolver.checkResolutions(polyClient.getMarketById);
+      if (result.resolved > 0) {
+        log.info('SCANNER', `Edge resolver: ${result.resolved} edges resolved (${result.checked} checked)`);
+      }
+    } catch (err) {
+      log.warn('SCANNER', `Edge resolution check failed: ${err.message}`);
+    }
+  }, 120000); // Every 2 minutes
+  log.info('SCANNER', 'Edge resolution tracker started (every 2 min)');
+
   // Run immediately, then on interval
   scan();
   scanInterval = setInterval(scan, config.scanner.opportunityScanMs);

@@ -47,8 +47,36 @@ function save() {
  */
 function recordEdge(edge) {
   if (!edge?.conditionId || !edge?.question) return;
-  // Don't duplicate
-  if (resolutions.find(r => r.conditionId === edge.conditionId && !r.resolved)) return;
+  // Don't duplicate — but DO update price history for decay tracking
+  const existing = resolutions.find(r => r.conditionId === edge.conditionId && !r.resolved);
+  if (existing) {
+    // Track edge decay: record how the market price has moved since detection
+    if (!existing.priceHistory) existing.priceHistory = [];
+    existing.priceHistory.push({
+      marketPrice: edge.marketPrice,
+      ourProb: edge.prob,
+      divergence: edge.divergence,
+      edgeQuality: edge.edgeQuality,
+      timestamp: Date.now(),
+    });
+    // Keep last 50 snapshots
+    if (existing.priceHistory.length > 50) existing.priceHistory = existing.priceHistory.slice(-50);
+    
+    // Update decay metrics
+    const initialDiv = Math.abs(existing.divergence || 0);
+    const currentDiv = Math.abs(edge.divergence || 0);
+    existing.edgeDecay = {
+      initialDivergence: initialDiv,
+      currentDivergence: currentDiv,
+      decayRate: initialDiv > 0 ? Math.round((1 - currentDiv / initialDiv) * 100) : 0,
+      snapshots: existing.priceHistory.length,
+      edgeNarrowing: currentDiv < initialDiv,
+      edgeWidening: currentDiv > initialDiv * 1.1,
+      lastUpdate: new Date().toISOString(),
+    };
+    save();
+    return;
+  }
 
   resolutions.push({
     conditionId: edge.conditionId,
@@ -65,12 +93,43 @@ function recordEdge(edge) {
     resolved: false,
     outcome: null,
     resolvedAt: null,
-    pnlPp: null, // Profit/loss in percentage points
+    pnlPp: null,
+    priceHistory: [{
+      marketPrice: edge.marketPrice,
+      ourProb: edge.prob,
+      divergence: edge.divergence,
+      edgeQuality: edge.edgeQuality,
+      timestamp: Date.now(),
+    }],
+    edgeDecay: null,
   });
 
   pnlTracker.totalEdges++;
   save();
   log.info('RESOLVER', `Tracking edge: "${edge.question?.slice(0, 50)}" (${edge.edgeGrade}, ${edge.edgeDirection})`);
+}
+
+/**
+ * Get edge decay analysis — which edges are narrowing vs widening?
+ * Narrowing = market moving toward our estimate (good sign)
+ * Widening = we may be wrong
+ */
+function getEdgeDecayAnalysis() {
+  const pending = resolutions.filter(r => !r.resolved && r.edgeDecay);
+  return {
+    total: pending.length,
+    narrowing: pending.filter(r => r.edgeDecay?.edgeNarrowing).length,
+    widening: pending.filter(r => r.edgeDecay?.edgeWidening).length,
+    stable: pending.filter(r => !r.edgeDecay?.edgeNarrowing && !r.edgeDecay?.edgeWidening).length,
+    edges: pending.map(r => ({
+      question: r.question?.slice(0, 60),
+      initialDiv: r.edgeDecay?.initialDivergence,
+      currentDiv: r.edgeDecay?.currentDivergence,
+      decayRate: r.edgeDecay?.decayRate,
+      direction: r.edgeDecay?.edgeNarrowing ? 'NARROWING' : r.edgeDecay?.edgeWidening ? 'WIDENING' : 'STABLE',
+      snapshots: r.edgeDecay?.snapshots,
+    })).sort((a, b) => (b.decayRate || 0) - (a.decayRate || 0)),
+  };
 }
 
 /**
@@ -228,4 +287,5 @@ module.exports = {
   checkResolutions,
   getTrackRecord,
   getPending,
+  getEdgeDecayAnalysis,
 };

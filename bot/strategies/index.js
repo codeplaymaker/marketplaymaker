@@ -5,7 +5,20 @@ const log = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
-const strategies = [noBets, arbitrage, sportsEdge];
+// New strategies — optional (graceful if missing)
+let momentum = null;
+let whaleDetection = null;
+let relativeValue = null;
+try { momentum = require('./momentum'); } catch { /* optional */ }
+try { whaleDetection = require('./whaleDetection'); } catch { /* optional */ }
+try { relativeValue = require('./relativeValue'); } catch { /* optional */ }
+
+const strategies = [
+  noBets, arbitrage, sportsEdge,
+  ...(momentum ? [momentum] : []),
+  ...(whaleDetection ? [whaleDetection] : []),
+  ...(relativeValue ? [relativeValue] : []),
+];
 
 const PERSISTENCE_FILE = path.join(__dirname, '..', 'logs', 'signal-persistence.json');
 

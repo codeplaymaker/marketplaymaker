@@ -26,3 +26,6 @@ yarn-error.log*
 # bot runtime data
 bot/logs/*.json
 bot/node_modules
+
+# Bot logs
+bot/logs/*.log

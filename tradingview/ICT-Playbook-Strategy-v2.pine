@@ -1,0 +1,1271 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © MarketPlaymaker — ICT Playbook Strategy v3.0
+// v3: Nephew_Sam_ structure engine, SMT divergence, locked trail ATR,
+// max drawdown kill, weekly/monthly opens, 4-state bar coloring, capped labels
+
+//@version=5
+strategy("ICT Playbook v3", overlay=true, margin_long=100, margin_short=100,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     initial_capital=100000, commission_type=strategy.commission.percent,
+     commission_value=0.01, slippage=1, calc_on_every_tick=false,
+     max_bars_back=500, pyramiding=0)
+
+// v3: Max drawdown kill switch
+strategy.risk.max_drawdown(10, strategy.percent_of_equity)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── INPUTS ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── General ──
+grp_gen = "═══ General Settings ═══"
+i_direction      = input.string("Both", "Trade Direction", options=["Long Only", "Short Only", "Both"], group=grp_gen)
+i_riskPct        = input.float(1.0, "Risk Per Trade %", minval=0.1, maxval=5.0, step=0.1, group=grp_gen)
+i_maxDailyTrades = input.int(2, "Max Trades Per Day", minval=1, maxval=10, group=grp_gen)
+i_minConfluence  = input.int(2, "Min Confluence Score", minval=1, maxval=7, group=grp_gen, tooltip="Minimum confluent factors required (FVG+OB+OTE+Liq+HTF+BB+SMT = max 7)")
+
+// ── HTF Bias (NEW in v2) ──
+grp_htf = "═══ HTF Bias Filter ═══"
+i_htfEnabled     = input.bool(true, "Enable HTF Bias Filter", group=grp_htf, tooltip="Only take longs when H4 is bullish, shorts when H4 is bearish — the #1 ICT rule")
+i_htfTF          = input.timeframe("240", "HTF Timeframe", group=grp_htf, tooltip="H4 recommended. Used to determine directional bias before LTF entry")
+i_htfSwingLen    = input.int(5, "HTF Swing Length", minval=2, maxval=20, group=grp_htf)
+
+// ── Structure Detection (v3: Nephew_Sam_-style confirmed structure) ──
+grp_struct = "═══ Structure Detection ═══"
+// i_swingLen removed in v3 — structure engine uses candle-confirmed pivots instead
+i_mssDisplace    = input.float(0.5, "MSS Min Displacement (× ATR)", minval=0.1, maxval=3.0, step=0.1, group=grp_struct)
+i_requireDisp    = input.bool(true, "Require Displacement for MSS", group=grp_struct)
+i_requireCandleConfirm = input.bool(true, "Require Candle Confirmation", group=grp_struct, tooltip="Nephew_Sam_ method: a bull engulfing off a low confirms the pivot, bear engulfing off a high confirms it. Prevents false structure breaks.")
+i_maxStructLabels = input.int(40, "Max Structure Labels", minval=10, maxval=100, group=grp_struct, tooltip="Cap labels to avoid TradingView's 500 limit")
+
+// ── FVG Settings ──
+grp_fvg = "═══ Fair Value Gap ═══"
+i_fvgEnabled     = input.bool(true, "Enable FVG Detection", group=grp_fvg)
+i_fvgMinSize     = input.float(0.2, "Min FVG Size (× ATR)", minval=0.05, maxval=2.0, step=0.05, group=grp_fvg)
+i_fvgEntry       = input.string("CE (50%)", "FVG Entry Method", options=["Complete Fill", "CE (50%)", "FVG Edge"], group=grp_fvg, tooltip="Complete Fill = safest (75% fill rate, 2-4R)\nCE = balanced (90% fill, 3-6R)\nFVG Edge = aggressive (95% fill, 5-10R)")
+i_fvgMaxAge      = input.int(50, "Max FVG Age (bars)", minval=5, maxval=200, group=grp_fvg)
+i_showFVG        = input.bool(true, "Show FVG Zones", group=grp_fvg)
+
+// ── Order Block Settings ──
+grp_ob = "═══ Order Blocks ═══"
+i_obEnabled      = input.bool(true, "Enable Order Block Detection", group=grp_ob)
+i_obMaxTouches   = input.int(2, "Max OB Touches Before Invalid", minval=1, maxval=5, group=grp_ob, tooltip="OBs tapped 2+ times are exhausted")
+i_showOB         = input.bool(true, "Show Order Block Zones", group=grp_ob)
+
+// ── Breaker Block Settings (NEW in v2) ──
+grp_bb = "═══ Breaker Blocks ═══"
+i_bbEnabled      = input.bool(true, "Enable Breaker Block Detection", group=grp_bb, tooltip="Failed OBs that become support/resistance. Powerful confirmation")
+i_showBB         = input.bool(true, "Show Breaker Block Zones", group=grp_bb)
+
+// ── OTE Settings ──
+grp_ote = "═══ Optimal Trade Entry ═══"
+i_oteEnabled     = input.bool(true, "Enable OTE Entries", group=grp_ote)
+i_oteLow         = input.float(0.62, "OTE Zone Start (Fib)", minval=0.5, maxval=0.8, step=0.01, group=grp_ote)
+i_oteHigh        = input.float(0.79, "OTE Zone End (Fib)", minval=0.6, maxval=0.95, step=0.01, group=grp_ote)
+i_oteSweet       = input.float(0.705, "OTE Sweet Spot (Fib)", minval=0.5, maxval=0.9, step=0.005, group=grp_ote)
+
+// ── Stop Loss ──
+grp_sl = "═══ Stop Loss ═══"
+i_slType         = input.string("FVG Invalidation", "Stop Loss Type", options=["Candle Body", "FVG Invalidation", "OB Invalidation", "Swing Point"], group=grp_sl, tooltip="Candle Body = tightest (8-15R)\nFVG = tight (4-8R)\nOB = medium (3-5R)\nSwing = safest (1.5-3R)")
+i_slBuffer       = input.float(0.5, "SL Buffer (× ATR)", minval=0.0, maxval=2.0, step=0.1, group=grp_sl)
+i_moveSLtoBE     = input.bool(true, "Move SL to Breakeven After TP1", group=grp_sl, tooltip="After TP1 is hit, SL moves to entry price")
+
+// ── Take Profit ──
+grp_tp = "═══ Take Profit ═══"
+i_tp1RR          = input.float(2.0, "TP1 R:R Ratio", minval=0.5, maxval=10.0, step=0.5, group=grp_tp)
+i_tp1Pct         = input.float(25, "TP1 Close %", minval=10, maxval=100, step=5, group=grp_tp)
+i_tp2RR          = input.float(4.0, "TP2 R:R Ratio", minval=1.0, maxval=15.0, step=0.5, group=grp_tp)
+i_tp2Pct         = input.float(50, "TP2 Close %", minval=0, maxval=100, step=5, group=grp_tp)
+i_tpTrail        = input.bool(true, "Trail Remaining Position", group=grp_tp)
+i_trailATR       = input.float(2.0, "Trailing Stop (× ATR)", minval=0.5, maxval=5.0, step=0.5, group=grp_tp)
+
+// ── Session / Killzone Filters ──
+grp_kz = "═══ Killzones ═══"
+i_kzFilter       = input.bool(true, "Only Trade During Killzones", group=grp_kz)
+i_kzLondon       = input.bool(true, "London KZ (02:00–05:00)", group=grp_kz)
+i_kzNYAM         = input.bool(true, "NY AM KZ (08:30–11:00)", group=grp_kz)
+i_kzNYPM         = input.bool(false, "NY PM KZ (13:30–16:00)", group=grp_kz)
+i_kzSilverAM     = input.bool(true, "AM Silver Bullet (10:00–11:00)", group=grp_kz)
+i_kzSilverPM     = input.bool(false, "PM Silver Bullet (14:00–15:00)", group=grp_kz)
+i_kzMacro        = input.bool(true, "ICT Macro Windows", group=grp_kz, tooltip="09:50-10:10, 10:50-11:10, 13:50-14:10 — key reversal windows")
+i_avoidMonday    = input.bool(true, "Avoid Monday", group=grp_kz)
+i_avoidFriday    = input.bool(false, "Avoid Friday", group=grp_kz)
+i_avoidLunch     = input.bool(true, "Avoid NY Lunch (12:00–13:30)", group=grp_kz)
+i_closeLunch     = input.bool(true, "Close Before Lunch (12:00)", group=grp_kz, tooltip="Close trades before NY lunch — never hold through chop")
+
+// ── SMT Divergence (v3 NEW) ──
+grp_smt = "═══ SMT Divergence ═══"
+i_smtEnabled     = input.bool(true, "Enable SMT Divergence", group=grp_smt, tooltip="Compare swing highs/lows with a correlated pair to confirm liquidity sweeps are real")
+i_smtSymbol      = input.symbol("NQ1!", "Correlated Symbol", group=grp_smt, tooltip="Pick the correlated pair:\nES↔NQ (indices), EUR/USD↔GBP/USD (forex),\nBTC↔ETH (crypto), EUR/USD↔DXY (inverse)")
+i_smtInverse     = input.bool(false, "Inverse Correlation", group=grp_smt, tooltip="Enable for inversely correlated pairs like EUR/USD↔DXY. When enabled, divergence logic flips.")
+i_smtLookback    = input.int(10, "Swing Lookback (bars)", minval=3, maxval=30, group=grp_smt, tooltip="How many bars back to compare swing highs/lows between pairs")
+
+// ── Liquidity Sweep ──
+grp_liq = "═══ Liquidity Sweep ═══"
+i_liqEnabled     = input.bool(true, "Enable Liquidity Sweep Entries", group=grp_liq)
+i_showLiq        = input.bool(true, "Show Liquidity Levels", group=grp_liq)
+
+// ── ADR / Volatility (NEW in v2) ──
+grp_adr = "═══ ADR / Volatility ═══"
+i_adrEnabled     = input.bool(true, "Enable ADR Filter", group=grp_adr, tooltip="Avoid entries when daily range already exceeds ADR — move is exhausted")
+i_adrLen         = input.int(20, "ADR Lookback (days)", minval=5, maxval=60, group=grp_adr)
+i_adrMaxPct      = input.float(80, "Max ADR Used %", minval=30, maxval=120, step=5, group=grp_adr, tooltip="Skip entries when price has moved >80% of ADR already")
+i_showADR        = input.bool(true, "Show ADR Levels", group=grp_adr)
+
+// ── Weekly/Monthly Opens (v3 NEW) ──
+grp_wmo = "═══ Weekly/Monthly Opens ═══"
+i_showWeeklyOpen = input.bool(true, "Show Weekly Open", group=grp_wmo, tooltip="Key ICT reference level — week's opening price")
+i_showMonthlyOpen = input.bool(true, "Show Monthly Open", group=grp_wmo)
+i_showQuarterlyOpen = input.bool(false, "Show Quarterly Open", group=grp_wmo)
+i_woColor        = input.color(color.new(#60a5fa, 40), "Weekly Open Color", group=grp_wmo)
+i_moColor        = input.color(color.new(#f472b6, 40), "Monthly Open Color", group=grp_wmo)
+i_qoColor        = input.color(color.new(#34d399, 40), "Quarterly Open Color", group=grp_wmo)
+
+// ── Visuals ──
+grp_vis = "═══ Visual Settings ═══"
+i_showDash       = input.bool(true, "Show Dashboard", group=grp_vis)
+i_showStructure  = input.bool(true, "Show Structure Labels", group=grp_vis)
+i_bullColor      = input.color(#4ade80, "Bullish Color", group=grp_vis)
+i_bearColor      = input.color(#f87171, "Bearish Color", group=grp_vis)
+i_fvgBullColor   = input.color(color.new(#4ade80, 85), "FVG Bullish Fill", group=grp_vis)
+i_fvgBearColor   = input.color(color.new(#f87171, 85), "FVG Bearish Fill", group=grp_vis)
+i_obBullColor    = input.color(color.new(#22d3ee, 85), "OB Bullish Fill", group=grp_vis)
+i_obBearColor    = input.color(color.new(#f59e0b, 85), "OB Bearish Fill", group=grp_vis)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── CORE CALCULATIONS ──────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+atr14 = ta.atr(14)
+
+// ── Session Time Functions (using America/New_York — handles DST automatically) ──
+f_inSession(_startH, _startM, _endH, _endM) =>
+    h = hour(time, "America/New_York")
+    m = minute(time, "America/New_York")
+    totalMin = h * 60 + m
+    startMin = _startH * 60 + _startM
+    endMin   = _endH * 60 + _endM
+    totalMin >= startMin and totalMin < endMin
+
+isLondonKZ  = f_inSession(2, 0, 5, 0)
+isNYAMKZ    = f_inSession(8, 30, 11, 0)
+isNYPMKZ    = f_inSession(13, 30, 16, 0)
+isSilverAM  = f_inSession(10, 0, 11, 0)
+isSilverPM  = f_inSession(14, 0, 15, 0)
+isNYLunch   = f_inSession(12, 0, 13, 30)
+
+// ICT Macro Windows (NEW in v2)
+isMacro1    = f_inSession(9, 50, 10, 10)
+isMacro2    = f_inSession(10, 50, 11, 10)
+isMacro3    = f_inSession(13, 50, 14, 10)
+isMacroWindow = i_kzMacro and (isMacro1 or isMacro2 or isMacro3)
+
+isKillzone = (i_kzLondon and isLondonKZ) or (i_kzNYAM and isNYAMKZ) or (i_kzNYPM and isNYPMKZ) or (i_kzSilverAM and isSilverAM) or (i_kzSilverPM and isSilverPM) or isMacroWindow
+kzAllowed  = i_kzFilter ? isKillzone : true
+
+// ── Day of Week ──
+dow = dayofweek(time, "America/New_York")
+isMonday  = dow == dayofweek.monday
+isFriday  = dow == dayofweek.friday
+isTuesday = dow == dayofweek.tuesday
+isWednesday = dow == dayofweek.wednesday
+isThursday  = dow == dayofweek.thursday
+dayAllowed = (not i_avoidMonday or not isMonday) and (not i_avoidFriday or not isFriday)
+lunchBlock = i_avoidLunch and isNYLunch
+
+sessionOK = kzAllowed and dayAllowed and not lunchBlock
+
+// ── Daily Trade Counter ──
+var int dailyTrades = 0
+newDay = ta.change(time("D")) != 0
+if newDay
+    dailyTrades := 0
+tradeAllowed = dailyTrades < i_maxDailyTrades
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── HTF BIAS (NEW in v2) ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Pull H4 (or user-selected HTF) structure to determine directional bias
+// Only trade longs when HTF is bullish, shorts when HTF is bearish
+
+f_htfBias() =>
+    htfHigh = ta.pivothigh(high, i_htfSwingLen, i_htfSwingLen)
+    htfLow  = ta.pivotlow(low, i_htfSwingLen, i_htfSwingLen)
+    var float htfLastHigh = na
+    var float htfLastLow  = na
+    var int htfBias = 0
+    if not na(htfHigh)
+        htfLastHigh := htfHigh
+    if not na(htfLow)
+        htfLastLow := htfLow
+    // Bullish: close breaks above last HTF swing high
+    if close > htfLastHigh and not na(htfLastHigh)
+        htfBias := 1
+    // Bearish: close breaks below last HTF swing low
+    if close < htfLastLow and not na(htfLastLow)
+        htfBias := -1
+    htfBias
+
+htfBias = request.security(syminfo.tickerid, i_htfTF, f_htfBias(), lookahead=barmerge.lookahead_off)
+htfBullish = not i_htfEnabled or htfBias >= 1
+htfBearish = not i_htfEnabled or htfBias <= -1
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── ADR FILTER (NEW in v2) ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Average Daily Range — avoid entries when daily candle already exhausted
+dailyHigh = request.security(syminfo.tickerid, "D", high, lookahead=barmerge.lookahead_off)
+dailyLow  = request.security(syminfo.tickerid, "D", low, lookahead=barmerge.lookahead_off)
+dailyOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_off)
+
+f_adr() =>
+    sum = 0.0
+    for j = 1 to i_adrLen
+        sum += high[j] - low[j]
+    sum / i_adrLen
+
+adrValue   = request.security(syminfo.tickerid, "D", f_adr(), lookahead=barmerge.lookahead_on)
+todayRange = dailyHigh - dailyLow
+adrUsedPct = adrValue > 0 ? (todayRange / adrValue) * 100 : 0
+adrOK      = not i_adrEnabled or adrUsedPct < i_adrMaxPct
+
+// ADR projection levels
+adrUpperTarget = dailyOpen + adrValue / 2
+adrLowerTarget = dailyOpen - adrValue / 2
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── WEEKLY / MONTHLY / QUARTERLY OPENS (v3 NEW) ────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+weeklyOpen    = request.security(syminfo.tickerid, "W", open, lookahead=barmerge.lookahead_on)
+monthlyOpen   = request.security(syminfo.tickerid, "M", open, lookahead=barmerge.lookahead_on)
+quarterlyOpen = request.security(syminfo.tickerid, "3M", open, lookahead=barmerge.lookahead_on)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── MARKET STRUCTURE (v3: Nephew_Sam_-style confirmed pivots) ──────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// v3: Instead of simple pivot→close comparison, we:
+// 1. Track bars since last bullish/bearish candle (candle body confirmation)
+// 2. Find highest/lowest between confirmed pivots
+// 3. Only confirm a new structure point when the opposite candle appears
+// 4. Maintain proper HH/HL/LH/LL alternation
+// 5. Cap labels to avoid TradingView's 500 limit
+
+bodySize       = math.abs(close - open)
+isDisplacement = bodySize > atr14 * i_mssDisplace
+
+// ── Candle state tracking (Nephew_Sam_ core concept) ──
+isBullCandle = close > open
+isBearCandle = close < open
+
+var int barsSinceBull = 0
+var int barsSinceBear = 0
+barsSinceBull := isBullCandle ? 0 : barsSinceBull + 1
+barsSinceBear := isBearCandle ? 0 : barsSinceBear + 1
+
+// ── Confirmed pivot tracking ──
+// Arrays: [0]=most recent, [1]=previous, etc.
+var float[] structHighs     = array.new_float(5, na)
+var int[]   structHighBars  = array.new_int(5, 0)
+var float[] structLows      = array.new_float(5, na)
+var int[]   structLowBars   = array.new_int(5, 0)
+
+var float pendingHigh       = na   // highest since last confirmed low
+var int   pendingHighBar    = na
+var float pendingLow        = na   // lowest since last confirmed high
+var int   pendingLowBar     = na
+
+var int   structureBias     = 0    // 1=bullish, -1=bearish
+var float mssLevel          = na
+var int   mssBar            = na
+var string lastStructType   = ""   // "high" or "low"
+
+// ── Capped label arrays ──
+var label[] structLabels = array.new_label(0)
+
+f_addStructLabel(_lbl) =>
+    array.push(structLabels, _lbl)
+    if array.size(structLabels) > i_maxStructLabels
+        old = array.shift(structLabels)
+        label.delete(old)
+
+// ── Track pending highs/lows ──
+// After a confirmed low, track the highest point until a bear candle confirms it
+// After a confirmed high, track the lowest point until a bull candle confirms it
+
+if na(pendingHigh) or high > pendingHigh
+    pendingHigh    := high
+    pendingHighBar := bar_index
+
+if na(pendingLow) or low < pendingLow
+    pendingLow    := low
+    pendingLowBar := bar_index
+
+// ── Confirm structure high ──
+// A structure high is confirmed when:
+// 1. We have a pending high above the last confirmed high
+// 2. A bearish candle appears (or we're past 1+ bars since last bull candle)
+// 3. This is Nephew_Sam_'s core: you don't mark the high until a bear candle confirms it
+
+lastConfHigh = array.get(structHighs, 0)
+lastConfLow  = array.get(structLows, 0)
+prevConfHigh = array.get(structHighs, 1)
+prevConfLow  = array.get(structLows, 1)
+
+isNewStructHigh = false
+isNewStructLow  = false
+
+bullishMSS = false
+bearishMSS = false
+
+// Confirm HIGH: pending high > last confirmed high, bear candle confirms
+confirmHigh = not na(pendingHigh) and (not na(lastConfHigh) ? pendingHigh > lastConfHigh : true)
+candleConfirmH = i_requireCandleConfirm ? (barsSinceBull >= 1 and isBearCandle) : true
+
+if confirmHigh and candleConfirmH and lastStructType != "high"
+    // Record the confirmed high
+    array.unshift(structHighs, pendingHigh)
+    array.unshift(structHighBars, pendingHighBar)
+    if array.size(structHighs) > 5
+        array.pop(structHighs)
+        array.pop(structHighBars)
+    
+    // Now find the lowest point between this high and the previous high for the confirmed low
+    float lowestBetween = na
+    int   lowestBar     = na
+    prevHighBar = array.get(structHighBars, 1)
+    if not na(prevHighBar) and pendingHighBar > prevHighBar
+        for j = bar_index - pendingHighBar to bar_index - prevHighBar
+            if j >= 0 and j < 5000
+                if na(lowestBetween) or low[j] < lowestBetween
+                    lowestBetween := low[j]
+                    lowestBar     := bar_index - j
+    
+    // If this low is different from last confirmed low, add it
+    if not na(lowestBetween) and (na(lastConfLow) or lowestBar != array.get(structLowBars, 0))
+        array.unshift(structLows, lowestBetween)
+        array.unshift(structLowBars, lowestBar)
+        if array.size(structLows) > 5
+            array.pop(structLows)
+            array.pop(structLowBars)
+    
+    isNewStructHigh := true
+    lastStructType  := "high"
+    
+    // Reset pending low tracker from this confirmed high
+    pendingLow    := low
+    pendingLowBar := bar_index
+
+// Confirm LOW: pending low < last confirmed low, bull candle confirms
+confirmLow = not na(pendingLow) and (not na(lastConfLow) ? pendingLow < lastConfLow : true)
+candleConfirmL = i_requireCandleConfirm ? (barsSinceBear >= 1 and isBullCandle) : true
+
+if confirmLow and candleConfirmL and lastStructType != "low"
+    // Record the confirmed low
+    array.unshift(structLows, pendingLow)
+    array.unshift(structLowBars, pendingLowBar)
+    if array.size(structLows) > 5
+        array.pop(structLows)
+        array.pop(structLowBars)
+    
+    // Find highest between this low and previous low for confirmed high
+    float highestBetween = na
+    int   highestBar     = na
+    prevLowBar = array.get(structLowBars, 1)
+    if not na(prevLowBar) and pendingLowBar > prevLowBar
+        for j = bar_index - pendingLowBar to bar_index - prevLowBar
+            if j >= 0 and j < 5000
+                if na(highestBetween) or high[j] > highestBetween
+                    highestBetween := high[j]
+                    highestBar     := bar_index - j
+    
+    if not na(highestBetween) and (na(lastConfHigh) or highestBar != array.get(structHighBars, 0))
+        array.unshift(structHighs, highestBetween)
+        array.unshift(structHighBars, highestBar)
+        if array.size(structHighs) > 5
+            array.pop(structHighs)
+            array.pop(structHighBars)
+    
+    isNewStructLow := true
+    lastStructType := "low"
+    
+    pendingHigh    := high
+    pendingHighBar := bar_index
+
+// ── HH/HL/LH/LL Classification ──
+sh0 = array.get(structHighs, 0)
+sh1 = array.get(structHighs, 1)
+sl0 = array.get(structLows, 0)
+sl1 = array.get(structLows, 1)
+
+isHH = not na(sh0) and not na(sh1) and sh0 > sh1
+isLH = not na(sh0) and not na(sh1) and sh0 < sh1
+isHL = not na(sl0) and not na(sl1) and sl0 > sl1
+isLL = not na(sl0) and not na(sl1) and sl0 < sl1
+
+// ── Structure Direction (TLQ-style from Nephew_Sam_) ──
+// Bullish: HH + HL. Bearish: LL + LH. MSS = first break of opposite structure.
+prevBias = structureBias
+
+if isNewStructHigh and isHH and isHL
+    structureBias := 1
+if isNewStructLow and isLL and isLH
+    structureBias := -1
+
+// MSS: bias flip with displacement
+bullishMSS := structureBias == 1 and prevBias <= 0 and (not i_requireDisp or isDisplacement)
+bearishMSS := structureBias == -1 and prevBias >= 0 and (not i_requireDisp or isDisplacement)
+
+if bullishMSS
+    mssLevel := sh0
+    mssBar   := bar_index
+if bearishMSS
+    mssLevel := sl0
+    mssBar   := bar_index
+
+// BOS: continuation break in same direction
+bullishBOS = isNewStructHigh and isHH and structureBias == 1 and not bullishMSS
+bearishBOS = isNewStructLow and isLL and structureBias == -1 and not bearishMSS
+
+// ── Structure labels (capped) ──
+if i_showStructure and isNewStructHigh
+    hhllText = isHH ? "HH" : "LH"
+    hhllClr  = isHH ? i_bullColor : i_bearColor
+    f_addStructLabel(label.new(array.get(structHighBars, 0), sh0, hhllText, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(hhllClr, 80), textcolor=hhllClr, size=size.tiny))
+
+if i_showStructure and isNewStructLow
+    llhlText = isLL ? "LL" : "HL"
+    llhlClr  = isLL ? i_bearColor : i_bullColor
+    f_addStructLabel(label.new(array.get(structLowBars, 0), sl0, llhlText, xloc=xloc.bar_index, style=label.style_label_up, color=color.new(llhlClr, 80), textcolor=llhlClr, size=size.tiny))
+
+if i_showStructure and bullishMSS
+    f_addStructLabel(label.new(bar_index, low, "MSS ▲", style=label.style_label_up, color=i_bullColor, textcolor=color.white, size=size.tiny))
+if i_showStructure and bearishMSS
+    f_addStructLabel(label.new(bar_index, high, "MSS ▼", style=label.style_label_down, color=i_bearColor, textcolor=color.white, size=size.tiny))
+
+if i_showStructure and bullishBOS
+    f_addStructLabel(label.new(bar_index, low, "BOS", style=label.style_label_up, color=color.new(i_bullColor, 60), textcolor=color.white, size=size.tiny))
+if i_showStructure and bearishBOS
+    f_addStructLabel(label.new(bar_index, high, "BOS", style=label.style_label_down, color=color.new(i_bearColor, 60), textcolor=color.white, size=size.tiny))
+
+// Expose swing values for other modules
+lastSwingHigh    = nz(sh0)
+lastSwingLow     = nz(sl0)
+prevSwingHigh    = nz(sh1)
+prevSwingLow     = nz(sl1)
+lastSwingHighBar = array.get(structHighBars, 0)
+lastSwingLowBar  = array.get(structLowBars, 0)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── FAIR VALUE GAPS ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float[] fvgTopArr    = array.new_float(0)
+var float[] fvgBotArr    = array.new_float(0)
+var int[]   fvgBarArr    = array.new_int(0)
+var int[]   fvgDirArr    = array.new_int(0)
+var bool[]  fvgActiveArr = array.new_bool(0)
+var box[]   fvgBoxArr    = array.new_box(0)  // v2: track box objects to avoid spam
+
+bullFVG = i_fvgEnabled and low > high[2] and (low - high[2]) > atr14 * i_fvgMinSize
+bearFVG = i_fvgEnabled and high < low[2] and (low[2] - high) > atr14 * i_fvgMinSize
+
+if bullFVG
+    array.push(fvgTopArr, low)
+    array.push(fvgBotArr, high[2])
+    array.push(fvgBarArr, bar_index)
+    array.push(fvgDirArr, 1)
+    array.push(fvgActiveArr, true)
+    bx = i_showFVG ? box.new(bar_index - 2, low, bar_index, high[2], bgcolor=i_fvgBullColor, border_color=color.new(i_bullColor, 60), border_width=1) : na
+    array.push(fvgBoxArr, bx)
+
+if bearFVG
+    array.push(fvgTopArr, low[2])
+    array.push(fvgBotArr, high)
+    array.push(fvgBarArr, bar_index)
+    array.push(fvgDirArr, -1)
+    array.push(fvgActiveArr, true)
+    bx = i_showFVG ? box.new(bar_index - 2, low[2], bar_index, high, bgcolor=i_fvgBearColor, border_color=color.new(i_bearColor, 60), border_width=1) : na
+    array.push(fvgBoxArr, bx)
+
+// Manage FVG lifecycle — v2: extend existing boxes instead of creating new ones
+if array.size(fvgTopArr) > 0
+    for i = array.size(fvgTopArr) - 1 to 0
+        age = bar_index - array.get(fvgBarArr, i)
+        isActive = array.get(fvgActiveArr, i)
+        fTop = array.get(fvgTopArr, i)
+        fBot = array.get(fvgBotArr, i)
+        fDir = array.get(fvgDirArr, i)
+        
+        // Check fill or expiry
+        filled = (fDir == 1 and low <= fBot) or (fDir == -1 and high >= fTop)
+        expired = age > i_fvgMaxAge
+        
+        if filled or expired or not isActive
+            if isActive
+                array.set(fvgActiveArr, i, false)
+            if filled or expired
+                bx = array.get(fvgBoxArr, i)
+                if not na(bx)
+                    box.delete(bx)
+                array.remove(fvgTopArr, i)
+                array.remove(fvgBotArr, i)
+                array.remove(fvgBarArr, i)
+                array.remove(fvgDirArr, i)
+                array.remove(fvgActiveArr, i)
+                array.remove(fvgBoxArr, i)
+        else
+            // Extend active box to current bar
+            bx = array.get(fvgBoxArr, i)
+            if not na(bx)
+                box.set_right(bx, bar_index)
+
+// Find nearest active FVG
+f_nearestFVG(_dir) =>
+    float bestTop = na
+    float bestBot = na
+    float bestDist = 1e10
+    if array.size(fvgTopArr) > 0
+        for i = 0 to array.size(fvgTopArr) - 1
+            if array.get(fvgActiveArr, i) and array.get(fvgDirArr, i) == _dir
+                fTop = array.get(fvgTopArr, i)
+                fBot = array.get(fvgBotArr, i)
+                ce   = (fTop + fBot) / 2
+                dist = math.abs(close - ce)
+                if dist < bestDist
+                    bestDist := dist
+                    bestTop  := fTop
+                    bestBot  := fBot
+    [bestTop, bestBot]
+
+[nearBullFVGTop, nearBullFVGBot] = f_nearestFVG(1)
+[nearBearFVGTop, nearBearFVGBot] = f_nearestFVG(-1)
+
+f_fvgEntryLevel(_top, _bot, _dir) =>
+    float lvl = na
+    if not na(_top) and not na(_bot)
+        if i_fvgEntry == "Complete Fill"
+            lvl := _dir == 1 ? _bot : _top
+        else if i_fvgEntry == "CE (50%)"
+            lvl := (_top + _bot) / 2
+        else
+            lvl := _dir == 1 ? _top : _bot
+    lvl
+
+bullFVGEntry = f_fvgEntryLevel(nearBullFVGTop, nearBullFVGBot, 1)
+bearFVGEntry = f_fvgEntryLevel(nearBearFVGTop, nearBearFVGBot, -1)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── ORDER BLOCKS ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float[] obTopArr     = array.new_float(0)
+var float[] obBotArr     = array.new_float(0)
+var int[]   obBarArr     = array.new_int(0)
+var int[]   obDirArr     = array.new_int(0)
+var int[]   obTouchArr   = array.new_int(0)
+var bool[]  obActiveArr  = array.new_bool(0)
+var bool[]  obInZonePrev = array.new_bool(0)  // v2: per-visit touch tracking
+var box[]   obBoxArr     = array.new_box(0)   // v2: managed drawing
+
+bullDisplacement = close > open and bodySize > atr14 * i_mssDisplace and close[1] < open[1]
+bearDisplacement = close < open and bodySize > atr14 * i_mssDisplace and close[1] > open[1]
+
+if i_obEnabled and bullDisplacement
+    array.push(obTopArr, math.max(open[1], close[1]))
+    array.push(obBotArr, math.min(open[1], close[1]))
+    array.push(obBarArr, bar_index - 1)
+    array.push(obDirArr, 1)
+    array.push(obTouchArr, 0)
+    array.push(obActiveArr, true)
+    array.push(obInZonePrev, false)
+    bx = i_showOB ? box.new(bar_index - 1, math.max(open[1], close[1]), bar_index, math.min(open[1], close[1]), bgcolor=i_obBullColor, border_color=color.new(#22d3ee, 60), border_width=1, border_style=line.style_dashed) : na
+    array.push(obBoxArr, bx)
+
+if i_obEnabled and bearDisplacement
+    array.push(obTopArr, math.max(open[1], close[1]))
+    array.push(obBotArr, math.min(open[1], close[1]))
+    array.push(obBarArr, bar_index - 1)
+    array.push(obDirArr, -1)
+    array.push(obTouchArr, 0)
+    array.push(obActiveArr, true)
+    array.push(obInZonePrev, false)
+    bx = i_showOB ? box.new(bar_index - 1, math.max(open[1], close[1]), bar_index, math.min(open[1], close[1]), bgcolor=i_obBearColor, border_color=color.new(#f59e0b, 60), border_width=1, border_style=line.style_dashed) : na
+    array.push(obBoxArr, bx)
+
+// Manage OB lifecycle — v2: per-visit touch counting (not per-bar)
+if array.size(obTopArr) > 0
+    for i = array.size(obTopArr) - 1 to 0
+        age = bar_index - array.get(obBarArr, i)
+        oTop = array.get(obTopArr, i)
+        oBot = array.get(obBotArr, i)
+        oDir = array.get(obDirArr, i)
+        touches = array.get(obTouchArr, i)
+        wasInZone = array.get(obInZonePrev, i)
+        isActive = array.get(obActiveArr, i)
+        
+        inZone = low <= oTop and high >= oBot
+        
+        // v2 FIX: only count touch on zone ENTRY, not every bar while inside
+        if inZone and not wasInZone and isActive
+            array.set(obTouchArr, i, touches + 1)
+            touches := touches + 1
+        array.set(obInZonePrev, i, inZone)
+        
+        // Invalidation rules
+        shouldRemove = age > 200 or touches >= i_obMaxTouches or (oDir == 1 and close < oBot) or (oDir == -1 and close > oTop)
+        
+        if shouldRemove or not isActive
+            if isActive
+                array.set(obActiveArr, i, false)
+            if shouldRemove
+                bx = array.get(obBoxArr, i)
+                if not na(bx)
+                    box.delete(bx)
+                array.remove(obTopArr, i)
+                array.remove(obBotArr, i)
+                array.remove(obBarArr, i)
+                array.remove(obDirArr, i)
+                array.remove(obTouchArr, i)
+                array.remove(obActiveArr, i)
+                array.remove(obInZonePrev, i)
+                array.remove(obBoxArr, i)
+        else
+            bx = array.get(obBoxArr, i)
+            if not na(bx)
+                box.set_right(bx, bar_index)
+
+// Find nearest active OB
+f_nearestOB(_dir) =>
+    float bestTop = na
+    float bestBot = na
+    float bestDist = 1e10
+    if array.size(obTopArr) > 0
+        for i = 0 to array.size(obTopArr) - 1
+            if array.get(obActiveArr, i) and array.get(obDirArr, i) == _dir
+                oTop = array.get(obTopArr, i)
+                oBot = array.get(obBotArr, i)
+                mid  = (oTop + oBot) / 2
+                dist = math.abs(close - mid)
+                if dist < bestDist
+                    bestDist := dist
+                    bestTop  := oTop
+                    bestBot  := oBot
+    [bestTop, bestBot]
+
+[nearBullOBTop, nearBullOBBot] = f_nearestOB(1)
+[nearBearOBTop, nearBearOBBot] = f_nearestOB(-1)
+
+bullOBEntry = not na(nearBullOBTop) ? (nearBullOBTop + nearBullOBBot) / 2 : na
+bearOBEntry = not na(nearBearOBTop) ? (nearBearOBTop + nearBearOBBot) / 2 : na
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── BREAKER BLOCKS (NEW in v2) ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Breaker = a failed OB. When a bullish OB gets broken (close < OB bot),
+// it becomes a bearish breaker (resistance). Vice versa.
+// Tracked via the OB invalidation — when an OB fails, we record it as a breaker.
+
+var float[] bbTopArr    = array.new_float(0)
+var float[] bbBotArr    = array.new_float(0)
+var int[]   bbDirArr    = array.new_int(0)
+var int[]   bbBarArr    = array.new_int(0)
+var bool[]  bbActiveArr = array.new_bool(0)
+var box[]   bbBoxArr    = array.new_box(0)
+
+// Detect breakers from OB failures — check if any previous OB was just invalidated
+// We detect when price closes through an OB in the opposite direction
+// Bullish OB broken = bearish breaker. Bearish OB broken = bullish breaker.
+
+bullOBBroken = i_obEnabled and not na(nearBullOBBot) and close < nearBullOBBot and bodySize > atr14 * 0.3
+bearOBBroken = i_obEnabled and not na(nearBearOBTop) and close > nearBearOBTop and bodySize > atr14 * 0.3
+
+if i_bbEnabled and bullOBBroken and not na(nearBullOBTop)
+    // Failed bullish OB becomes bearish breaker (now resistance)
+    array.push(bbTopArr, nearBullOBTop)
+    array.push(bbBotArr, nearBullOBBot)
+    array.push(bbDirArr, -1)
+    array.push(bbBarArr, bar_index)
+    array.push(bbActiveArr, true)
+    bx = i_showBB ? box.new(bar_index, nearBullOBTop, bar_index, nearBullOBBot, bgcolor=color.new(#f59e0b, 90), border_color=color.new(#f59e0b, 40), border_width=1, border_style=line.style_dotted) : na
+    array.push(bbBoxArr, bx)
+
+if i_bbEnabled and bearOBBroken and not na(nearBearOBTop)
+    // Failed bearish OB becomes bullish breaker (now support)
+    array.push(bbTopArr, nearBearOBTop)
+    array.push(bbBotArr, nearBearOBBot)
+    array.push(bbDirArr, 1)
+    array.push(bbBarArr, bar_index)
+    array.push(bbActiveArr, true)
+    bx = i_showBB ? box.new(bar_index, nearBearOBTop, bar_index, nearBearOBBot, bgcolor=color.new(#818cf8, 90), border_color=color.new(#818cf8, 40), border_width=1, border_style=line.style_dotted) : na
+    array.push(bbBoxArr, bx)
+
+// Manage breaker lifecycle
+if array.size(bbTopArr) > 0
+    for i = array.size(bbTopArr) - 1 to 0
+        age = bar_index - array.get(bbBarArr, i)
+        bTop = array.get(bbTopArr, i)
+        bBot = array.get(bbBotArr, i)
+        bDir = array.get(bbDirArr, i)
+        
+        // Breakers valid for 100 bars, invalidated if price closes through
+        shouldRemove = age > 100 or (bDir == 1 and close < bBot) or (bDir == -1 and close > bTop)
+        
+        if shouldRemove
+            bx = array.get(bbBoxArr, i)
+            if not na(bx)
+                box.delete(bx)
+            array.remove(bbTopArr, i)
+            array.remove(bbBotArr, i)
+            array.remove(bbDirArr, i)
+            array.remove(bbBarArr, i)
+            array.remove(bbActiveArr, i)
+            array.remove(bbBoxArr, i)
+        else
+            bx = array.get(bbBoxArr, i)
+            if not na(bx)
+                box.set_right(bx, bar_index)
+
+// Check if price is at a breaker
+f_atBreaker(_dir) =>
+    bool result = false
+    if array.size(bbTopArr) > 0
+        for i = 0 to array.size(bbTopArr) - 1
+            if array.get(bbActiveArr, i) and array.get(bbDirArr, i) == _dir
+                bTop = array.get(bbTopArr, i)
+                bBot = array.get(bbBotArr, i)
+                if low <= bTop and high >= bBot
+                    result := true
+    result
+
+atBullBreaker = f_atBreaker(1)
+atBearBreaker = f_atBreaker(-1)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── OTE (OPTIMAL TRADE ENTRY) ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float oteSwingHigh = na
+var float oteSwingLow  = na
+var bool  oteActive    = false
+var int   oteDirection = 0
+
+if bullishMSS
+    oteSwingLow  := lastSwingLow
+    oteSwingHigh := high
+    oteActive    := true
+    oteDirection := 1
+
+if bearishMSS
+    oteSwingHigh := lastSwingHigh
+    oteSwingLow  := low
+    oteActive    := true
+    oteDirection := -1
+
+oteRange     = oteSwingHigh - oteSwingLow
+oteLevelLow  = oteDirection == 1 ? oteSwingHigh - oteRange * i_oteHigh : oteSwingLow + oteRange * i_oteLow
+oteLevelHigh = oteDirection == 1 ? oteSwingHigh - oteRange * i_oteLow : oteSwingLow + oteRange * i_oteHigh
+oteSweet     = oteDirection == 1 ? oteSwingHigh - oteRange * i_oteSweet : oteSwingLow + oteRange * i_oteSweet
+inOTEZone    = oteActive and low <= math.max(oteLevelLow, oteLevelHigh) and high >= math.min(oteLevelLow, oteLevelHigh)
+
+if oteActive and oteDirection == 1 and close < oteSwingLow
+    oteActive := false
+if oteActive and oteDirection == -1 and close > oteSwingHigh
+    oteActive := false
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── LIQUIDITY LEVELS ───────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_on)
+
+// EQH/EQL detection — equal highs/lows = engineered liquidity pools
+eqhThreshold = atr14 * 0.1
+hasEQH = not na(lastSwingHigh) and not na(prevSwingHigh) and math.abs(lastSwingHigh - prevSwingHigh) < eqhThreshold
+hasEQL = not na(lastSwingLow) and not na(prevSwingLow) and math.abs(lastSwingLow - prevSwingLow) < eqhThreshold
+
+// Track EQH/EQL formation events (only fire once when first detected)
+var bool prevHasEQH = false
+var bool prevHasEQL = false
+eqhFormed = hasEQH and not prevHasEQH  // rising edge
+eqlFormed = hasEQL and not prevHasEQL
+prevHasEQH := hasEQH
+prevHasEQL := hasEQL
+
+// EQH/EQL sweep detection — sweeping equal levels is HIGH conviction
+eqhSwept = hasEQH and high > lastSwingHigh and close < lastSwingHigh  // wick through EQH, close back
+eqlSwept = hasEQL and low < lastSwingLow and close > lastSwingLow    // wick through EQL, close back
+
+// Liquidity sweep: wick through then close back (enhanced with EQH/EQL)
+bullLiqSweep = i_liqEnabled and (low < pdl or low < lastSwingLow or eqlSwept) and close > open and close > pdl
+bearLiqSweep = i_liqEnabled and (high > pdh or high > lastSwingHigh or eqhSwept) and close < open and close < pdh
+
+// v2: persistent liquidity lines (only on last bar)
+var line lnPDH = na
+var line lnPDL = na
+var line lnPWH = na
+var line lnPWL = na
+var label lblPDH = na
+var label lblPDL = na
+var label lblPWH = na
+var label lblPWL = na
+if i_showLiq and barstate.islast
+    // Delete previous to avoid spam
+    if not na(lnPDH)
+        line.delete(lnPDH)
+    if not na(lnPDL)
+        line.delete(lnPDL)
+    if not na(lnPWH)
+        line.delete(lnPWH)
+    if not na(lnPWL)
+        line.delete(lnPWL)
+    if not na(lblPDH)
+        label.delete(lblPDH)
+    if not na(lblPDL)
+        label.delete(lblPDL)
+    if not na(lblPWH)
+        label.delete(lblPWH)
+    if not na(lblPWL)
+        label.delete(lblPWL)
+    
+    if not na(pdh)
+        lnPDH := line.new(bar_index - 30, pdh, bar_index + 5, pdh, color=color.new(#f59e0b, 50), style=line.style_dotted, width=1)
+        lblPDH := label.new(bar_index + 5, pdh, "PDH", style=label.style_none, textcolor=color.new(#f59e0b, 50), size=size.tiny)
+    if not na(pdl)
+        lnPDL := line.new(bar_index - 30, pdl, bar_index + 5, pdl, color=color.new(#f59e0b, 50), style=line.style_dotted, width=1)
+        lblPDL := label.new(bar_index + 5, pdl, "PDL", style=label.style_none, textcolor=color.new(#f59e0b, 50), size=size.tiny)
+    if not na(pwh)
+        lnPWH := line.new(bar_index - 30, pwh, bar_index + 5, pwh, color=color.new(#c084fc, 50), style=line.style_dotted, width=1)
+        lblPWH := label.new(bar_index + 5, pwh, "PWH", style=label.style_none, textcolor=color.new(#c084fc, 50), size=size.tiny)
+    if not na(pwl)
+        lnPWL := line.new(bar_index - 30, pwl, bar_index + 5, pwl, color=color.new(#c084fc, 50), style=line.style_dotted, width=1)
+        lblPWL := label.new(bar_index + 5, pwl, "PWL", style=label.style_none, textcolor=color.new(#c084fc, 50), size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── SMT DIVERGENCE (v3 NEW) ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// SMT = Smart Money Technique. When correlated pairs diverge at swing points,
+// it reveals that the move is engineered (liquidity grab), not genuine.
+// Bullish SMT: our asset makes a lower low, correlated asset holds its low
+// Bearish SMT: our asset makes a higher high, correlated asset holds its high
+// For inverse pairs (e.g. EUR/USD vs DXY), the logic flips.
+
+smtHigh = request.security(i_smtSymbol, timeframe.period, ta.highest(high, i_smtLookback), lookahead=barmerge.lookahead_off)
+smtLow  = request.security(i_smtSymbol, timeframe.period, ta.lowest(low, i_smtLookback), lookahead=barmerge.lookahead_off)
+
+smtPrevHigh = request.security(i_smtSymbol, timeframe.period, ta.highest(high, i_smtLookback)[i_smtLookback], lookahead=barmerge.lookahead_off)
+smtPrevLow  = request.security(i_smtSymbol, timeframe.period, ta.lowest(low, i_smtLookback)[i_smtLookback], lookahead=barmerge.lookahead_off)
+
+// Our asset's recent swing comparison
+ourNewLow  = ta.lowest(low, i_smtLookback) < ta.lowest(low, i_smtLookback)[i_smtLookback]
+ourNewHigh = ta.highest(high, i_smtLookback) > ta.highest(high, i_smtLookback)[i_smtLookback]
+
+// Correlated asset's swing comparison
+smtNewLow  = not na(smtLow) and not na(smtPrevLow) and smtLow < smtPrevLow
+smtNewHigh = not na(smtHigh) and not na(smtPrevHigh) and smtHigh > smtPrevHigh
+
+// Positive correlation SMT:
+// Bullish: we make new low, they DON'T → our low is a fake sweep
+// Bearish: we make new high, they DON'T → our high is a fake sweep
+// Inverse correlation: flip the correlated pair's logic
+
+bullSMT_pos = ourNewLow and not smtNewLow       // we sweep low, they hold
+bearSMT_pos = ourNewHigh and not smtNewHigh      // we sweep high, they hold
+
+bullSMT_inv = ourNewLow and smtNewHigh           // we sweep low, they make new high (inverse)
+bearSMT_inv = ourNewHigh and smtNewLow           // we sweep high, they make new low (inverse)
+
+bullishSMT = i_smtEnabled and (i_smtInverse ? bullSMT_inv : bullSMT_pos)
+bearishSMT = i_smtEnabled and (i_smtInverse ? bearSMT_inv : bearSMT_pos)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── CONFLUENCE SCORING (v3: updated with SMT) ──────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Count how many factors align for the trade — minimum required to enter
+fvgLongTrigger  = i_fvgEnabled and not na(bullFVGEntry) and low <= nearBullFVGTop and close > nearBullFVGBot
+obLongTrigger   = i_obEnabled and not na(bullOBEntry) and low <= nearBullOBTop and close > nearBullOBBot
+oteLongTrigger  = i_oteEnabled and inOTEZone and oteDirection == 1
+liqLongTrigger  = bullLiqSweep
+htfLongConf     = htfBias == 1
+bbLongConf      = atBullBreaker
+
+fvgShortTrigger = i_fvgEnabled and not na(bearFVGEntry) and high >= nearBearFVGBot and close < nearBearFVGTop
+obShortTrigger  = i_obEnabled and not na(bearOBEntry) and high >= nearBearOBBot and close < nearBearOBTop
+oteShortTrigger = i_oteEnabled and inOTEZone and oteDirection == -1
+liqShortTrigger = bearLiqSweep
+htfShortConf    = htfBias == -1
+bbShortConf     = atBearBreaker
+
+// Confluence score
+smtLongConf  = bullishSMT
+smtShortConf = bearishSMT
+
+longScore  = (fvgLongTrigger ? 1 : 0) + (obLongTrigger ? 1 : 0) + (oteLongTrigger ? 1 : 0) + (liqLongTrigger ? 1 : 0) + (htfLongConf ? 1 : 0) + (bbLongConf ? 1 : 0) + (smtLongConf ? 1 : 0)
+shortScore = (fvgShortTrigger ? 1 : 0) + (obShortTrigger ? 1 : 0) + (oteShortTrigger ? 1 : 0) + (liqShortTrigger ? 1 : 0) + (htfShortConf ? 1 : 0) + (bbShortConf ? 1 : 0) + (smtShortConf ? 1 : 0)
+
+// Direction filter
+canLong  = i_direction != "Short Only"
+canShort = i_direction != "Long Only"
+
+// At least one PD array hit + meets confluence minimum
+longPDArray = fvgLongTrigger or obLongTrigger or oteLongTrigger or liqLongTrigger
+shortPDArray = fvgShortTrigger or obShortTrigger or oteShortTrigger or liqShortTrigger
+
+longSignal  = canLong and structureBias == 1 and htfBullish and longPDArray and longScore >= i_minConfluence and sessionOK and tradeAllowed and adrOK and strategy.position_size == 0
+shortSignal = canShort and structureBias == -1 and htfBearish and shortPDArray and shortScore >= i_minConfluence and sessionOK and tradeAllowed and adrOK and strategy.position_size == 0
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── LOCKED SL/TP STATE MACHINE (v2 FIX) ───────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// v2: SL and TP are calculated ONCE at entry and locked via var
+// They do NOT recalculate every bar like v1
+
+buffer = atr14 * i_slBuffer
+
+f_calcSL(_dir) =>
+    float sl = na
+    if i_slType == "Candle Body"
+        sl := _dir == 1 ? math.min(open, close) - buffer : math.max(open, close) + buffer
+    else if i_slType == "FVG Invalidation"
+        if _dir == 1 and not na(nearBullFVGBot)
+            sl := nearBullFVGBot - buffer
+        else if _dir == -1 and not na(nearBearFVGTop)
+            sl := nearBearFVGTop + buffer
+        if na(sl)
+            sl := _dir == 1 ? math.min(open, close) - buffer : math.max(open, close) + buffer
+    else if i_slType == "OB Invalidation"
+        if _dir == 1 and not na(nearBullOBBot)
+            sl := nearBullOBBot - buffer
+        else if _dir == -1 and not na(nearBearOBTop)
+            sl := nearBearOBTop + buffer
+        if na(sl)
+            sl := _dir == 1 ? low - buffer : high + buffer
+    else
+        if _dir == 1 and not na(lastSwingLow)
+            sl := lastSwingLow - buffer
+        else if _dir == -1 and not na(lastSwingHigh)
+            sl := lastSwingHigh + buffer
+        if na(sl)
+            sl := _dir == 1 ? low - atr14 : high + atr14
+    sl
+
+// Locked trade state variables
+var float lockedSL      = na
+var float lockedTP1     = na
+var float lockedTP2     = na
+var float lockedEntry   = na
+var float lockedATR     = na  // v3: lock ATR at entry for trail consistency
+var int   lockedDir     = 0  // 1 = long, -1 = short
+var bool  tp1Hit        = false
+var string lockedModel  = ""
+var int   lockedScore   = 0
+
+// Position sizing — v2: handle forex where pointvalue can be 0
+f_posSize(_riskPerShare) =>
+    pv = syminfo.pointvalue
+    if pv == 0
+        pv := 1  // forex fallback
+    _riskPerShare * pv > 0 ? math.floor((strategy.equity * i_riskPct / 100) / (_riskPerShare * pv)) : 0
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── EXECUTE TRADES (v2 state machine) ──────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+if longSignal
+    sl = f_calcSL(1)
+    risk = close - sl
+    if risk > 0
+        tp1 = close + risk * i_tp1RR
+        tp2 = close + risk * i_tp2RR
+        qty = math.max(f_posSize(risk), 1)
+        
+        strategy.entry("Long", strategy.long, qty=qty)
+        
+        // Lock all levels at entry
+        lockedSL    := sl
+        lockedTP1   := tp1
+        lockedTP2   := tp2
+        lockedEntry := close
+        lockedDir   := 1
+        lockedATR   := atr14  // v3: freeze ATR at entry
+        tp1Hit      := false
+        dailyTrades += 1
+        oteActive   := false
+        lockedScore := longScore
+        lockedModel := liqLongTrigger ? "Liq Sweep" : oteLongTrigger ? "OTE" : obLongTrigger ? "OB" : fvgLongTrigger ? "FVG" : "Breaker"
+
+if shortSignal
+    sl = f_calcSL(-1)
+    risk = sl - close
+    if risk > 0
+        tp1 = close - risk * i_tp1RR
+        tp2 = close - risk * i_tp2RR
+        qty = math.max(f_posSize(risk), 1)
+        
+        strategy.entry("Short", strategy.short, qty=qty)
+        
+        lockedSL    := sl
+        lockedTP1   := tp1
+        lockedTP2   := tp2
+        lockedEntry := close
+        lockedDir   := -1
+        lockedATR   := atr14  // v3: freeze ATR at entry
+        tp1Hit      := false
+        dailyTrades += 1
+        oteActive   := false
+        lockedScore := shortScore
+        lockedModel := liqShortTrigger ? "Liq Sweep" : oteShortTrigger ? "OTE" : obShortTrigger ? "OB" : fvgShortTrigger ? "FVG" : "Breaker"
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── EXIT STATE MACHINE (v2 FIX) ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// v2: Single exit call with locked levels — no conflicting exit IDs
+// After TP1: move SL to breakeven, continue to TP2 or trail
+
+inPosition = strategy.position_size != 0
+
+if inPosition and not na(lockedSL)
+    // Detect if TP1 was hit (price reached TP1 level)
+    if lockedDir == 1 and high >= lockedTP1 and not tp1Hit
+        tp1Hit := true
+        if i_moveSLtoBE
+            lockedSL := lockedEntry  // Move SL to breakeven
+    if lockedDir == -1 and low <= lockedTP1 and not tp1Hit
+        tp1Hit := true
+        if i_moveSLtoBE
+            lockedSL := lockedEntry
+
+    // TP1: partial with SL
+    if not tp1Hit
+        if lockedDir == 1
+            strategy.exit("Exit Long", "Long", qty_percent=i_tp1Pct, limit=lockedTP1, stop=lockedSL)
+        else
+            strategy.exit("Exit Short", "Short", qty_percent=i_tp1Pct, limit=lockedTP1, stop=lockedSL)
+    else
+        // After TP1: trail or TP2
+        if i_tpTrail
+            trailTicks = math.round(nz(lockedATR, atr14) * i_trailATR / syminfo.mintick)  // v3: use locked ATR
+            if lockedDir == 1
+                strategy.exit("Exit Long", "Long", stop=lockedSL, trail_points=trailTicks, trail_offset=trailTicks)
+            else
+                strategy.exit("Exit Short", "Short", stop=lockedSL, trail_points=trailTicks, trail_offset=trailTicks)
+        else if i_tp2Pct > 0
+            if lockedDir == 1
+                strategy.exit("Exit Long", "Long", limit=lockedTP2, stop=lockedSL)
+            else
+                strategy.exit("Exit Short", "Short", limit=lockedTP2, stop=lockedSL)
+        else
+            if lockedDir == 1
+                strategy.exit("Exit Long", "Long", stop=lockedSL)
+            else
+                strategy.exit("Exit Short", "Short", stop=lockedSL)
+
+// Close before lunch
+if i_closeLunch and isNYLunch and inPosition
+    strategy.close_all("Lunch Close")
+
+// Reset state when flat
+if strategy.position_size == 0 and lockedDir != 0
+    lockedDir   := 0
+    lockedSL    := na
+    lockedTP1   := na
+    lockedTP2   := na
+    lockedEntry := na
+    lockedATR   := na
+    tp1Hit      := false
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── VISUAL OVERLAYS ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Killzone background
+kzColor = isLondonKZ ? color.new(#818cf8, 94) : isNYAMKZ ? color.new(#22d3ee, 94) : isNYPMKZ ? color.new(#f59e0b, 94) : isSilverAM ? color.new(#4ade80, 94) : isSilverPM ? color.new(#c084fc, 94) : na
+bgcolor(i_kzFilter ? kzColor : na, title="Killzone BG")
+bgcolor(isNYLunch ? color.new(#f87171, 96) : na, title="NY Lunch")
+
+// ICT Macro window highlight
+bgcolor(isMacroWindow ? color.new(#fbbf24, 94) : na, title="ICT Macro Window")
+
+// Entry signals
+plotshape(longSignal, "Long Entry", shape.triangleup, location.belowbar, i_bullColor, size=size.small)
+plotshape(shortSignal, "Short Entry", shape.triangledown, location.abovebar, i_bearColor, size=size.small)
+
+// SMT divergence markers on chart
+plotshape(i_smtEnabled and bullishSMT, "Bull SMT", shape.diamond, location.belowbar, color.new(#22d3ee, 20), size=size.tiny, text="SMT")
+plotshape(i_smtEnabled and bearishSMT, "Bear SMT", shape.diamond, location.abovebar, color.new(#f472b6, 20), size=size.tiny, text="SMT")
+
+// EQH/EQL markers — show where equal levels form (liquidity pools)
+plotshape(eqhFormed and i_showLiq, "EQH Formed", shape.xcross, location.abovebar, color.new(#f59e0b, 30), size=size.tiny, text="EQH")
+plotshape(eqlFormed and i_showLiq, "EQL Formed", shape.xcross, location.belowbar, color.new(#f59e0b, 30), size=size.tiny, text="EQL")
+
+// OTE zone
+p_oteTop = plot(oteActive and i_oteEnabled ? math.max(oteLevelLow, oteLevelHigh) : na, "OTE Top", color=color.new(#c084fc, 70), style=plot.style_linebr)
+p_oteBot = plot(oteActive and i_oteEnabled ? math.min(oteLevelLow, oteLevelHigh) : na, "OTE Bottom", color=color.new(#c084fc, 70), style=plot.style_linebr)
+fill(p_oteTop, p_oteBot, color=color.new(#c084fc, 92), title="OTE Zone Fill")
+plot(oteActive and i_oteEnabled ? oteSweet : na, "OTE Sweet Spot", color=color.new(#c084fc, 50), style=plot.style_circles, linewidth=1)
+
+// ADR levels
+plot(i_showADR and i_adrEnabled ? adrUpperTarget : na, "ADR Upper", color=color.new(#fbbf24, 60), style=plot.style_stepline_diamond, linewidth=1)
+plot(i_showADR and i_adrEnabled ? adrLowerTarget : na, "ADR Lower", color=color.new(#fbbf24, 60), style=plot.style_stepline_diamond, linewidth=1)
+
+// Weekly / Monthly / Quarterly Opens (v3)
+plot(i_showWeeklyOpen ? weeklyOpen : na, "Weekly Open", color=i_woColor, style=plot.style_stepline, linewidth=2)
+plot(i_showMonthlyOpen ? monthlyOpen : na, "Monthly Open", color=i_moColor, style=plot.style_stepline, linewidth=2)
+plot(i_showQuarterlyOpen ? quarterlyOpen : na, "Quarterly Open", color=i_qoColor, style=plot.style_stepline, linewidth=2)
+
+// Locked SL/TP lines while in trade
+plot(inPosition and lockedDir == 1 ? lockedSL : na, "Long SL", color=i_bearColor, style=plot.style_linebr, linewidth=1)
+plot(inPosition and lockedDir == -1 ? lockedSL : na, "Short SL", color=i_bearColor, style=plot.style_linebr, linewidth=1)
+plot(inPosition and lockedDir == 1 and not tp1Hit ? lockedTP1 : na, "Long TP1", color=i_bullColor, style=plot.style_linebr, linewidth=1)
+plot(inPosition and lockedDir == -1 and not tp1Hit ? lockedTP1 : na, "Short TP1", color=i_bullColor, style=plot.style_linebr, linewidth=1)
+
+// Structure bias bar color
+// v3: 4-state bar coloring — structure + bar direction
+bullBar = close > open
+barcolor(structureBias == 1 and bullBar ? color.new(i_bullColor, 50) : structureBias == 1 and not bullBar ? color.new(i_bullColor, 80) : structureBias == -1 and not bullBar ? color.new(i_bearColor, 50) : structureBias == -1 and bullBar ? color.new(i_bearColor, 80) : na, title="4-State Structure")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── DASHBOARD (v3) ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+if i_showDash and barstate.islast
+    var table dash = table.new(position.top_right, 2, 21, bgcolor=color.new(#111113, 10), border_color=color.new(#27272a, 10), border_width=1, frame_color=color.new(#27272a, 10), frame_width=1)
+    
+    biasStr = structureBias == 1 ? "BULLISH ▲" : structureBias == -1 ? "BEARISH ▼" : "NEUTRAL —"
+    biasClr = structureBias == 1 ? i_bullColor : structureBias == -1 ? i_bearColor : color.gray
+    
+    // v3: show HH/HL/LH/LL state
+    structState = (isHH ? "HH" : isLH ? "LH" : "—") + " / " + (isHL ? "HL" : isLL ? "LL" : "—")
+    structStateClr = isHH and isHL ? i_bullColor : isLL and isLH ? i_bearColor : color.gray
+    htfStr  = htfBias == 1 ? "BULLISH ▲" : htfBias == -1 ? "BEARISH ▼" : "NEUTRAL —"
+    htfClr  = htfBias == 1 ? i_bullColor : htfBias == -1 ? i_bearColor : color.gray
+    kzStr   = isLondonKZ ? "LONDON" : isNYAMKZ ? "NY AM" : isNYPMKZ ? "NY PM" : isSilverAM ? "SILVER AM" : isSilverPM ? "SILVER PM" : isMacroWindow ? "MACRO ⚡" : isNYLunch ? "LUNCH ⚠" : "OFF"
+    kzClr   = isLondonKZ ? #818cf8 : isNYAMKZ ? #22d3ee : isNYPMKZ ? #f59e0b : isMacroWindow ? #fbbf24 : isNYLunch ? #f87171 : color.gray
+    
+    activeFVGs = 0
+    if array.size(fvgActiveArr) > 0
+        for i = 0 to array.size(fvgActiveArr) - 1
+            if array.get(fvgActiveArr, i)
+                activeFVGs += 1
+    
+    activeOBs = 0
+    if array.size(obActiveArr) > 0
+        for i = 0 to array.size(obActiveArr) - 1
+            if array.get(obActiveArr, i)
+                activeOBs += 1
+    
+    activeBBs = 0
+    if array.size(bbActiveArr) > 0
+        for i = 0 to array.size(bbActiveArr) - 1
+            if array.get(bbActiveArr, i)
+                activeBBs += 1
+    
+    dowStr = isMonday ? "MON" : isTuesday ? "TUE" : isWednesday ? "WED" : isThursday ? "THU" : isFriday ? "FRI" : "—"
+    dowClr = isMonday ? #f87171 : isTuesday ? #4ade80 : isWednesday ? #4ade80 : isThursday ? #22d3ee : isFriday ? #f59e0b : color.gray
+    
+    table.cell(dash, 0, 0, "ICT PLAYBOOK", text_color=#22d3ee, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, "v3.0", text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 1, "HTF Bias", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 1, htfStr, text_color=htfClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 2, "LTF Bias", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 2, biasStr, text_color=biasClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 3, "Structure", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 3, structState, text_color=structStateClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 4, "Killzone", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 4, kzStr, text_color=kzClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 5, "Day", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 5, dowStr, text_color=dowClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 6, "ADR Used", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    adrPctStr = str.tostring(adrUsedPct, "#.0") + "%"
+    adrPctClr = adrUsedPct > i_adrMaxPct ? #f87171 : adrUsedPct > 60 ? #fbbf24 : #4ade80
+    table.cell(dash, 1, 6, adrPctStr, text_color=adrPctClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 7, "Active FVGs", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 7, str.tostring(activeFVGs), text_color=activeFVGs > 0 ? #4ade80 : color.gray, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 8, "Active OBs", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 8, str.tostring(activeOBs), text_color=activeOBs > 0 ? #22d3ee : color.gray, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 9, "Breakers", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 9, str.tostring(activeBBs), text_color=activeBBs > 0 ? #818cf8 : color.gray, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 10, "OTE Zone", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 10, oteActive ? "ACTIVE" : "—", text_color=oteActive ? #c084fc : color.gray, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 11, "ATR(14)", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 11, str.tostring(atr14, "#.#####"), text_color=color.white, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 12, "Daily Trades", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 12, str.tostring(dailyTrades) + "/" + str.tostring(i_maxDailyTrades), text_color=dailyTrades >= i_maxDailyTrades ? #f87171 : #4ade80, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 13, "Confluence", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    confStr = str.tostring(math.max(longScore, shortScore)) + "/7"
+    confClr = math.max(longScore, shortScore) >= i_minConfluence ? #4ade80 : #f87171
+    table.cell(dash, 1, 13, confStr, text_color=confClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 14, "EQH / EQL", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    eqStr = hasEQH and hasEQL ? "EQH + EQL" : hasEQH ? "EQH ⚠" : hasEQL ? "EQL ⚠" : "—"
+    eqClr = hasEQH or hasEQL ? #f59e0b : color.gray
+    table.cell(dash, 1, 14, eqStr, text_color=eqClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 15, "SMT (" + i_smtSymbol + ")", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    smtStr = bullishSMT ? "BULL DIV ▲" : bearishSMT ? "BEAR DIV ▼" : i_smtEnabled ? "—" : "OFF"
+    smtClr = bullishSMT ? i_bullColor : bearishSMT ? i_bearColor : color.gray
+    table.cell(dash, 1, 15, smtStr, text_color=smtClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 16, "SL Type", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 16, i_slType, text_color=#f59e0b, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 17, "Last Model", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 17, lockedModel != "" ? lockedModel : "—", text_color=#22d3ee, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 18, "Position", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    posStr = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    posClr = strategy.position_size > 0 ? i_bullColor : strategy.position_size < 0 ? i_bearColor : color.gray
+    table.cell(dash, 1, 18, posStr + (tp1Hit ? " (TP1 ✓)" : ""), text_color=posClr, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 19, "Max DD", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 19, "10% kill", text_color=#f87171, text_size=size.tiny, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 20, "Bar Color", text_color=color.gray, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 20, "4-STATE", text_color=#c084fc, text_size=size.tiny, text_halign=text.align_right)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── ALERTS ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(longSignal, "ICT Long Entry", "ICT v3 — LONG signal. Check dashboard for confluence score and entry model.")
+alertcondition(shortSignal, "ICT Short Entry", "ICT v3 — SHORT signal. Check dashboard for confluence score and entry model.")
+alertcondition(bullishMSS, "Bullish MSS", "Market Structure Shift — BULLISH. Displacement confirmed.")
+alertcondition(bearishMSS, "Bearish MSS", "Market Structure Shift — BEARISH. Displacement confirmed.")
+alertcondition(bullFVG, "Bullish FVG", "New Bullish Fair Value Gap detected.")
+alertcondition(bearFVG, "Bearish FVG", "New Bearish Fair Value Gap detected.")
+alertcondition(bullLiqSweep, "Bull Liq Sweep", "Sell-side liquidity swept — potential long reversal.")
+alertcondition(bearLiqSweep, "Bear Liq Sweep", "Buy-side liquidity swept — potential short reversal.")
+alertcondition(isMacroWindow, "ICT Macro Active", "ICT Macro window active — watch for reversal setups.")
+alertcondition(bullOBBroken, "Bull OB Broken → Bear Breaker", "Bullish OB failed — now bearish breaker (resistance).")
+alertcondition(bearOBBroken, "Bear OB Broken → Bull Breaker", "Bearish OB failed — now bullish breaker (support).")
+alertcondition(bullishSMT, "Bullish SMT Divergence", "SMT Divergence — Bullish. Correlated pair did not confirm new low.")
+alertcondition(bearishSMT, "Bearish SMT Divergence", "SMT Divergence — Bearish. Correlated pair did not confirm new high.")
+alertcondition(eqhFormed, "Equal Highs Formed", "EQH detected — buy-side liquidity pooling. Watch for sweep + short setup.")
+alertcondition(eqlFormed, "Equal Lows Formed", "EQL detected — sell-side liquidity pooling. Watch for sweep + long setup.")
+alertcondition(eqhSwept, "EQH Swept", "Equal Highs swept — engineered liquidity taken. High-conviction short zone.")
+alertcondition(eqlSwept, "EQL Swept", "Equal Lows swept — engineered liquidity taken. High-conviction long zone.")

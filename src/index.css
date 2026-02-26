@@ -107,3 +107,20 @@ input, button, textarea, select {
   overflow-x: hidden;
   width: 100%;
 }
+
+/* ─── Edge table: desktop table / mobile cards toggle ───── */
+.edge-cards-mobile {
+  display: flex;
+}
+.edge-table-desktop {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .edge-cards-mobile {
+    display: none;
+  }
+  .edge-table-desktop {
+    display: block;
+  }
+}

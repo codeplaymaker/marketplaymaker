@@ -98,6 +98,9 @@ async function checkMarketResolution(conditionId) {
     const lastYesPrice = market.lastTradePrice || yesPrice;
 
     // Get signal snapshot from paper trader for proper signal-level feedback
+    // NOTE: paperTrader.resolveMarket() internally calls probabilityModel.recordResolution()
+    // with the ORIGINAL entry price (not the post-resolution price). So we do NOT call
+    // recordResolution() again here to avoid double-counting.
     let signalFeedback = {};
     if (paperTrader) {
       try {
@@ -111,8 +114,18 @@ async function checkMarketResolution(conditionId) {
       }
     }
 
-    // Pass signal feedback to probability model for adaptive weight learning
-    probabilityModel.recordResolution(parseFloat(lastYesPrice), outcome, signalFeedback);
+    // Only record calibration if paper trader didn't handle it (no paper trades for this market)
+    if (!signalFeedback || Object.keys(signalFeedback).length === 0) {
+      // Use a reasonable pre-resolution price estimate (NOT the resolved price)
+      // When market resolves to YES, yesPrice→1.0; to NO, yesPrice→0.0
+      // That tells us nothing about calibration. Use lastTradePrice if meaningful.
+      const calPrice = (market.lastTradePrice && market.lastTradePrice > 0.01 && market.lastTradePrice < 0.99)
+        ? parseFloat(market.lastTradePrice)
+        : null;
+      if (calPrice) {
+        probabilityModel.recordResolution(calPrice, outcome, signalFeedback);
+      }
+    }
 
     // Store signal snapshot for future analysis
     signalSnapshots.push({

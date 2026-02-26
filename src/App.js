@@ -21,6 +21,7 @@ const TradePlanComponent = lazy(() => import('./components/TradePlanComponent'))
 const UserApiForm = lazy(() => import('./components/UserApiForm'));
 const Polymarket = lazy(() => import('./components/Polymarket'));
 const TrackRecord = lazy(() => import('./components/TrackRecord'));
+const Playbook = lazy(() => import('./components/Playbook'));
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
                   <Route path="/" element={<HomePage />} />
                   <Route path="/blog" element={<Blog />} />
                   <Route path="/track-record" element={<TrackRecord />} />
+                  <Route path="/playbook" element={<Playbook />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/signup" element={<Signup />} />
                   <Route
