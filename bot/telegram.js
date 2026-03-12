@@ -117,20 +117,30 @@ async function pollUpdates() {
     const msg = update.message;
     if (!msg?.text) continue;
 
+    // userId = the person (for identity, keys, settings, admin checks)
+    // chatId = where to reply (same as userId in DMs, group ID in groups)
+    const userId = String(msg.from?.id || msg.chat.id);
     const chatId = String(msg.chat.id);
+    const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
     const username = msg.from?.username || msg.from?.first_name || null;
 
-    // Auto-register every user who messages the bot
-    userStore.getOrCreateUser(chatId, username);
+    // Auto-register every user who messages the bot (keyed by userId)
+    userStore.getOrCreateUser(userId, username);
 
-    // Check if user is in a key-input session
-    if (keySessions.has(chatId)) {
+    // Check if user is in a key-input session (always keyed by userId)
+    if (keySessions.has(userId)) {
+      // Key sessions should only happen in DMs for security
+      if (isGroup) {
+        await sendTo(chatId, `🔒 @${username || 'user'}, please set up API keys in a *private chat* with me for security.`);
+        keySessions.delete(userId);
+        continue;
+      }
       try {
-        await handleKeyInput(chatId, msg.text.trim());
+        await handleKeyInput(userId, chatId, msg.text.trim());
       } catch (err) {
         log.error('TELEGRAM', `Key input error: ${err.message}`);
         await sendTo(chatId, `❌ Error: ${err.message}`);
-        keySessions.delete(chatId);
+        keySessions.delete(userId);
       }
       continue;
     }
@@ -139,7 +149,7 @@ async function pollUpdates() {
     const args = msg.text.split(/\s+/).slice(1).join(' ');
 
     try {
-      await handleCommand(chatId, command, args);
+      await handleCommand(userId, chatId, command, args, isGroup, username);
     } catch (err) {
       log.error('TELEGRAM', `Command ${command} failed: ${err.message}`);
       await sendTo(chatId, `❌ Error: ${err.message}`);
@@ -149,10 +159,18 @@ async function pollUpdates() {
 
 // ─── Command Router ──────────────────────────────────────────────────
 
-async function handleCommand(chatId, command, args) {
+// Private commands that should be redirected to DM when used in groups
+const PRIVATE_COMMANDS = new Set(['/setkeys', '/mykeys', '/clearkeys']);
+
+async function handleCommand(userId, chatId, command, args, isGroup, username) {
+  // Redirect sensitive commands to DM when used in groups
+  if (isGroup && PRIVATE_COMMANDS.has(command)) {
+    return sendTo(chatId, `🔒 @${username || 'user'}, please use *${command}* in a *private chat* with me for security.`);
+  }
+
   switch (command) {
-    case '/start':     return handleStart(chatId);
-    case '/help':      return handleHelp(chatId);
+    case '/start':     return handleStart(userId, chatId);
+    case '/help':      return handleHelp(userId, chatId);
     case '/status':    return handleStatus(chatId);
     case '/edges':     return handleEdges(chatId);
     case '/trades':    return handleTrades(chatId);
@@ -160,40 +178,40 @@ async function handleCommand(chatId, command, args) {
     case '/pnl':       return handlePnl(chatId);
     case '/opportunities': return handleOpportunities(chatId);
 
-    // Key management
-    case '/setkeys':   return handleSetKeys(chatId);
-    case '/mykeys':    return handleMyKeys(chatId);
-    case '/clearkeys': return handleClearKeys(chatId);
+    // Key management (userId for identity, chatId for reply)
+    case '/setkeys':   return handleSetKeys(userId, chatId);
+    case '/mykeys':    return handleMyKeys(userId, chatId);
+    case '/clearkeys': return handleClearKeys(userId, chatId);
 
-    // Trading control
-    case '/enable':    return handleEnable(chatId);
-    case '/disable':   return handleDisable(chatId);
-    case '/settings':  return handleSettings(chatId, args);
-    case '/signals':   return handleSignals(chatId, args);
-    case '/mytrades':  return handleMyTrades(chatId);
+    // Trading control (userId for identity, chatId for reply)
+    case '/enable':    return handleEnable(userId, chatId);
+    case '/disable':   return handleDisable(userId, chatId);
+    case '/settings':  return handleSettings(userId, chatId, args);
+    case '/signals':   return handleSignals(userId, chatId, args);
+    case '/mytrades':  return handleMyTrades(userId, chatId);
 
-    // BTC Bot
+    // BTC Bot (read-only commands just need chatId for reply)
     case '/btc':       return handleBtc(chatId);
     case '/btcmarkets': return handleBtcMarkets(chatId);
     case '/btctrades': return handleBtcTrades(chatId);
-    case '/btcstart':  return requireAdmin(chatId, () => handleBtcStart(chatId));
-    case '/btcstop':   return requireAdmin(chatId, () => handleBtcStop(chatId));
-    case '/btcset':    return requireAdmin(chatId, () => handleBtcSet(chatId, args));
+    case '/btcstart':  return requireAdmin(userId, chatId, () => handleBtcStart(chatId));
+    case '/btcstop':   return requireAdmin(userId, chatId, () => handleBtcStop(chatId));
+    case '/btcset':    return requireAdmin(userId, chatId, () => handleBtcSet(chatId, args));
 
     // BTC 5-Min Sniper
     case '/sniper':    return handleSniper(chatId);
     case '/signal':    return handleSniperSignal(chatId);
     case '/snipertrades': return handleSniperTrades(chatId);
-    case '/sniperstart': return requireAdmin(chatId, () => handleSniperStart(chatId));
-    case '/sniperstop':  return requireAdmin(chatId, () => handleSniperStop(chatId));
-    case '/sniperset':   return requireAdmin(chatId, () => handleSniperSet(chatId, args));
+    case '/sniperstart': return requireAdmin(userId, chatId, () => handleSniperStart(chatId));
+    case '/sniperstop':  return requireAdmin(userId, chatId, () => handleSniperStop(chatId));
+    case '/sniperset':   return requireAdmin(userId, chatId, () => handleSniperSet(chatId, args));
 
-    // Admin only
-    case '/scan':      return requireAdmin(chatId, () => handleScan(chatId));
-    case '/startbot':  return requireAdmin(chatId, () => handleStartBot(chatId));
-    case '/stopbot':   return requireAdmin(chatId, () => handleStopBot(chatId));
-    case '/users':     return requireAdmin(chatId, () => handleUsers(chatId));
-    case '/broadcast': return requireAdmin(chatId, () => handleBroadcast(chatId, args));
+    // Admin only (userId for auth, chatId for reply)
+    case '/scan':      return requireAdmin(userId, chatId, () => handleScan(chatId));
+    case '/startbot':  return requireAdmin(userId, chatId, () => handleStartBot(chatId));
+    case '/stopbot':   return requireAdmin(userId, chatId, () => handleStopBot(chatId));
+    case '/users':     return requireAdmin(userId, chatId, () => handleUsers(chatId));
+    case '/broadcast': return requireAdmin(userId, chatId, () => handleBroadcast(chatId, args));
 
     // Proven Edge system
     case '/proven':    return handleProvenEdge(chatId);
@@ -207,8 +225,8 @@ async function handleCommand(chatId, command, args) {
   }
 }
 
-async function requireAdmin(chatId, handler) {
-  if (!userStore.isAdmin(chatId)) {
+async function requireAdmin(userId, chatId, handler) {
+  if (!userStore.isAdmin(userId)) {
     return sendTo(chatId, `🔒 Admin-only command.`);
   }
   return handler();
@@ -216,8 +234,8 @@ async function requireAdmin(chatId, handler) {
 
 // ─── Start / Help ────────────────────────────────────────────────────
 
-async function handleStart(chatId) {
-  const user = userStore.getUser(chatId);
+async function handleStart(userId, chatId) {
+  const user = userStore.getUser(userId);
   const admin = user?.role === 'admin';
 
   await sendTo(chatId,
@@ -268,14 +286,14 @@ async function handleStart(chatId) {
   );
 }
 
-async function handleHelp(chatId) {
-  return handleStart(chatId);
+async function handleHelp(userId, chatId) {
+  return handleStart(userId, chatId);
 }
 
 // ─── Key Management ──────────────────────────────────────────────────
 
-async function handleSetKeys(chatId) {
-  keySessions.set(chatId, { step: 'apiKey', data: {} });
+async function handleSetKeys(userId, chatId) {
+  keySessions.set(userId, { step: 'apiKey', data: {} });
   await sendTo(chatId,
     `🔑 *Set Polymarket API Keys*\n\n` +
     `I'll walk you through adding your keys one at a time.\n` +
@@ -286,13 +304,13 @@ async function handleSetKeys(chatId) {
   );
 }
 
-async function handleKeyInput(chatId, text) {
+async function handleKeyInput(userId, chatId, text) {
   if (text === '/cancel') {
-    keySessions.delete(chatId);
+    keySessions.delete(userId);
     return sendTo(chatId, `❌ Key setup cancelled.`);
   }
 
-  const session = keySessions.get(chatId);
+  const session = keySessions.get(userId);
 
   switch (session.step) {
     case 'apiKey':
@@ -309,10 +327,10 @@ async function handleKeyInput(chatId, text) {
 
     case 'passphrase':
       session.data.passphrase = text;
-      keySessions.delete(chatId);
+      keySessions.delete(userId);
 
-      // Save the keys
-      userStore.setPolymarketKeys(chatId, session.data);
+      // Save the keys (keyed by userId)
+      userStore.setPolymarketKeys(userId, session.data);
 
       await sendTo(chatId,
         `✅ *All keys saved & encrypted!*\n\n` +
@@ -327,9 +345,9 @@ async function handleKeyInput(chatId, text) {
   }
 }
 
-async function handleMyKeys(chatId) {
-  const user = userStore.getUser(chatId);
-  const hasKeys = userStore.hasValidKeys(chatId);
+async function handleMyKeys(userId, chatId) {
+  const user = userStore.getUser(userId);
+  const hasKeys = userStore.hasValidKeys(userId);
 
   if (!hasKeys) {
     return sendTo(chatId, `🔑 No API keys set.\n\nUse /setkeys to add your Polymarket credentials.`);
@@ -349,19 +367,19 @@ async function handleMyKeys(chatId) {
   );
 }
 
-async function handleClearKeys(chatId) {
-  userStore.clearPolymarketKeys(chatId);
+async function handleClearKeys(userId, chatId) {
+  userStore.clearPolymarketKeys(userId);
   await sendTo(chatId, `🗑 API keys removed. Trading disabled.`);
 }
 
 // ─── Trading Control ─────────────────────────────────────────────────
 
-async function handleEnable(chatId) {
-  if (!userStore.hasValidKeys(chatId)) {
+async function handleEnable(userId, chatId) {
+  if (!userStore.hasValidKeys(userId)) {
     return sendTo(chatId, `❌ Set your API keys first: /setkeys`);
   }
-  userStore.updateSettings(chatId, { enabled: true });
-  const user = userStore.getUser(chatId);
+  userStore.updateSettings(userId, { enabled: true });
+  const user = userStore.getUser(userId);
   await sendTo(chatId,
     `✅ Trading enabled!\n\n` +
     `Mode: ${user.settings.dryRun ? '📝 Dry-run (safe)' : '💰 LIVE'}\n` +
@@ -372,13 +390,13 @@ async function handleEnable(chatId) {
   );
 }
 
-async function handleDisable(chatId) {
-  userStore.updateSettings(chatId, { enabled: false, autoTrade: false });
+async function handleDisable(userId, chatId) {
+  userStore.updateSettings(userId, { enabled: false, autoTrade: false });
   await sendTo(chatId, `⏸ Trading disabled. You'll still receive alerts.`);
 }
 
-async function handleSettings(chatId, args) {
-  const user = userStore.getUser(chatId);
+async function handleSettings(userId, chatId, args) {
+  const user = userStore.getUser(userId);
   if (!user) return;
 
   // If args provided, parse setting changes
@@ -400,7 +418,7 @@ async function handleSettings(chatId, args) {
     if (setting) {
       const parsed = setting.parse(val);
       if (setting.validate(parsed)) {
-        userStore.updateSettings(chatId, { [setting.key]: parsed });
+        userStore.updateSettings(userId, { [setting.key]: parsed });
         await sendTo(chatId, `✅ Updated *${setting.key}* → \`${parsed}\``);
         return;
       }
@@ -429,10 +447,10 @@ async function handleSettings(chatId, args) {
   );
 }
 
-async function handleMyTrades(chatId) {
-  const user = userStore.getUser(chatId);
+async function handleMyTrades(userId, chatId) {
+  const user = userStore.getUser(userId);
   if (!user || user.trades.length === 0) {
-    return sendTo(chatId, `📭 No trades yet.${userStore.hasValidKeys(chatId) ? '' : ' Set your keys first: /setkeys'}`);
+    return sendTo(chatId, `📭 No trades yet.${userStore.hasValidKeys(userId) ? '' : ' Set your keys first: /setkeys'}`);
   }
 
   let text = `💹 *Your Trades* (${user.trades.length} total)\n\n`;
@@ -646,8 +664,8 @@ async function handleBroadcast(chatId, message) {
 
 // ─── Signal Preferences ──────────────────────────────────────────────
 
-async function handleSignals(chatId, args) {
-  const user = userStore.getUser(chatId);
+async function handleSignals(userId, chatId, args) {
+  const user = userStore.getUser(userId);
   if (!user) return;
 
   // Ensure signals object exists (for users created before this feature)
