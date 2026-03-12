@@ -8,6 +8,7 @@ const executor = require('./executor');
 const paperTrader = require('./paperTrader');
 const alerts = require('./alerts');
 const signalTracker = require('./signalTracker');
+const probabilityModel = require('./probabilityModel');
 const fs = require('fs');
 const path = require('path');
 
@@ -127,6 +128,35 @@ async function scan() {
     // Record price snapshots & check alerts
     alerts.recordPriceSnapshot(allMarkets);
     const firedAlerts = alerts.checkAlerts(allMarkets, newOpps);
+
+    // ─── Random Calibration Sampling ───
+    // CRITICAL FIX: Record resolutions from RANDOM markets, not just edge detections.
+    // This builds unbiased calibration data over time.
+    // Every 10th scan, sample 5 random recently-resolved markets.
+    if (scanCount % 10 === 0 && allMarkets.length > 20) {
+      try {
+        const resolved = allMarkets.filter(m => m.resolved && m.yesPrice > 0.01 && m.yesPrice < 0.99);
+        const sample = [];
+        for (let i = 0; i < Math.min(5, resolved.length); i++) {
+          const idx = Math.floor(Math.random() * resolved.length);
+          if (!sample.includes(resolved[idx])) sample.push(resolved[idx]);
+        }
+        for (const m of sample) {
+          const outcome = m.resolutionOutcome || (m.yesPrice >= 0.95 ? 'YES' : m.yesPrice <= 0.05 ? 'NO' : null);
+          if (outcome) {
+            probabilityModel.recordResolution(m.yesPrice, outcome, {}, true); // isRandomSample = true
+          }
+        }
+        if (sample.length > 0) log.info('SCANNER', `Calibration: recorded ${sample.length} random market resolutions`);
+      } catch (err) { log.debug('SCANNER', `Random calibration sampling failed: ${err.message}`); }
+    }
+
+    // ─── Update CLV tracking for Proven Edge strategy ───
+    if (strategies.provenEdge) {
+      try {
+        strategies.provenEdge.updateCLVSignals(allMarkets);
+      } catch (err) { log.debug('SCANNER', `CLV update failed: ${err.message}`); }
+    }
 
     // Check pending limit/TWAP orders
     let pendingResult = { filled: 0, expired: 0, pending: 0 };
@@ -310,20 +340,20 @@ function getStatus() {
   if (wsClient) {
     try {
       status.websocket = wsClient.getStatus();
-    } catch { status.websocket = { available: false }; }
+    } catch (err) { log.debug('SCANNER', 'WebSocket status error: ' + err.message); status.websocket = { available: false }; }
   }
 
   // News signal status
   if (newsSignal && newsSignal.getStatus) {
     try {
       status.newsSignal = newsSignal.getStatus();
-    } catch { status.newsSignal = { available: false }; }
+    } catch (err) { log.debug('SCANNER', 'News signal status error: ' + err.message); status.newsSignal = { available: false }; }
   }
 
   // Paper trade / self-learning status
   try {
     status.paperTrading = paperTrader.getStats();
-  } catch { status.paperTrading = { available: false }; }
+  } catch (err) { log.debug('SCANNER', 'Paper trading status error: ' + err.message); status.paperTrading = { available: false }; }
 
   // Independent signal sources status
   if (independentSignals) {
@@ -332,7 +362,7 @@ function getStatus() {
       if (lastIndependentResults) {
         status.independentSources.lastResultCount = lastIndependentResults.size;
       }
-    } catch { status.independentSources = { available: false }; }
+    } catch (err) { log.debug('SCANNER', 'Independent sources status error: ' + err.message); status.independentSources = { available: false }; }
   }
 
   return status;

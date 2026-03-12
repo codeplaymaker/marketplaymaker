@@ -4,7 +4,7 @@ import {
   Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ScatterChart, Scatter, ReferenceLine,
-  Cell,
+  Cell, ComposedChart,
 } from 'recharts';
 
 const API_BASE = process.env.REACT_APP_BOT_API || '/polybot';
@@ -112,26 +112,79 @@ const StressTrack = styled.div`
   overflow: hidden;
 `;
 
+const TradeRow = styled.div`
+  display: grid;
+  grid-template-columns: 32px 1fr 60px 70px 60px 70px;
+  gap: 8px;
+  padding: 8px 12px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 12px;
+  &:hover { background: rgba(255,255,255,0.03); }
+`;
+
+const TradeHeader = styled(TradeRow)`
+  color: #666;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+`;
+
+const Badge = styled.span`
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: ${p => p.$bg || 'rgba(255,255,255,0.1)'};
+  color: ${p => p.$color || '#ccc'};
+`;
+
+const TabGroup = styled.div`
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+`;
+
+const TabBtn = styled.button`
+  background: ${p => p.$active ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.05)'};
+  border: 1px solid ${p => p.$active ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'};
+  color: ${p => p.$active ? '#c4b5fd' : '#888'};
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  &:hover { background: rgba(139,92,246,0.2); }
+`;
+
 // ─── Main Component ──────────────────────────────────────────────────
 export default function AnalyticsCharts() {
   const [pnlData, setPnlData] = useState(null);
   const [stats, setStats] = useState(null);
   const [varData, setVarData] = useState(null);
   const [stressData, setStressData] = useState(null);
+  const [pnlChart, setPnlChart] = useState(null);
+  const [tradeHistory, setTradeHistory] = useState(null);
+  const [tradeFilter, setTradeFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [pnl, dbStats, varResult, stress] = await Promise.all([
+      const [pnl, dbStats, varResult, stress, pnlC, trades] = await Promise.all([
         api('/db/pnl?days=60').catch(() => ({ available: false, series: [] })),
         api('/db/stats').catch(() => ({ available: false })),
         api('/risk/var?simulations=5000').catch(() => null),
         api('/risk/stress').catch(() => null),
+        api('/pnl/chart').catch(() => ({ trades: [], daily: [], summary: {} })),
+        api('/trades/history?limit=200').catch(() => ({ trades: [], total: 0 })),
       ]);
       setPnlData(pnl);
       setStats(dbStats);
       setVarData(varResult);
       setStressData(stress);
+      setPnlChart(pnlC);
+      setTradeHistory(trades);
     } catch (err) {
       console.warn('Analytics fetch error:', err);
     }
@@ -140,19 +193,88 @@ export default function AnalyticsCharts() {
 
   useEffect(() => {
     fetchAll();
-    const iv = setInterval(fetchAll, 60000); // refresh every 60s
+    const iv = setInterval(fetchAll, 60000);
     return () => clearInterval(iv);
   }, [fetchAll]);
 
   if (loading) return <NoData>Loading analytics...</NoData>;
 
+  // Determine best PnL data source
+  const hasEdgePnL = pnlChart?.daily?.length > 0 || pnlChart?.trades?.length > 0;
+  const hasDbPnL = pnlData?.series?.length > 0;
+
   return (
     <Container>
-      {/* ── Equity Curve ── */}
+      {/* ── PnL Summary Stats ── */}
+      {(pnlChart?.summary || tradeHistory) && (
+        <ChartCard $full>
+          <ChartTitle>💰 Trade Record Summary</ChartTitle>
+          <StatRow>
+            <StatBadge>
+              <StatLabel>Total Edges</StatLabel>
+              <StatValue>{pnlChart?.summary?.totalEdges || tradeHistory?.total || 0}</StatValue>
+            </StatBadge>
+            <StatBadge>
+              <StatLabel>Resolved</StatLabel>
+              <StatValue>{pnlChart?.summary?.resolvedEdges || tradeHistory?.closed || 0}</StatValue>
+            </StatBadge>
+            <StatBadge>
+              <StatLabel>Open</StatLabel>
+              <StatValue $color="#3b82f6">{pnlChart?.summary?.pending || tradeHistory?.open || 0}</StatValue>
+            </StatBadge>
+            <StatBadge>
+              <StatLabel>Win Rate</StatLabel>
+              <StatValue $color={(pnlChart?.summary?.winRate || 0) >= 50 ? '#22c55e' : '#ef4444'}>
+                {pnlChart?.summary?.winRate != null ? `${pnlChart.summary.winRate}%` : '—'}
+              </StatValue>
+            </StatBadge>
+            <StatBadge>
+              <StatLabel>Total P&L</StatLabel>
+              <StatValue $color={(pnlChart?.summary?.cumPnl || pnlChart?.summary?.totalPnLpp || 0) >= 0 ? '#22c55e' : '#ef4444'}>
+                {pnlChart?.summary?.cumPnl != null ? `$${pnlChart.summary.cumPnl.toFixed(2)}` : pnlChart?.summary?.totalPnLpp != null ? `${pnlChart.summary.totalPnLpp.toFixed(1)}pp` : '—'}
+              </StatValue>
+            </StatBadge>
+            <StatBadge>
+              <StatLabel>Better Than Market</StatLabel>
+              <StatValue $color={(pnlChart?.summary?.betterRate || 0) >= 50 ? '#22c55e' : '#ef4444'}>
+                {pnlChart?.summary?.betterRate != null ? `${pnlChart.summary.betterRate}%` : '—'}
+              </StatValue>
+            </StatBadge>
+          </StatRow>
+        </ChartCard>
+      )}
+
+      {/* ── PnL Equity Curve (from edge resolutions) ── */}
       <ChartCard $full>
-        <ChartTitle>📈 Equity Curve (P&L Over Time)</ChartTitle>
-        {pnlData?.series?.length > 0 ? (
-          <ResponsiveContainer width="100%" height={280}>
+        <ChartTitle>📈 P&L Equity Curve</ChartTitle>
+        {hasEdgePnL ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={pnlChart.daily}>
+              <defs>
+                <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="date" stroke="#666" fontSize={11} tickFormatter={d => d?.slice(5)} />
+              <YAxis stroke="#666" fontSize={11} tickFormatter={v => `$${v}`} />
+              <Tooltip
+                contentStyle={{ background: '#1e1e2e', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
+                formatter={(v, name) => [`$${typeof v === 'number' ? v.toFixed(2) : v}`, name]}
+                labelFormatter={(l) => `Date: ${l}`}
+              />
+              <ReferenceLine y={0} stroke="#555" strokeDasharray="3 3" />
+              <Area type="monotone" dataKey="cumPnl" stroke="#8b5cf6" fill="url(#pnlGrad)" name="Cumulative P&L" />
+              <Bar dataKey="dailyPnl" name="Daily P&L" barSize={12}>
+                {(pnlChart.daily || []).map((entry, i) => (
+                  <Cell key={i} fill={entry.dailyPnl >= 0 ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)'} />
+                ))}
+              </Bar>
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : hasDbPnL ? (
+          <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={pnlData.series}>
               <defs>
                 <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
@@ -174,8 +296,82 @@ export default function AnalyticsCharts() {
             </AreaChart>
           </ResponsiveContainer>
         ) : (
-          <NoData>No P&L data yet. Trades will appear here once resolved.</NoData>
+          <NoData>No P&L data yet. Edges will appear here as markets resolve. Currently tracking {pnlChart?.summary?.totalEdges || 0} edges.</NoData>
         )}
+      </ChartCard>
+
+      {/* ── Trade-by-Trade PnL (scatter) ── */}
+      {pnlChart?.trades?.length > 0 && (
+        <ChartCard $full>
+          <ChartTitle>🎯 Trade-by-Trade Results</ChartTitle>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={pnlChart.trades}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="date" stroke="#666" fontSize={10} tickFormatter={d => d?.slice(5)} />
+              <YAxis stroke="#666" fontSize={11} tickFormatter={v => `$${v}`} />
+              <Tooltip
+                contentStyle={{ background: '#1e1e2e', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
+                formatter={(v, name) => [`$${typeof v === 'number' ? v.toFixed(2) : v}`, name]}
+                labelFormatter={(l) => `${l}`}
+                labelStyle={{ color: '#ccc' }}
+              />
+              <ReferenceLine y={0} stroke="#555" strokeDasharray="3 3" />
+              <Bar dataKey="pnl" name="Trade P&L" barSize={8}>
+                {pnlChart.trades.map((entry, i) => (
+                  <Cell key={i} fill={entry.won ? '#22c55e' : '#ef4444'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      {/* ── Trade Record Table ── */}
+      <ChartCard $full>
+        <ChartTitle>📋 Trade Record</ChartTitle>
+        <TabGroup>
+          {['all', 'open', 'closed'].map(f => (
+            <TabBtn key={f} $active={tradeFilter === f} onClick={() => setTradeFilter(f)}>
+              {f === 'all' ? `All (${tradeHistory?.total || 0})` : f === 'open' ? `Open (${tradeHistory?.open || 0})` : `Closed (${tradeHistory?.closed || 0})`}
+            </TabBtn>
+          ))}
+        </TabGroup>
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          <TradeHeader>
+            <div>#</div>
+            <div>Market</div>
+            <div>Side</div>
+            <div>Edge</div>
+            <div>Source</div>
+            <div>P&L</div>
+          </TradeHeader>
+          {(tradeHistory?.trades || [])
+            .filter(t => tradeFilter === 'all' || (tradeFilter === 'open' ? !t.resolved : t.resolved))
+            .slice(0, 50)
+            .map((t, i) => (
+              <TradeRow key={t.id || i}>
+                <div style={{ color: '#666' }}>{t.id || i + 1}</div>
+                <div style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.question?.slice(0, 55) || 'Unknown'}
+                </div>
+                <Badge $bg={t.side === 'YES' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'} $color={t.side === 'YES' ? '#22c55e' : '#ef4444'}>
+                  {t.side}
+                </Badge>
+                <div style={{ color: Math.abs(t.edgePp || 0) > 15 ? '#c4b5fd' : '#888' }}>
+                  {t.edgePp != null ? `${t.edgePp > 0 ? '+' : ''}${t.edgePp.toFixed(1)}pp` : '—'}
+                </div>
+                <Badge $bg="rgba(255,255,255,0.05)" $color={t.source === 'youtube' ? '#f59e0b' : t.source === 'twitter' ? '#38bdf8' : '#888'}>
+                  {t.source || 'scan'}
+                </Badge>
+                <div style={{ fontWeight: 600, color: t.resolved ? (t.won ? '#22c55e' : '#ef4444') : '#555' }}>
+                  {t.resolved ? (t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : (t.pnlPp != null ? `${t.pnlPp > 0 ? '+' : ''}${t.pnlPp}pp` : '—')) : '⏳'}
+                </div>
+              </TradeRow>
+            ))}
+          {(!tradeHistory?.trades?.length) && (
+            <NoData>No trades recorded yet. Edges from scanner, YouTube, and Twitter will appear here.</NoData>
+          )}
+        </div>
       </ChartCard>
 
       {/* ── Strategy Performance ── */}

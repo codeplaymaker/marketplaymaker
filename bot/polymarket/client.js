@@ -45,8 +45,37 @@ async function getMarketBySlug(slug) {
 }
 
 async function getMarketById(conditionId) {
-  const data = await fetchJSON(`${GAMMA}/markets?condition_id=${conditionId}`);
-  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+  // Use CLOB API — Gamma API ignores condition_id filter entirely
+  const data = await fetchJSON(`${CLOB}/markets/${conditionId}`);
+  if (!data || !data.condition_id) return null;
+
+  // Normalize CLOB response fields to match what edgeResolver expects
+  const tokens = data.tokens || [];
+  const yesToken = tokens.find(t => t.outcome === 'Yes');
+  const noToken = tokens.find(t => t.outcome === 'No');
+  const hasWinner = tokens.some(t => t.winner === true);
+
+  const yesPrice = yesToken?.price != null ? parseFloat(yesToken.price) : null;
+  const noPrice = noToken?.price != null ? parseFloat(noToken.price) : null;
+  const result = hasWinner ? (yesToken?.winner ? 'YES' : 'NO') : null;
+
+  return {
+    conditionId: data.condition_id,
+    question: data.question,
+    slug: data.market_slug,
+    closed: data.closed || false,
+    resolved: hasWinner,                         // true if any token has winner=true
+    resolution: result,                          // 'YES' | 'NO' | null — matches Gamma format
+    result,                                      // same, for callers using either key
+    endDate: data.end_date_iso,
+    active: data.active,
+    acceptingOrders: data.accepting_orders,
+    yesPrice,
+    noPrice,
+    tokens,
+    // Keep raw CLOB data available too
+    _raw: data,
+  };
 }
 
 async function getEvents({ limit = 50, active = true } = {}) {

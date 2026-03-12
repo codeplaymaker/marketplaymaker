@@ -66,7 +66,7 @@ function saveScoresCache() {
       lastFetch: lastScoresFetch,
       savedAt: new Date().toISOString(),
     }, null, 2));
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('PICKS', 'Failed to save scores cache: ' + err.message); }
 }
 
 // Load on startup

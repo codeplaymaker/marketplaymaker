@@ -122,7 +122,7 @@ async function fetchHeadlines() {
   try {
     const rssHeadlines = await fetchRSSHeadlines();
     headlines.push(...rssHeadlines);
-  } catch { /* skip RSS on failure */ }
+  } catch (err) { log.debug('NEWS', 'RSS fetch failed: ' + err.message); }
 
   cachedHeadlines = headlines;
   lastFetchTime = new Date().toISOString();
@@ -135,7 +135,7 @@ async function fetchHeadlines() {
       headlines: headlines.slice(0, 200), // Keep last 200
       fetchedAt: lastFetchTime,
     }, null, 2));
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('NEWS', 'Failed to save headline cache: ' + err.message); }
 
   return headlines;
 }
@@ -176,7 +176,7 @@ async function fetchRSSHeadlines() {
           });
         }
       }
-    } catch { /* skip failing feeds */ }
+    } catch (err) { log.debug('NEWS', `RSS feed ${feed.source} failed: ` + err.message); }
   }
 
   return headlines;

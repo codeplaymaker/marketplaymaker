@@ -38,13 +38,75 @@ const NITTER_INSTANCES = [
   'https://nitter.woodland.cafe',
   'https://nitter.esmailelbob.xyz',
   'https://nitter.1d4.us',
+  'https://nitter.lucabased.xyz',
+  'https://nitter.perennialte.ch',
+  'https://nitter.rawbit.ninja',
+  'https://nitter.salastil.com',
+  'https://nitter.privacytools.io',
 ];
 let nitterIdx = 0;
 
+// ─── Instance Health Tracking ────────────────────────────────────────
+// Track which instances are alive so we skip dead ones quickly.
+const instanceHealth = new Map(); // url → { failures, lastFail, disabled, successCount }
+
+function getInstanceHealth(url) {
+  if (!instanceHealth.has(url)) {
+    instanceHealth.set(url, { failures: 0, lastFail: 0, disabled: false, successCount: 0 });
+  }
+  return instanceHealth.get(url);
+}
+
+function markInstanceSuccess(url) {
+  const h = getInstanceHealth(url);
+  h.failures = 0;
+  h.successCount++;
+  h.disabled = false;
+}
+
+function markInstanceFailure(url) {
+  const h = getInstanceHealth(url);
+  h.failures++;
+  h.lastFail = Date.now();
+  // Circuit breaker: disable after 3 consecutive failures, re-enable after cooldown
+  if (h.failures >= 3) {
+    h.disabled = true;
+    log.warn('TW_TRACK', `Nitter instance disabled (3 consecutive failures): ${url}`);
+  }
+}
+
+function isInstanceAvailable(url) {
+  const h = getInstanceHealth(url);
+  if (!h.disabled) return true;
+  // Re-enable after 30 min cooldown
+  if (Date.now() - h.lastFail > 30 * 60 * 1000) {
+    h.disabled = false;
+    h.failures = 0;
+    log.info('TW_TRACK', `Nitter instance re-enabled after cooldown: ${url}`);
+    return true;
+  }
+  return false;
+}
+
 function getNextNitter() {
-  const instance = NITTER_INSTANCES[nitterIdx % NITTER_INSTANCES.length];
-  nitterIdx++;
-  return instance;
+  // Try up to NITTER_INSTANCES.length to find an available one
+  for (let i = 0; i < NITTER_INSTANCES.length; i++) {
+    const instance = NITTER_INSTANCES[nitterIdx % NITTER_INSTANCES.length];
+    nitterIdx++;
+    if (isInstanceAvailable(instance)) return instance;
+  }
+  // All disabled — force-enable the oldest-disabled one
+  let oldest = NITTER_INSTANCES[0];
+  let oldestFail = Infinity;
+  for (const url of NITTER_INSTANCES) {
+    const h = getInstanceHealth(url);
+    if (h.lastFail < oldestFail) { oldest = url; oldestFail = h.lastFail; }
+  }
+  const h = getInstanceHealth(oldest);
+  h.disabled = false;
+  h.failures = 0;
+  log.info('TW_TRACK', `All Nitter instances disabled — force-enabling ${oldest}`);
+  return oldest;
 }
 
 // ─── Known Accounts ─────────────────────────────────────────────────
@@ -75,7 +137,7 @@ function saveCache() {
       matches: Object.fromEntries(marketMatches),
       savedAt: new Date().toISOString(),
     }, null, 2));
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('TW_TRACK', 'Failed to save cache: ' + err.message); }
 }
 
 // ─── Optional API Key (RapidAPI free tier) ───────────────────────────
@@ -122,7 +184,7 @@ async function getTotalTweetCount(username) {
  * Nitter renders plain HTML with tweet count in a stats element.
  */
 async function tryNitterCount(username) {
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < Math.min(5, NITTER_INSTANCES.length); i++) {
     const instance = getNextNitter();
     try {
       const url = `${instance}/${username}`;
@@ -134,7 +196,10 @@ async function tryNitterCount(username) {
         signal: AbortSignal.timeout(8000),
       });
 
-      if (!resp.ok) continue;
+      if (!resp.ok) {
+        markInstanceFailure(instance);
+        continue;
+      }
       const html = await resp.text();
 
       // Nitter shows tweet count in various formats
@@ -150,12 +215,17 @@ async function tryNitterCount(username) {
         if (match) {
           const count = parseCompactNumber(match[1]);
           if (count > 0) {
+            markInstanceSuccess(instance);
             log.info('TW_TRACK', `Nitter (${instance}): @${username} total tweets = ${count}`);
             return count;
           }
         }
       }
-    } catch {
+      // Got HTML but no count — might be a changed layout, count as soft failure
+      markInstanceFailure(instance);
+    } catch (err) {
+      markInstanceFailure(instance);
+      log.debug('TW_TRACK', `Nitter ${instance} failed: ` + err.message);
       continue;
     }
   }
@@ -192,8 +262,8 @@ async function tryXProfileCount(username) {
       log.info('TW_TRACK', `X syndication: @${username} visible recent tweets: ${last24h} (24h), ${tweetDates.length} total visible`);
       // Can't get total count from this; used as supplementary signal only
     }
-  } catch {
-    // Expected — syndication endpoint may be restricted
+  } catch (err) {
+    log.debug('TW_TRACK', 'X syndication fetch failed: ' + err.message);
   }
   return null;
 }
@@ -223,8 +293,8 @@ async function tryRapidApiCount(username) {
       log.info('TW_TRACK', `RapidAPI: @${username} total tweets = ${count}`);
       return count;
     }
-  } catch {
-    // API error
+  } catch (err) {
+    log.debug('TW_TRACK', 'RapidAPI fetch failed: ' + err.message);
   }
   return null;
 }
@@ -594,6 +664,7 @@ function parseCompactNumber(str) {
 }
 
 function getStatus() {
+  const healthyInstances = NITTER_INSTANCES.filter(u => isInstanceAvailable(u)).length;
   return {
     configured: true, // Always available — Nitter scraping needs no key
     hasRapidApi: !!rapidApiKey,
@@ -602,6 +673,10 @@ function getStatus() {
     source: 'Nitter Scraping + Snapshot Diffs (FREE)',
     knownAccounts: Object.keys(TRACKED_ACCOUNTS),
     nitterInstances: NITTER_INSTANCES.length,
+    healthyInstances,
+    instanceHealth: Object.fromEntries(
+      NITTER_INSTANCES.map(u => [u, { ...getInstanceHealth(u) }])
+    ),
   };
 }
 

@@ -8,16 +8,23 @@ const path = require('path');
 // New strategies — optional (graceful if missing)
 let momentum = null;
 let whaleDetection = null;
-let relativeValue = null;
+let provenEdge = null;
 try { momentum = require('./momentum'); } catch { /* optional */ }
 try { whaleDetection = require('./whaleDetection'); } catch { /* optional */ }
-try { relativeValue = require('./relativeValue'); } catch { /* optional */ }
+try { provenEdge = require('./provenEdge'); } catch (e) { log.error('STRATEGY', `Failed to load provenEdge: ${e.message}`); }
+// RELATIVE_VALUE permanently removed — 0W/99L (-$1,604) in paper trading audit 2026-03-11
 
 const strategies = [
-  noBets, arbitrage, sportsEdge,
+  // PROVEN EDGE runs FIRST — highest priority, externally validated
+  ...(provenEdge ? [provenEdge] : []),
+  arbitrage,
+  // noBets and sportsEdge DEMOTED — they rely on the probability model which has 47% accuracy.
+  // They still run but their signals should be treated as low-confidence without bookmaker confirmation.
+  noBets,
+  sportsEdge,
   ...(momentum ? [momentum] : []),
   ...(whaleDetection ? [whaleDetection] : []),
-  ...(relativeValue ? [relativeValue] : []),
+  // RELATIVE_VALUE permanently killed — 0W/99L (-$1,604) audit 2026-03-11. DO NOT re-enable.
 ];
 
 const PERSISTENCE_FILE = path.join(__dirname, '..', 'logs', 'signal-persistence.json');
@@ -139,4 +146,5 @@ module.exports = {
   noBets,
   arbitrage,
   sportsEdge,
+  provenEdge,
 };

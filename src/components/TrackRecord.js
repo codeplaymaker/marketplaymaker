@@ -383,21 +383,21 @@ export default function TrackRecord() {
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('active');
 
-  // Determine API base
-  const apiBase = useMemo(() => {
-    if (process.env.NODE_ENV === 'production') return '';
-    return '';
+  // In dev, /polybot → proxy to localhost:4000/api
+  // In production, the bot serves the build and /api routes are direct
+  const botPrefix = useMemo(() => {
+    return process.env.NODE_ENV === 'production' ? '/api' : '/polybot';
   }, []);
 
   useEffect(() => {
-    fetch(`${apiBase}/api/public/track-record`)
+    fetch(`${botPrefix}/public/track-record`)
       .then(r => {
         if (!r.ok) throw new Error('Failed to load track record');
         return r.json();
       })
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [apiBase]);
+  }, [botPrefix]);
 
   if (loading) return <Page><Loader>Loading track record</Loader></Page>;
   if (error) return <Page><EmptyState>Unable to load track record. Try again later.</EmptyState></Page>;

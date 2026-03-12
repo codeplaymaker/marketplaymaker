@@ -46,7 +46,8 @@ function learn() {
     if (!fs.existsSync(HISTORY_FILE)) return null;
     const raw = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
     picks = (raw.picks || []).filter(p => p.result !== 'pending');
-  } catch {
+  } catch (err) {
+    log.debug('LEARNER', 'Failed to read picks history: ' + err.message);
     return null;
   }
 

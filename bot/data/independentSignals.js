@@ -74,7 +74,7 @@ function saveHistory() {
         history: signalHistory.slice(-MAX_HISTORY),
         savedAt: new Date().toISOString(),
       }, null, 2));
-    } catch { /* non-critical */ }
+    } catch (err) { log.debug('INDSIG', 'Failed to save signal history: ' + err.message); }
   });
 }
 
@@ -294,7 +294,7 @@ async function getIndependentSignal(market, options = {}) {
                   r.prob = Math.max(0.02, Math.min(0.98, r.prob * (impact.modifier > 1 ? 1.1 : 0.9)));
                   culturalDetail = ` | Cultural: ${impact.detail}`;
                 }
-              } catch { /* non-critical */ }
+              } catch (err) { log.debug('INDSIG', 'YouTube cultural impact failed: ' + err.message); }
             }
             results.youtube = {
               prob: r.prob,
@@ -334,7 +334,7 @@ async function getIndependentSignal(market, options = {}) {
                   r.prob = Math.max(0.02, Math.min(0.98, r.prob + adjustment));
                   culturalDetail = ` | Cultural: ${impact.detail}`;
                 }
-              } catch { /* non-critical */ }
+              } catch (err) { log.debug('INDSIG', 'Twitter cultural impact failed: ' + err.message); }
             }
             results.twitter = {
               prob: r.prob,

@@ -75,13 +75,30 @@ async function checkMarketResolution(conditionId) {
     // Market must be both closed AND have a deterministic outcome
     if (!market.closed && !market.resolved) return null;
 
-    const outcomePrices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
-    const yesPrice = parseFloat(outcomePrices[0] || 0.5);
-
     let outcome = null;
-    if (yesPrice >= 0.99) outcome = 'YES';
-    else if (yesPrice <= 0.01) outcome = 'NO';
-    else return null; // Not fully resolved yet
+
+    // Best: use the resolution/result field from CLOB response
+    if (market.resolution) {
+      outcome = market.resolution.toUpperCase();
+    } else if (market.result) {
+      outcome = market.result.toUpperCase();
+    }
+
+    // Fallback: check token winner flags
+    if (!outcome && market.tokens) {
+      const yesToken = market.tokens.find(t => t.outcome === 'Yes');
+      if (yesToken?.winner === true) outcome = 'YES';
+      else if (yesToken?.winner === false && market.resolved) outcome = 'NO';
+    }
+
+    // Fallback: check price extremes
+    if (!outcome) {
+      const yesPrice = market.yesPrice ?? (market.outcomePrices ? parseFloat(JSON.parse(market.outcomePrices)[0] || 0.5) : 0.5);
+      if (yesPrice >= 0.95) outcome = 'YES';
+      else if (yesPrice <= 0.05) outcome = 'NO';
+    }
+
+    if (!outcome) return null; // Not fully resolved yet
 
     const resolution = {
       conditionId,
@@ -147,7 +164,7 @@ async function checkMarketResolution(conditionId) {
           .slice(0, 3);
         log.info('RESOLVER', `Top signals: ${topSignals.map(([k, v]) => `${k}(${(v.accuracy * 100).toFixed(0)}%)`).join(', ')}`);
       }
-    } catch { /* non-critical */ }
+    } catch (err) { log.debug('RESOLVER', 'Signal perf lookup failed: ' + err.message); }
 
     log.info('RESOLVER', `Market resolved: "${market.question}" → ${outcome}`);
     save();
@@ -375,7 +392,7 @@ function getCalibrationInsights() {
     signalPerformance = probabilityModel.getSignalPerformance
       ? probabilityModel.getSignalPerformance()
       : null;
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('RESOLVER', 'Signal performance fetch failed: ' + err.message); }
 
   return {
     status: 'OK',

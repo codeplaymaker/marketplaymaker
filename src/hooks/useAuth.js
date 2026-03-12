@@ -45,6 +45,7 @@ export const AuthProvider = ({ children }) => {
           email: firebaseUser.email,
           isAdmin: false,
           role: 'user',
+          subscription: null,
           createdAt: serverTimestamp(),
         });
       }

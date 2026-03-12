@@ -43,7 +43,7 @@ try {
 function save() {
   try {
     fs.promises.writeFile(ALERTS_FILE, JSON.stringify({ alerts, history: alertHistory.slice(-MAX_HISTORY) }, null, 2));
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('ALERTS', 'Failed to save alerts: ' + err.message); }
 }
 
 // ─── Alert CRUD ──────────────────────────────────────────────────────

@@ -1,3 +1,14 @@
+/**
+ * MarketPlayMaker Intelligence Server
+ *
+ * Clean architecture:
+ *   - server.js      → Bootstrap, middleware, startup orchestration
+ *   - routes/*.js    → All API endpoints (markets, risk, trading, intel, social, watchlist)
+ *   - engine/*.js    → Business logic (scanner, executor, resolver, risk, etc.)
+ *   - data/*.js      → External data sources
+ *   - strategies/*.js → Trading strategies
+ */
+
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -5,6 +16,9 @@ const express = require('express');
 const cors = require('cors');
 const config = require('./config');
 const log = require('./utils/logger');
+const mountRoutes = require('./routes');
+
+// ─── Core Modules ────────────────────────────────────────────────────
 const scanner = require('./engine/scanner');
 const executor = require('./engine/executor');
 const riskManager = require('./engine/riskManager');
@@ -13,79 +27,81 @@ const markets = require('./polymarket/markets');
 const client = require('./polymarket/client');
 const oddsApi = require('./bookmakers/oddsApi');
 const paperTrader = require('./engine/paperTrader');
-
-// Intelligence platform modules
 const { authMiddleware, getKey, regenerateKey } = require('./utils/auth');
 const alerts = require('./engine/alerts');
 const watchlist = require('./engine/watchlist');
 const signalTracker = require('./engine/signalTracker');
+const telegramBot = require('./telegram');
+const btcBot = require('./btcBot');
+const btcSniper = require('./btcSniper');
 
-// SQLite database — optional (install better-sqlite3 for full persistence)
+// ─── Optional Modules (graceful degradation) ─────────────────────────
+function optionalRequire(mod) { try { return require(mod); } catch { return null; } }
+
 let database = null;
 try {
   database = require('./engine/database');
   if (database.initialize()) {
     log.info('SERVER', 'SQLite database initialized');
-    // Auto-migrate from JSON on first run
     const migrationResult = database.migrateFromJSON();
-    if (migrationResult.migrated) {
-      log.info('SERVER', `DB migration: ${JSON.stringify(migrationResult.stats)}`);
-    }
+    if (migrationResult.migrated) log.info('SERVER', `DB migration: ${JSON.stringify(migrationResult.stats)}`);
   }
-} catch (err) {
-  log.warn('SERVER', `SQLite not available: ${err.message}`);
-}
+} catch (err) { log.warn('SERVER', `SQLite not available: ${err.message}`); }
 
-// Kalshi integration — optional
-let kalshiClient = null;
-let kalshiMarkets = null;
-try {
-  kalshiClient = require('./kalshi/client');
-  kalshiMarkets = require('./kalshi/markets');
-  log.info('SERVER', 'Kalshi modules loaded');
-} catch (err) {
-  log.warn('SERVER', `Kalshi modules not loaded: ${err.message}`);
-}
+const kalshiClient      = optionalRequire('./kalshi/client');
+const kalshiMarkets     = optionalRequire('./kalshi/markets');
+const wsClient          = optionalRequire('./polymarket/websocket');
+const newsSignal        = optionalRequire('./data/newsSignal');
+const eventPush         = optionalRequire('./engine/eventPush');
+const independentSignals = optionalRequire('./data/independentSignals');
+const youtubeTracker    = optionalRequire('./data/youtubeTracker');
+const twitterTracker    = optionalRequire('./data/twitterTracker');
+const culturalEvents    = optionalRequire('./data/culturalEvents');
+const edgeResolver      = optionalRequire('./engine/edgeResolver');
+const accaBuilder       = optionalRequire('./strategies/accaBuilder');
+const picksTracker      = optionalRequire('./engine/picksTracker');
+const picksLearner      = optionalRequire('./engine/picksLearner');
 
-// New modules — optional
-let wsClient = null;
-let newsSignal = null;
-let eventPush = null;
-try { wsClient = require('./polymarket/websocket'); } catch { /* optional */ }
-try { newsSignal = require('./data/newsSignal'); } catch { /* optional */ }
-try { eventPush = require('./engine/eventPush'); } catch { /* optional */ }
+// ─── New Alpha Engines ───────────────────────────────────────────────
+const newMarketDetector   = optionalRequire('./engine/newMarketDetector');
+const newsReactor         = optionalRequire('./engine/newsReactor');
+const panicDipDetector    = optionalRequire('./engine/panicDipDetector');
+const calibrationCollector = optionalRequire('./engine/calibrationCollector');
+const executionPipeline   = optionalRequire('./engine/executionPipeline');
 
-let independentSignals = null;
-try { independentSignals = require('./data/independentSignals'); } catch { /* optional */ }
+if (newMarketDetector) log.info('SERVER', 'New market detector loaded');
+if (newsReactor) log.info('SERVER', 'Rapid news reactor loaded');
+if (panicDipDetector) log.info('SERVER', 'Panic dip detector loaded');
+if (calibrationCollector) log.info('SERVER', 'Calibration collector loaded');
+if (executionPipeline) log.info('SERVER', 'Execution pipeline loaded');
 
-let youtubeTracker = null;
-try { youtubeTracker = require('./data/youtubeTracker'); } catch { /* optional */ }
+// ─── Infrastructure Modules (10/10 upgrades) ─────────────────────────
+const healthMonitor       = optionalRequire('./engine/healthMonitor');
+const logCleanup          = optionalRequire('./engine/logCleanup');
+const strategyOptimizer   = optionalRequire('./engine/strategyOptimizer');
+const probabilityEnsemble = optionalRequire('./engine/probabilityEnsemble');
+const wsServer            = optionalRequire('./engine/wsServer');
+const newsStream          = optionalRequire('./engine/newsStream');
 
-let twitterTracker = null;
-try { twitterTracker = require('./data/twitterTracker'); } catch { /* optional */ }
+if (healthMonitor) log.info('SERVER', 'Health monitor loaded');
+if (logCleanup) log.info('SERVER', 'Log cleanup loaded');
+if (strategyOptimizer) log.info('SERVER', 'Strategy optimizer loaded');
+if (probabilityEnsemble) log.info('SERVER', 'Probability ensemble loaded');
+if (wsServer) log.info('SERVER', 'WebSocket server loaded');
+if (newsStream) log.info('SERVER', 'News stream loaded');
 
-let culturalEvents = null;
-try { culturalEvents = require('./data/culturalEvents'); } catch { /* optional */ }
+if (kalshiClient)  log.info('SERVER', 'Kalshi modules loaded');
+if (edgeResolver)  log.info('SERVER', 'Edge resolver loaded');
 
-let edgeResolver = null;
-try { edgeResolver = require('./engine/edgeResolver'); } catch { /* optional */ }
-
-let accaBuilder = null;
-try { accaBuilder = require('./strategies/accaBuilder'); } catch { /* optional */ }
-
-let picksTracker = null;
-try { picksTracker = require('./engine/picksTracker'); } catch { /* optional */ }
-
-let picksLearner = null;
-try { picksLearner = require('./engine/picksLearner'); } catch { /* optional */ }
-
+// ═══════════════════════════════════════════════════════════════════════
+// EXPRESS APP
+// ═══════════════════════════════════════════════════════════════════════
 const app = express();
 
-// ─── Process Stability ─────────────────────────────────────────────
+// ─── Process Stability ───────────────────────────────────────────────
 process.on('uncaughtException', (err) => {
   log.error('CRASH', `Uncaught exception: ${err.message}`);
   log.error('CRASH', err.stack);
-  // Don't exit — keep serving. Log and continue.
 });
 process.on('unhandledRejection', (reason) => {
   log.error('CRASH', `Unhandled rejection: ${reason}`);
@@ -96,38 +112,23 @@ const SCAN_CACHE_FILE = path.join(__dirname, 'logs/scan-cache.json');
 let cachedScanResults = [];
 let lastScanTime = null;
 let scanRunning = false;
-const SCAN_INTERVAL = 15 * 60 * 1000; // 15 minutes
+const SCAN_INTERVAL = 15 * 60 * 1000;
 const SCAN_MARKETS = 30;
 
-// Load cached scan results from disk on startup
 try {
   if (fs.existsSync(SCAN_CACHE_FILE)) {
     const saved = JSON.parse(fs.readFileSync(SCAN_CACHE_FILE, 'utf8'));
     cachedScanResults = saved.results || [];
     lastScanTime = saved.timestamp ? new Date(saved.timestamp) : null;
-    log.info('SCANNER', `Loaded ${cachedScanResults.length} cached edges from disk (${lastScanTime ? lastScanTime.toLocaleTimeString() : 'unknown'})`);
+    log.info('SCANNER', `Loaded ${cachedScanResults.length} cached edges from disk`);
   }
 } catch { /* fresh start */ }
 
-/**
- * Run a full batch scan in the background.
- * Results are cached in memory + disk for instant serving.
- */
 async function runAutoScan() {
-  if (scanRunning) {
-    log.info('SCANNER', 'Scan already in progress, skipping');
-    return;
-  }
-  if (!independentSignals) {
-    log.warn('SCANNER', 'Independent signals module not loaded, skipping scan');
-    return;
-  }
-
+  if (scanRunning) return log.info('SCANNER', 'Scan already in progress, skipping');
+  if (!independentSignals) return log.warn('SCANNER', 'Independent signals module not loaded, skipping');
   const allMarkets = markets.getCachedMarkets();
-  if (allMarkets.length === 0) {
-    log.warn('SCANNER', 'No markets cached yet, will retry next cycle');
-    return;
-  }
+  if (allMarkets.length === 0) return log.warn('SCANNER', 'No markets cached yet, will retry');
 
   scanRunning = true;
   const startTime = Date.now();
@@ -135,1672 +136,154 @@ async function runAutoScan() {
 
   try {
     const results = await independentSignals.batchAnalyze(allMarkets, { maxMarkets: SCAN_MARKETS });
-
     const entries = [];
-    for (const [condId, signal] of results) {
-      entries.push({ conditionId: condId, ...signal });
-    }
-
-    // Sort by divergence (best edges first)
+    for (const [condId, signal] of results) entries.push({ conditionId: condId, ...signal });
     entries.sort((a, b) => (b.absDivergence || 0) - (a.absDivergence || 0));
 
-    // Cache results
-    cachedScanResults = entries;
+    // ─── SANITY FILTER: Reject signals with unrealistic divergences ───
+    // The old model produced 30pp+ deviations from market price (e.g. Mkt: 48% → Est: 16%).
+    // Without BOOKMAKER confirmation, no signal should diverge more than 12% from market.
+    // With bookmaker confirmation, allow up to 20%.
+    const saneEntries = entries.filter(e => {
+      const absDivPct = Math.abs(e.divergence || 0);
+      if (absDivPct > 0.20) return false; // Never trust 20%+ divergence
+      if (absDivPct > 0.12 && !(e.bookmakerCount >= 5)) return false; // 12%+ needs bookmaker backup
+      return true;
+    });
+
+    const filtered = entries.length - saneEntries.length;
+    if (filtered > 0) log.info('SCANNER', `Sanity filter: removed ${filtered} unrealistic signals (>12% divergence without bookmaker confirmation)`);
+
+    cachedScanResults = saneEntries;
     lastScanTime = new Date();
 
-    // Persist to disk
-    try {
-      fs.writeFileSync(SCAN_CACHE_FILE, JSON.stringify({
-        results: entries,
-        timestamp: lastScanTime.toISOString(),
-        marketCount: allMarkets.length,
-        scanDuration: Date.now() - startTime,
-      }, null, 2));
-    } catch { /* non-critical */ }
+    // Persist to disk (async, non-blocking)
+    fs.promises.writeFile(SCAN_CACHE_FILE, JSON.stringify({
+      results: saneEntries, timestamp: lastScanTime.toISOString(),
+      marketCount: allMarkets.length, scanDuration: Date.now() - startTime,
+    }, null, 2)).catch(() => {});
 
-    // Record edges for resolution tracking
+    // Record edges for resolution
     if (edgeResolver) {
-      for (const e of entries) {
-        if ((e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE') && (e.sourceCount || 0) >= 1) {
-          edgeResolver.recordEdge(e);
-        }
+      for (const e of saneEntries) {
+        if ((e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE') && (e.sourceCount || 0) >= 1) edgeResolver.recordEdge(e);
       }
     }
 
-    // Fire webhook alerts for A-grade STRONG edges
-    const strongEdges = entries.filter(e => e.edgeSignal === 'STRONG' && (e.edgeQuality || 0) >= 55);
-    if (strongEdges.length > 0) {
-      fireWebhookAlerts(strongEdges).catch(() => {});
+    // ─── TRACKING MERGE (2026-03-11): Feed autoScan edges to paperTrader too ───
+    // Previously autoScan only fed edgeResolver, while paperTrader required manual scanner.start().
+    // This caused two completely separate tracking systems with only 4 overlapping conditions.
+    // Now both systems track the same signals for unified performance measurement.
+    try {
+      const strategies = require('./strategies');
+      const edgeOpps = saneEntries
+        .filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE')
+        .map(e => ({
+          conditionId: e.conditionId,
+          market: e.question,
+          question: e.question,
+          strategy: e.strategy || e.edgeSource || 'autoScan',
+          side: e.edgeDirection === 'BUY_YES' ? 'YES' : (e.edgeDirection === 'BUY_NO' ? 'NO' : 'YES'),
+          price: e.marketPrice,
+          yesPrice: e.marketPrice,
+          noPrice: 1 - (e.marketPrice || 0.5),
+          score: e.edgeQuality || 50,
+          confidence: e.edgeSignal,
+          edge: e.divergence,
+          netEdge: e.divergence,
+          positionSize: 10,
+          liquidity: e.liquidity || 50000,
+          riskLevel: e.edgeGrade === 'A' ? 'LOW' : 'MEDIUM',
+        }));
+      if (edgeOpps.length > 0) {
+        const recorded = paperTrader.recordScanResults(edgeOpps, 25);
+        if (recorded > 0) log.info('SCANNER', `Paper trader: recorded ${recorded} new positions from autoScan`);
+      }
+    } catch (err) {
+      log.debug('SCANNER', `Paper trader feed failed: ${err.message}`);
     }
 
-    const aCount = entries.filter(e => (e.edgeQuality || 0) >= 75).length;
-    const bCount = entries.filter(e => (e.edgeQuality || 0) >= 55 && (e.edgeQuality || 0) < 75).length;
-    const edgeCount = entries.filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE').length;
-    log.info('SCANNER', `Auto-scan complete: ${entries.length} analyzed, A=${aCount} B=${bCount}, ${edgeCount} edges (${((Date.now() - startTime) / 1000).toFixed(1)}s)`);
+    // ─── Run Proven Edge strategy for REAL signals ───
+    let provenEdgeOpps = [];
+    try {
+      const provenEdge = require('./strategies/provenEdge');
+      const polyMarkets = allMarkets.filter(m => !m.platform || m.platform === 'POLYMARKET');
+      for (const m of polyMarkets) { if (!m.platform) m.platform = 'POLYMARKET'; }
+      provenEdgeOpps = await provenEdge.findOpportunities(polyMarkets, scanner.getBankroll());
+      if (provenEdgeOpps.length > 0) {
+        log.info('SCANNER', `Proven Edge: ${provenEdgeOpps.length} externally-validated edges found`);
+        // Push proven edges as Telegram alerts (these are the REAL signals)
+        const provenAlerts = provenEdgeOpps.map(o => ({
+          question: o.market,
+          conditionId: o.conditionId,
+          marketPrice: o.entryPrice,
+          prob: o.edge.externalProb || o.edge.fairProb || o.entryPrice,
+          divergence: o.edge.net,
+          absDivergence: Math.abs(o.edge.net),
+          edgeSignal: o.score >= 65 ? 'STRONG' : 'MODERATE',
+          edgeQuality: o.score,
+          edgeGrade: o.grade,
+          edgeDirection: `${o.side} (${o.type})`,
+          sourceCount: o.bookmaker?.bookmakerCount || 1,
+          provenEdge: true,
+          riskNote: o.riskNote,
+        }));
+        if (provenAlerts.length > 0) telegramBot.pushEdgeAlert(provenAlerts).catch(() => {});
+      }
+    } catch (err) {
+      log.debug('SCANNER', `Proven edge scan failed: ${err.message}`);
+    }
 
+    // Webhook alerts for A-grade STRONG edges (sane only)
+    const strongEdges = saneEntries.filter(e => e.edgeSignal === 'STRONG' && (e.edgeQuality || 0) >= 55);
+    if (strongEdges.length > 0) fireWebhookAlerts(strongEdges).catch(() => {});
+
+    // OLD independent-signal alerts DISABLED — 47% historical win rate = noise.
+    // Only proven edge alerts (bookmaker-validated, cross-platform arb, orderbook arb) are pushed above.
+    // const anyEdges = saneEntries.filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE');
+    // if (anyEdges.length > 0) telegramBot.pushEdgeAlert(anyEdges).catch(() => {});
+
+    const aCount = saneEntries.filter(e => (e.edgeQuality || 0) >= 75).length;
+    const bCount = saneEntries.filter(e => (e.edgeQuality || 0) >= 55 && (e.edgeQuality || 0) < 75).length;
+    const edgeCount = saneEntries.filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE').length;
+    log.info('SCANNER', `Auto-scan complete: ${saneEntries.length} analyzed (${filtered} filtered), A=${aCount} B=${bCount}, ${edgeCount} edges, ${provenEdgeOpps.length} proven (${((Date.now() - startTime) / 1000).toFixed(1)}s)`);
+
+    // Emit scan results via WebSocket
+    if (wsServer) {
+      wsServer.scanComplete({ edgeCount, totalAnalyzed: saneEntries.length, filtered, provenEdges: provenEdgeOpps.length, duration: Date.now() - startTime });
+      for (const e of strongEdges || []) { wsServer.signalDetected({ type: 'edge', ...e }); }
+    }
+    // Record health
+    if (healthMonitor) healthMonitor.recordSuccess('scanner', Date.now() - startTime, { edgeCount });
   } catch (err) {
     log.error('SCANNER', `Auto-scan failed: ${err.message}`);
+    if (healthMonitor) healthMonitor.recordError('scanner', err.message);
   } finally {
     scanRunning = false;
   }
 }
 
-// CORS — allow local dev + deployed frontend
-const allowedOrigins = [
-  'http://localhost:3000',
-  process.env.FRONTEND_URL,
-].filter(Boolean);
-
-app.use(cors({
-  origin: (origin, cb) => {
-    // Allow requests with no origin (curl, server-to-server) or matched origins
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
-    // In production, reject unknown origins. In dev, allow all.
-    if (process.env.NODE_ENV === 'production') {
-      return cb(new Error(`Origin ${origin} not allowed`), false);
-    }
-    cb(null, true);
-  },
-  credentials: true,
-}));
-
-app.use(express.json({ limit: '1mb' }));
-app.set('etag', false);       // Disable ETags — prevents 304s that break fetch .ok checks
-
-// ─── Rate Limiting (in-memory) ───────────────────────────────────────
-const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 600;      // 600 requests per minute per IP (generous for localhost + frontend polling)
-
-function rateLimit(req, res, next) {
-  // Skip rate limiting for health checks
-  if (req.path === '/api/health') return next();
-
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
-  const now = Date.now();
-  let record = rateLimitMap.get(ip);
-
-  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW) {
-    record = { windowStart: now, count: 0 };
-    rateLimitMap.set(ip, record);
-  }
-
-  record.count++;
-  res.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
-  res.set('X-RateLimit-Remaining', String(Math.max(0, RATE_LIMIT_MAX - record.count)));
-
-  if (record.count > RATE_LIMIT_MAX) {
-    return res.status(429).json({ error: 'Too many requests', retryAfter: Math.ceil((record.windowStart + RATE_LIMIT_WINDOW - now) / 1000) });
-  }
-  next();
-}
-
-// Clean up rate limit map every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, record] of rateLimitMap) {
-    if (now - record.windowStart > RATE_LIMIT_WINDOW * 2) rateLimitMap.delete(ip);
-  }
-}, 300000);
-
-app.use(rateLimit);
-
-// Auto-load Odds API key from environment variable
-if (process.env.ODDS_API_KEY) {
-  try {
-    oddsApi.setApiKey(process.env.ODDS_API_KEY);
-    log.info('SERVER', 'Odds API key loaded from environment');
-    // Auto-fetch odds on startup (non-blocking)
-    oddsApi.fetchAllOdds().then(events => {
-      log.info('SERVER', `Auto-fetched ${events.length} bookmaker events on startup`);
-    }).catch(err => log.warn('SERVER', `Auto-fetch odds failed: ${err.message}`));
-    // Auto-refresh odds every 30 minutes
-    setInterval(() => {
-      oddsApi.fetchAllOdds().catch(() => {});
-    }, 30 * 60 * 1000);
-  } catch (err) {
-    log.warn('SERVER', `Failed to set Odds API key: ${err.message}`);
-  }
-}
-
-// Auto-load LLM API key from environment variable
-if (process.env.OPENAI_API_KEY && independentSignals) {
-  try {
-    independentSignals.llm.configure({
-      apiKey: process.env.OPENAI_API_KEY,
-      provider: process.env.LLM_PROVIDER || 'openai',
-      model: process.env.LLM_MODEL || undefined,
-    });
-    log.info('SERVER', `LLM configured from env: provider=${process.env.LLM_PROVIDER || 'openai'}`);
-  } catch (err) {
-    log.warn('SERVER', `Failed to configure LLM: ${err.message}`);
-  }
-}
-
-// Auto-load YouTube API key from environment variable
-if (process.env.YOUTUBE_API_KEY) {
-  try {
-    if (independentSignals?.youtube?.setApiKey) independentSignals.youtube.setApiKey(process.env.YOUTUBE_API_KEY);
-    if (youtubeTracker?.setApiKey) youtubeTracker.setApiKey(process.env.YOUTUBE_API_KEY);
-    log.info('SERVER', 'YouTube tracker API key loaded from env');
-  } catch (err) {
-    log.warn('SERVER', `Failed to set YouTube API key: ${err.message}`);
-  }
-}
-
-// Twitter tracker — FREE (Nitter scraping, no API key needed)
-// Optional: RapidAPI key for fallback
-if (process.env.RAPIDAPI_KEY) {
-  if (independentSignals?.twitter) {
-    try {
-      independentSignals.twitter.setApiKey(process.env.RAPIDAPI_KEY);
-      log.info('SERVER', 'Twitter independentSignals RapidAPI key loaded');
-    } catch (err) {
-      log.warn('SERVER', `Failed to set RapidAPI key (independentSignals): ${err.message}`);
-    }
-  }
-  if (twitterTracker?.setApiKey) {
-    try {
-      twitterTracker.setApiKey(process.env.RAPIDAPI_KEY);
-      log.info('SERVER', 'Twitter tracker RapidAPI fallback key loaded');
-    } catch (err) {
-      log.warn('SERVER', `Failed to set RapidAPI key (twitterTracker): ${err.message}`);
-    }
-  }
-} else if (twitterTracker) {
-  log.info('SERVER', 'Twitter tracker running FREE (Nitter scraping) — no API key needed');
-}
-
-// Share news API key with cultural events engine
-if (process.env.NEWSDATA_API_KEY && independentSignals?.culturalEvents) {
-  try {
-    independentSignals.culturalEvents.setNewsApiKey(process.env.NEWSDATA_API_KEY);
-    log.info('SERVER', 'Cultural events engine using NewsData API key');
-  } catch { /* optional */ }
-}
-
-// Auto-fetch Polymarket markets on startup (non-blocking)
-markets.refreshMarkets().then(mktList => {
-  log.info('SERVER', `Auto-fetched ${mktList.length} Polymarket markets on startup`);
-}).catch(err => log.warn('SERVER', `Auto-fetch markets failed: ${err.message}`));
-
-// Auto-refresh Polymarket markets every 15 minutes
-setInterval(() => {
-  markets.refreshMarkets().catch(() => {});
-}, 15 * 60 * 1000);
-
-app.use((req, res, next) => { // Prevent caching on API responses
-  res.set('Cache-Control', 'no-store');
-  next();
-});
-
-// Request logger
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    log.info('HTTP', `${req.method} ${req.url} → ${res.statusCode} (${Date.now() - start}ms)`);
-  });
-  next();
-});
-
-// API Key Authentication — protects all routes except /api/health and /api/auth/*
-app.use(authMiddleware);
-
-// ─── Health ──────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
-});
-
-// ─── Server-Sent Events (real-time push) ─────────────────────────────
-if (eventPush) {
-  app.get('/api/events', eventPush.sseHandler);
-  app.get('/api/events/status', (req, res) => {
-    res.json({ clients: eventPush.getClientCount(), available: true });
-  });
-}
-
-// ─── Auth ────────────────────────────────────────────────────────────
-app.get('/api/auth/key', (req, res) => {
-  res.json({ key: getKey() });
-});
-
-app.post('/api/auth/verify', (req, res) => {
-  res.json({ valid: true });
-});
-
-app.post('/api/auth/regenerate', (req, res) => {
-  const key = regenerateKey();
-  res.json({ key });
-});
-
-// ─── Bot Control ─────────────────────────────────────────────────────
-app.post('/api/bot/start', (req, res) => {
-  const { bankroll } = req.body || {};
-  scanner.start(bankroll || 1000);
-  res.json({ status: 'started', ...scanner.getStatus() });
-});
-
-app.post('/api/bot/stop', (req, res) => {
-  scanner.stop();
-  res.json({ status: 'stopped', ...scanner.getStatus() });
-});
-
-app.get('/api/bot/status', (req, res) => {
-  res.json({
-    scanner: scanner.getStatus(),
-    executor: executor.getTradeStats(),
-    risk: riskManager.getStats(scanner.getBankroll()),
-    mode: executor.getMode(),
-  });
-});
-
-app.post('/api/bot/mode', (req, res) => {
-  const { mode } = req.body;
-  try {
-    executor.setMode(mode);
-    res.json({ mode: executor.getMode() });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.post('/api/bot/bankroll', (req, res) => {
-  const { amount } = req.body;
-  if (!amount || amount < 0) return res.status(400).json({ error: 'Invalid amount' });
-  scanner.setBankroll(amount);
-  res.json({ bankroll: scanner.getBankroll() });
-});
-
-// ─── Markets ─────────────────────────────────────────────────────────
-app.get('/api/markets', async (req, res) => {
-  try {
-    const { limit = 50, refresh } = req.query;
-    if (refresh === 'true') await markets.refreshMarkets();
-    const data = markets.getCachedMarkets().slice(0, parseInt(limit));
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/markets/top-volume', (req, res) => {
-  const n = parseInt(req.query.n) || 20;
-  res.json(markets.getTopMarketsByVolume(n));
-});
-
-app.get('/api/markets/top-liquidity', (req, res) => {
-  const n = parseInt(req.query.n) || 20;
-  res.json(markets.getTopMarketsByLiquidity(n));
-});
-
-app.get('/api/markets/high-spread', (req, res) => {
-  const { min = 0.02, max = 0.15 } = req.query;
-  res.json(markets.getHighSpreadMarkets(parseFloat(min), parseFloat(max)));
-});
-
-app.get('/api/markets/:slug', async (req, res) => {
-  try {
-    const market = markets.getMarketBySlug(req.params.slug);
-    if (!market) return res.status(404).json({ error: 'Market not found' });
-    // Enrich with live CLOB data
-    const enriched = await client.enrichMarket(market.raw || market);
-    res.json(enriched);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Opportunities ───────────────────────────────────────────────────
-app.get('/api/opportunities', (req, res) => {
-  const { limit = 50, strategy } = req.query;
-  const opps = strategy
-    ? scanner.getOpportunitiesByStrategy(strategy.toUpperCase())
-    : scanner.getOpportunities(parseInt(limit));
-  res.json(opps);
-});
-
-app.post('/api/opportunities/scan', async (req, res) => {
-  try {
-    const result = await scanner.scan();
-    res.json(result || { scanNumber: 0, marketsScanned: 0, opportunitiesFound: 0, topOpportunities: [], error: 'Scan returned no result' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Execution ───────────────────────────────────────────────────────
-app.post('/api/execute', async (req, res) => {
-  try {
-    const { opportunity } = req.body;
-    if (!opportunity) return res.status(400).json({ error: 'Opportunity required' });
-    const result = await executor.execute(opportunity, scanner.getBankroll());
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/auto-execute', async (req, res) => {
-  try {
-    const { maxTrades = 3, minScore = 50 } = req.body || {};
-    const opps = scanner.getOpportunities(20);
-    const results = await executor.autoExecute(opps, scanner.getBankroll(), { maxTrades, minScore });
-    res.json({ executed: results.length, trades: results });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Trade History & Positions ───────────────────────────────────────
-app.get('/api/trades', (req, res) => {
-  const limit = parseInt(req.query.limit) || 100;
-  res.json(executor.getTradeHistory(limit));
-});
-
-app.get('/api/positions', (req, res) => {
-  res.json(riskManager.getPositions());
-});
-
-app.get('/api/risk', (req, res) => {
-  res.json(riskManager.getStats(scanner.getBankroll()));
-});
-
-// ─── Performance ─────────────────────────────────────────────────────
-app.get('/api/performance', (req, res) => {
-  const stats = executor.getTradeStats();
-  const risk = riskManager.getStats(scanner.getBankroll());
-
-  // Use REAL performance from resolution tracker (not fake Math.random)
-  const realPerf = resolver.getRealPerformance();
-
-  res.json({
-    ...stats,
-    ...risk,
-    bankroll: scanner.getBankroll(),
-    // Real P&L from resolved markets
-    realPnL: realPerf.totalPnL,
-    realWinRate: realPerf.winRate,
-    realProfitFactor: realPerf.profitFactor,
-    resolvedCount: realPerf.totalResolved,
-    pnlCurve: realPerf.pnlCurve,
-    byStrategy: realPerf.byStrategy,
-    // Pending positions (not yet resolved)
-    pendingPositions: riskManager.getPositions().length,
-  });
-});
-
-// ─── Reset ───────────────────────────────────────────────────────────
-app.post('/api/reset', (req, res) => {
-  scanner.stop();
-  executor.reset();
-  riskManager.reset();
-  res.json({ status: 'reset', message: 'All systems reset' });
-});
-
-// ─── Pending Orders ──────────────────────────────────────────────────
-app.get('/api/orders/pending', (req, res) => {
-  const pending = executor.getPendingOrders ? executor.getPendingOrders() : [];
-  res.json(pending);
-});
-
-app.delete('/api/orders/:orderId', (req, res) => {
-  if (!executor.cancelOrder) return res.status(501).json({ error: 'Not available' });
-  const result = executor.cancelOrder(req.params.orderId);
-  if (!result) return res.status(404).json({ error: 'Order not found' });
-  res.json(result);
-});
-
-// ─── WebSocket Status ────────────────────────────────────────────────
-app.get('/api/ws/status', (req, res) => {
-  if (!wsClient) return res.json({ available: false, reason: 'WebSocket module not loaded' });
-  res.json(wsClient.getStatus());
-});
-
-// ─── News Sentiment ──────────────────────────────────────────────────
-app.get('/api/news/status', (req, res) => {
-  if (!newsSignal) return res.json({ available: false, reason: 'News module not loaded' });
-  try {
-    const status = newsSignal.getStatus ? newsSignal.getStatus() : { available: true };
-    res.json(status);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/news/key', (req, res) => {
-  if (!newsSignal) return res.status(501).json({ error: 'News module not loaded' });
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ error: 'API key required' });
-  try {
-    if (newsSignal.setApiKey) newsSignal.setApiKey(key);
-    else process.env.NEWSDATA_API_KEY = key;
-    res.json({ status: 'ok' });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// ─── Calibration & Learning ─────────────────────────────────────────
-app.get('/api/calibration', (req, res) => {
-  try {
-    const insights = resolver.getCalibrationInsights
-      ? resolver.getCalibrationInsights()
-      : { status: 'Not available' };
-    res.json(insights);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Portfolio Risk Heatmap ──────────────────────────────────────────
-app.get('/api/risk/heatmap', (req, res) => {
-  try {
-    const heatmap = riskManager.getCorrelationHeatmap
-      ? riskManager.getCorrelationHeatmap()
-      : {};
-    const vaR = riskManager.estimatePortfolioVaR
-      ? riskManager.estimatePortfolioVaR(scanner.getBankroll())
-      : {};
-    res.json({ heatmap, vaR });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Monte Carlo VaR ─────────────────────────────────────────────────
-app.get('/api/risk/var', (req, res) => {
-  try {
-    const sims = parseInt(req.query.simulations) || 10000;
-    const mc = riskManager.monteCarloVaR
-      ? riskManager.monteCarloVaR(scanner.getBankroll(), { simulations: sims })
-      : {};
-    res.json(mc);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Stress Testing ──────────────────────────────────────────────────
-app.get('/api/risk/stress', (req, res) => {
-  try {
-    const results = riskManager.runStressTest
-      ? riskManager.runStressTest(scanner.getBankroll())
-      : { scenarios: {}, summary: 'Stress test not available' };
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Database Analytics API ──────────────────────────────────────────
-app.get('/api/db/trades', (req, res) => {
-  try {
-    if (!database || !database.isReady()) return res.json({ available: false, trades: [] });
-    const { limit, offset, strategy, status } = req.query;
-    const trades = database.getTradeHistory({
-      limit: parseInt(limit) || 100,
-      offset: parseInt(offset) || 0,
-      strategy, status,
-    });
-    res.json({ available: true, trades });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/db/stats', (req, res) => {
-  try {
-    if (!database || !database.isReady()) return res.json({ available: false });
-    const stats = database.getTradeStats();
-    const byStrategy = database.getStrategyBreakdown();
-    const calibration = database.getCalibrationCurve();
-    const edgeAccuracy = database.getEdgeAccuracy();
-    res.json({ available: true, stats, byStrategy, calibration, edgeAccuracy });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/db/pnl', (req, res) => {
-  try {
-    if (!database || !database.isReady()) return res.json({ available: false, series: [] });
-    const { days, mode } = req.query;
-    const series = database.getPnlTimeseries({ days: parseInt(days) || 30, mode });
-    // Build cumulative P&L
-    let cumulative = 0;
-    const cumSeries = series.map(d => {
-      cumulative += d.daily_pnl;
-      return { ...d, cumulative_pnl: Math.round(cumulative * 100) / 100 };
-    });
-    res.json({ available: true, series: cumSeries });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Bookmaker Odds API ──────────────────────────────────────────
-app.post('/api/odds/key', (req, res) => {
-  try {
-    const { key } = req.body;
-    oddsApi.setApiKey(key);
-    res.json({ status: 'ok', ...oddsApi.getStatus() });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/api/odds/status', (req, res) => {
-  res.json(oddsApi.getStatus());
-});
-
-app.post('/api/odds/fetch', async (req, res) => {
-  try {
-    const events = await oddsApi.fetchAllOdds();
-    // Match against current Polymarket markets
-    const mktList = markets.getCachedMarkets();
-    const matches = oddsApi.matchAllMarkets(mktList);
-    const matchArr = Array.from(matches.entries()).map(([condId, data]) => ({ conditionId: condId, ...data }));
-    res.json({
-      status: 'ok',
-      bookmakerEvents: events.length,
-      polymarketMatches: matchArr.length,
-      matches: matchArr.sort((a, b) => Math.abs(b.divergence) - Math.abs(a.divergence)).slice(0, 20),
-      ...oddsApi.getStatus(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/odds/sports', async (req, res) => {
-  const sports = await oddsApi.getSports();
-  res.json(sports);
-});
-
-// ─── Accumulator (Parlay) Builder ────────────────────────────────────
-app.post('/api/accas/build', async (req, res) => {
-  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
-  try {
-    const { maxLegs, minLegs } = req.body || {};
-    const accas = accaBuilder.buildAccas(maxLegs || 5, minLegs || 2);
-    const result = accaBuilder.getAccas();
-    // Snapshot picks for track record
-    if (picksTracker && result.accas?.length > 0) {
-      picksTracker.snapshotAccas(result.accas);
-    }
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/accas', (req, res) => {
-  if (!accaBuilder) return res.json({ accas: [], stats: { total: 0 }, lastBuildTime: null });
-  res.json(accaBuilder.getAccas());
-});
-
-app.get('/api/accas/top', (req, res) => {
-  if (!accaBuilder) return res.json([]);
-  const limit = parseInt(req.query.limit) || 10;
-  res.json(accaBuilder.getTopAccas(limit));
-});
-
-// Public acca endpoint (no auth required)
-app.get('/api/public/accas', (req, res) => {
-  if (!accaBuilder) return res.json({ accas: [], stats: { total: 0 }, lastBuildTime: null });
-  const data = accaBuilder.getAccas();
-  // Sanitize: remove bookmaker keys, just show picks and odds
-  const publicAccas = (data.accas || []).slice(0, 5).map(a => ({
-    grade: a.grade,
-    numLegs: a.numLegs,
-    combinedOdds: a.combinedOdds,
-    evPercent: a.evPercent,
-    crossSport: a.crossSport,
-    legs: a.legs.map(l => ({
-      match: l.match,
-      pick: l.pick,
-      odds: l.odds,
-      sport: l.sport,
-      betType: l.betType,
-    })),
-    hypothetical: a.hypothetical,
-    generatedAt: a.generatedAt,
-  }));
-  res.json({ accas: publicAccas, stats: data.stats, lastBuildTime: data.lastBuildTime });
-});
-
-// ─── CLV Analysis Endpoint ───────────────────────────────────────────
-app.get('/api/accas/clv', (req, res) => {
-  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
-  try {
-    const clv = accaBuilder.analyzeCLV();
-    res.json(clv);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Line Movement Endpoint ──────────────────────────────────────────
-app.get('/api/accas/movements', (req, res) => {
-  if (!accaBuilder) return res.status(503).json({ error: 'Acca builder not available' });
-  try {
-    const data = accaBuilder.getAccas();
-    const movements = data.stats?.lineMovements || 0;
-    const steamMoves = data.stats?.steamMoves || 0;
-    // Also read line-history.json for detailed movements
-    let lineHistory = {};
-    try {
-      lineHistory = JSON.parse(fs.readFileSync(path.join(__dirname, 'logs', 'line-history.json'), 'utf-8'));
-    } catch { /* no history yet */ }
-    const recentMoves = Object.entries(lineHistory)
-      .map(([key, snapshots]) => ({ key, snapshots: snapshots.slice(-5), count: snapshots.length }))
-      .filter(m => m.count > 1)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 20);
-    res.json({ movements, steamMoves, recentMoves });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Picks Track Record ──────────────────────────────────────────────
-app.get('/api/picks/track-record', (req, res) => {
-  if (!picksTracker) return res.json({ summary: { totalPicks: 0 }, recent: [], byGrade: {}, dailyPnl: [] });
-  res.json(picksTracker.getTrackRecord());
-});
-
-app.get('/api/picks/history', (req, res) => {
-  if (!picksTracker) return res.json({ picks: [], total: 0, page: 1, totalPages: 0 });
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 50;
-  res.json(picksTracker.getHistory(page, limit));
-});
-
-app.post('/api/picks/resolve', async (req, res) => {
-  if (!picksTracker) return res.status(503).json({ error: 'Picks tracker not available' });
-  try {
-    const apiKey = oddsApi.hasApiKey() ? process.env.ODDS_API_KEY : null;
-    const result = await picksTracker.checkAndResolve(apiKey);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/public/picks/track-record', (req, res) => {
-  if (!picksTracker) return res.json({ summary: { totalPicks: 0 }, recent: [], byGrade: {}, dailyPnl: [] });
-  const record = picksTracker.getTrackRecord();
-  // Sanitize for public: limit recent to 10, remove internal IDs
-  record.recent = record.recent.slice(0, 10).map(p => ({
-    grade: p.grade, numLegs: p.numLegs, combinedOdds: p.combinedOdds,
-    result: p.result, pnl: p.pnl, savedAt: p.savedAt, wonLegs: p.wonLegs,
-    legs: p.legs.map(l => ({ match: l.match, pick: l.pick, sport: l.sport, result: l.result, score: l.score })),
-  }));
-  res.json(record);
-});
-
-// ─── Picks Learning / Intelligence ──────────────────────────────────
-app.get('/api/picks/learning', (req, res) => {
-  if (!picksLearner) return res.json({ learnedAt: null, totalResolved: 0, adjustments: null, insights: ['Learning engine not available'] });
-  const report = picksLearner.getLearningReport();
-  res.json(report);
-});
-
-app.post('/api/picks/learn', (req, res) => {
-  if (!picksLearner) return res.status(503).json({ error: 'Learning engine not available' });
-  const result = picksLearner.learn();
-  if (!result) return res.json({ success: false, message: 'Not enough resolved picks to learn from' });
-  res.json({ success: true, totalResolved: result.totalResolved, insights: result.insights });
-});
-
-app.get('/api/public/picks/learning', (req, res) => {
-  if (!picksLearner) return res.json({ insights: [], adjustments: null });
-  const report = picksLearner.getLearningReport();
-  // Sanitized public version
-  res.json({
-    totalResolved: report.totalResolved || 0,
-    overallWinRate: report.overallWinRate || 0,
-    overallROI: report.overallROI || 0,
-    insights: report.insights || [],
-    learnedAt: report.learnedAt,
-  });
-});
-
-// ─── Paper Trade Tracking ────────────────────────────────────────────
-app.get('/api/paper-trades', (req, res) => {
-  const limit = parseInt(req.query.limit) || 50;
-  res.json(paperTrader.getHistory(limit));
-});
-
-app.get('/api/paper-trades/performance', (req, res) => {
-  res.json(paperTrader.getPerformance());
-});
-
-app.get('/api/paper-trades/stats', (req, res) => {
-  res.json(paperTrader.getStats());
-});
-
-app.post('/api/paper-trades/reset', (req, res) => {
-  paperTrader.reset();
-  res.json({ status: 'ok', message: 'Paper trade history cleared, bankroll reset to $1000' });
-});
-
-app.post('/api/paper-trades/manual', (req, res) => {
-  try {
-    const { conditionId, market, side, amount, entryPrice } = req.body;
-    const trade = paperTrader.placeManualTrade({
-      conditionId, market, side,
-      amount: parseFloat(amount),
-      entryPrice: parseFloat(entryPrice),
-    });
-    res.json({ status: 'ok', trade });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/api/paper-trades/bankroll', (req, res) => {
-  res.json({
-    bankroll: paperTrader.getSimBankroll(),
-    stats: paperTrader.getStats(),
-  });
-});
-
-app.post('/api/paper-trades/bankroll', (req, res) => {
-  const { amount } = req.body;
-  if (!amount || amount < 0) return res.status(400).json({ error: 'Valid amount required' });
-  paperTrader.setSimBankroll(parseFloat(amount));
-  res.json({ bankroll: paperTrader.getSimBankroll() });
-});
-
-// ─── Self-Learning Dashboard ─────────────────────────────────────────
-app.get('/api/learning/insights', (req, res) => {
-  try {
-    const insights = paperTrader.getLearningInsights
-      ? paperTrader.getLearningInsights()
-      : { status: 'Not available' };
-    res.json(insights);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/learning/thresholds', (req, res) => {
-  try {
-    const strategies = ['NO_BETS', 'SPORTS_EDGE', 'ARBITRAGE'];
-    const thresholds = {};
-    for (const s of strategies) {
-      const t = paperTrader.getLearnedThreshold ? paperTrader.getLearnedThreshold(s) : null;
-      thresholds[s] = t || { status: 'Insufficient data (need 10+ resolved trades)' };
-    }
-    res.json(thresholds);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/learning/cycle', (req, res) => {
-  try {
-    if (!paperTrader.runLearningCycle) {
-      return res.status(501).json({ error: 'Learning cycle not available' });
-    }
-    paperTrader.runLearningCycle();
-    const insights = paperTrader.getLearningInsights();
-    res.json({ status: 'ok', message: 'Learning cycle executed', insights });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/learning/signals', (req, res) => {
-  try {
-    const insights = paperTrader.getLearningInsights
-      ? paperTrader.getLearningInsights()
-      : {};
-    res.json({
-      signalAccuracy: insights.signalAccuracy || {},
-      topSignals: insights.topSignals || [],
-      weakSignals: insights.weakSignals || [],
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Kalshi Markets ──────────────────────────────────────────────────
-app.get('/api/kalshi/status', (req, res) => {
-  if (!kalshiClient) return res.json({ available: false, reason: 'Kalshi module not loaded' });
-  const cached = kalshiMarkets ? kalshiMarkets.getCachedMarkets() : [];
-  res.json({
-    available: true,
-    enabled: config.kalshi?.enabled !== false,
-    cachedMarkets: cached.length,
-  });
-});
-
-app.get('/api/kalshi/markets', async (req, res) => {
-  if (!kalshiMarkets) return res.status(501).json({ error: 'Kalshi module not loaded' });
-  try {
-    const { limit = 50, refresh } = req.query;
-    if (refresh === 'true') await kalshiMarkets.refreshMarkets();
-    const data = kalshiMarkets.getCachedMarkets().slice(0, parseInt(limit));
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/kalshi/markets/top-volume', (req, res) => {
-  if (!kalshiMarkets) return res.status(501).json({ error: 'Kalshi module not loaded' });
-  const n = parseInt(req.query.n) || 20;
-  res.json(kalshiMarkets.getTopMarketsByVolume(n));
-});
-
-app.get('/api/kalshi/markets/:ticker', async (req, res) => {
-  if (!kalshiClient) return res.status(501).json({ error: 'Kalshi module not loaded' });
-  try {
-    const market = await kalshiClient.getMarket(req.params.ticker);
-    if (!market) return res.status(404).json({ error: 'Market not found' });
-    res.json(kalshiClient.normalizeMarket(market));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/kalshi/orderbook/:ticker', async (req, res) => {
-  if (!kalshiClient) return res.status(501).json({ error: 'Kalshi module not loaded' });
-  try {
-    const ob = await kalshiClient.getOrderbook(req.params.ticker);
-    res.json(ob);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/kalshi/toggle', (req, res) => {
-  const { enabled } = req.body;
-  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) required' });
-  if (!config.kalshi) config.kalshi = {};
-  config.kalshi.enabled = enabled;
-  res.json({ enabled: config.kalshi.enabled });
-});
-
-// ─── Intelligence: Alerts ────────────────────────────────────────────
-app.get('/api/intel/alerts', (req, res) => {
-  res.json({ alerts: alerts.getAlerts(), history: alerts.getAlertHistory(parseInt(req.query.limit) || 50) });
-});
-
-app.post('/api/intel/alerts', (req, res) => {
-  try {
-    const alert = alerts.createAlert(req.body);
-    res.json(alert);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.delete('/api/intel/alerts/:alertId', (req, res) => {
-  const removed = alerts.deleteAlert(req.params.alertId);
-  if (!removed) return res.status(404).json({ error: 'Alert not found' });
-  res.json(removed);
-});
-
-app.delete('/api/intel/alerts-history', (req, res) => {
-  alerts.clearHistory();
-  res.json({ status: 'ok' });
-});
-
-// ─── Intelligence: Watchlist ─────────────────────────────────────────
-app.get('/api/intel/watchlist', (req, res) => {
-  const currentMarkets = markets.getCachedMarkets();
-  const opps = scanner.getOpportunities(500);
-  res.json(watchlist.getEnriched(currentMarkets, opps));
-});
-
-app.post('/api/intel/watchlist', (req, res) => {
-  try {
-    const result = watchlist.add(req.body, req.body.notes);
-    if (result.error) return res.status(409).json(result);
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.delete('/api/intel/watchlist/:conditionId', (req, res) => {
-  const removed = watchlist.remove(req.params.conditionId);
-  if (!removed) return res.status(404).json({ error: 'Not in watchlist' });
-  res.json(removed);
-});
-
-app.patch('/api/intel/watchlist/:conditionId/notes', (req, res) => {
-  const updated = watchlist.updateNotes(req.params.conditionId, req.body.notes);
-  if (!updated) return res.status(404).json({ error: 'Not in watchlist' });
-  res.json(updated);
-});
-
-// ─── Intelligence: Market Movers ─────────────────────────────────────
-app.get('/api/intel/movers', (req, res) => {
-  const currentMarkets = markets.getCachedMarkets();
-  const limit = parseInt(req.query.limit) || 10;
-  res.json(alerts.getMarketMovers(currentMarkets, limit));
-});
-
-// ─── Intelligence: Signal Credibility ────────────────────────────────
-app.get('/api/intel/credibility', (req, res) => {
-  res.json(signalTracker.getReport());
-});
-
-// ─── Intelligence: Cross-Platform Divergences ────────────────────────
-app.get('/api/intel/divergences', (req, res) => {
-  try {
-    const mktList = markets.getCachedMarkets();
-    const matches = oddsApi.matchAllMarkets(mktList);
-    const divergences = Array.from(matches.entries())
-      .map(([condId, data]) => ({ conditionId: condId, ...data }))
-      .filter(d => Math.abs(d.divergence || 0) >= 0.03)
-      .sort((a, b) => Math.abs(b.divergence) - Math.abs(a.divergence));
-
-    res.json({
-      count: divergences.length,
-      divergences,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Intelligence: Market Comparison ─────────────────────────────────
-app.get('/api/intel/compare/:conditionId', (req, res) => {
-  try {
-    const condId = req.params.conditionId;
-    const polyMarket = markets.getCachedMarkets().find(m => m.conditionId === condId);
-    const kalshiMkt = kalshiMarkets ? kalshiMarkets.getCachedMarkets().find(m => m.conditionId === condId) : null;
-    const bookmaker = oddsApi.matchAllMarkets(markets.getCachedMarkets()).get(condId);
-    const signals = scanner.getOpportunities(500).filter(o => o.conditionId === condId);
-
-    const badge = signals.length > 0 ? signalTracker.getBadge(signals[0].strategy, signals[0].score) : null;
-
-    res.json({
-      conditionId: condId,
-      polymarket: polyMarket || null,
-      kalshi: kalshiMkt || null,
-      bookmaker: bookmaker || null,
-      signals,
-      credibilityBadge: badge,
-      watched: watchlist.isWatched(condId),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Independent Data Sources ────────────────────────────────────────
-
-// Status of all independent sources
-app.get('/api/intel/independent/status', (req, res) => {
-  if (!independentSignals) return res.json({ available: false });
-  res.json(independentSignals.getStatus());
-});
-
-// Configure LLM analysis provider
-app.post('/api/intel/independent/llm/configure', (req, res) => {
-  if (!independentSignals) return res.status(503).json({ error: 'Independent signals module not loaded' });
-  try {
-    const { apiKey, provider, model } = req.body;
-    if (!apiKey) return res.status(400).json({ error: 'apiKey required' });
-    independentSignals.llm.configure({ apiKey, provider, model });
-    res.json({ status: 'configured', provider: provider || 'openai', model });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// Get LLM analysis status + cost tracking
-app.get('/api/intel/independent/llm/status', (req, res) => {
-  if (!independentSignals) return res.json({ available: false });
-  res.json(independentSignals.llm.getStatus());
-});
-
-// Get recent edge opportunities — serves cached auto-scan results instantly
-app.get('/api/intel/independent/edges', (req, res) => {
-  if (!independentSignals) return res.json({ edges: [], available: false });
-  const limit = parseInt(req.query.limit) || 20;
-  const minQuality = parseInt(req.query.minQuality) || 0;
-
-  // Prefer cached auto-scan results (instant response)
-  let edges = cachedScanResults.length > 0
-    ? cachedScanResults.filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE')
-    : independentSignals.getRecentEdges(limit * 2);
-
-  // Filter by quality if requested
-  if (minQuality > 0) {
-    edges = edges.filter(e => (e.edgeQuality || 0) >= minQuality);
-  }
-
-  res.json({
-    edges: edges.slice(0, limit),
-    calibration: independentSignals.getCalibrationData(),
-    lastScan: lastScanTime ? lastScanTime.toISOString() : null,
-    nextScan: lastScanTime ? new Date(lastScanTime.getTime() + SCAN_INTERVAL).toISOString() : null,
-    scanRunning,
-  });
-});
-
-// Get ALL cached scan results (not just edges — includes full analysis)
-app.get('/api/intel/independent/cached', (req, res) => {
-  const minQuality = parseInt(req.query.minQuality) || 0;
-  let results = [...cachedScanResults];
-  if (minQuality > 0) {
-    results = results.filter(e => (e.edgeQuality || 0) >= minQuality);
-  }
-  res.json({
-    count: results.length,
-    results,
-    lastScan: lastScanTime ? lastScanTime.toISOString() : null,
-    nextScan: lastScanTime ? new Date(lastScanTime.getTime() + SCAN_INTERVAL).toISOString() : null,
-    scanRunning,
-    totalCached: cachedScanResults.length,
-  });
-});
-
-// Manually trigger a scan (returns immediately, scan runs in background)
-app.post('/api/intel/independent/scan', (req, res) => {
-  if (scanRunning) return res.json({ status: 'already_running', lastScan: lastScanTime?.toISOString() });
-  runAutoScan().catch(() => {});
-  res.json({ status: 'started', lastScan: lastScanTime?.toISOString() });
-});
-
-// Scanner status
-app.get('/api/intel/independent/scanner', (req, res) => {
-  res.json({
-    running: scanRunning,
-    lastScan: lastScanTime ? lastScanTime.toISOString() : null,
-    nextScan: lastScanTime ? new Date(lastScanTime.getTime() + SCAN_INTERVAL).toISOString() : null,
-    cachedResults: cachedScanResults.length,
-    interval: SCAN_INTERVAL / 1000 + 's',
-    edgeCount: cachedScanResults.filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE').length,
-    aGrade: cachedScanResults.filter(e => (e.edgeQuality || 0) >= 75).length,
-    bGrade: cachedScanResults.filter(e => (e.edgeQuality || 0) >= 55 && (e.edgeQuality || 0) < 75).length,
-  });
-});
-
-// Analyze a specific market with all independent sources
-app.get('/api/intel/independent/:conditionId', async (req, res) => {
-  if (!independentSignals) return res.status(503).json({ error: 'Independent signals module not loaded' });
-  try {
-    const condId = req.params.conditionId;
-    const market = markets.getCachedMarkets().find(m => m.conditionId === condId);
-    if (!market) return res.status(404).json({ error: 'Market not found' });
-
-    const signal = await independentSignals.getIndependentSignal(market);
-    res.json(signal);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Trigger LLM analysis for a specific market
-app.post('/api/intel/independent/llm/analyze', async (req, res) => {
-  if (!independentSignals) return res.status(503).json({ error: 'Independent signals module not loaded' });
-  try {
-    const { conditionId, headlines } = req.body;
-    if (!conditionId) return res.status(400).json({ error: 'conditionId required' });
-
-    const market = markets.getCachedMarkets().find(m => m.conditionId === conditionId);
-    if (!market) return res.status(404).json({ error: 'Market not found' });
-
-    const result = await independentSignals.llm.analyzeMarket(market, headlines || []);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Batch analyze top markets
-app.post('/api/intel/independent/batch', async (req, res) => {
-  if (!independentSignals) return res.status(503).json({ error: 'Independent signals module not loaded' });
-  try {
-    const body = req.body || {};
-    const maxMarkets = body.maxMarkets || body.count || 10;
-    const skipLLM = body.skipLLM || false;
-    const allMarkets = markets.getCachedMarkets();
-    const results = await independentSignals.batchAnalyze(allMarkets, { maxMarkets, skipLLM });
-
-    const entries = [];
-    for (const [condId, signal] of results) {
-      entries.push({ conditionId: condId, ...signal });
-    }
-
-    // Record ALL edges with real divergence for resolution tracking
-    // Track everything with 2+ sources — builds track record fast from sports
-    if (edgeResolver) {
-      for (const e of entries) {
-        if ((e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE') && (e.sourceCount || 0) >= 1) {
-          edgeResolver.recordEdge(e);
-        }
-      }
-    }
-
-    // Fire webhook alerts for high-quality STRONG edges
-    const strongEdges = entries.filter(e => e.edgeSignal === 'STRONG' && (e.edgeQuality || 0) >= 55);
-    if (strongEdges.length > 0) {
-      fireWebhookAlerts(strongEdges).catch(() => {});
-    }
-
-    res.json({
-      count: entries.length,
-      results: entries.sort((a, b) => (b.absDivergence || 0) - (a.absDivergence || 0)),
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Calibration & Track Record ──────────────────────────────────────
-
-app.get('/api/intel/calibration', (req, res) => {
-  if (!independentSignals) return res.json({ available: false });
-
-  const calibration = independentSignals.getCalibrationData();
-  const edges = independentSignals.getRecentEdges(200);
-
-  // Compute additional metrics
-  const last24h = edges.filter(e => Date.now() - (e.timestamp || 0) < 86400000);
-  const last7d = edges.filter(e => Date.now() - (e.timestamp || 0) < 604800000);
-
-  // Quality distribution
-  const qualityDist = { A: 0, B: 0, C: 0, D: 0 };
-  for (const e of edges) {
-    const grade = e.edgeGrade || (e.edgeQuality >= 75 ? 'A' : e.edgeQuality >= 55 ? 'B' : e.edgeQuality >= 35 ? 'C' : 'D');
-    qualityDist[grade] = (qualityDist[grade] || 0) + 1;
-  }
-
-  // Average edge quality
-  const avgQuality = edges.length > 0
-    ? Math.round(edges.reduce((sum, e) => sum + (e.edgeQuality || 0), 0) / edges.length)
-    : 0;
-
-  // Source hit rates
-  const sourceHits = {};
-  for (const e of edges) {
-    const count = e.sourceCount || e.validatedSourceCount || 0;
-    sourceHits[count] = (sourceHits[count] || 0) + 1;
-  }
-
-  res.json({
-    calibration,
-    metrics: {
-      totalEdges: edges.length,
-      last24h: last24h.length,
-      last7d: last7d.length,
-      avgQuality,
-      qualityDistribution: qualityDist,
-      sourceHitRates: sourceHits,
-      strongEdges: edges.filter(e => e.edgeSignal === 'STRONG').length,
-      moderateEdges: edges.filter(e => e.edgeSignal === 'MODERATE').length,
-      highQualityEdges: edges.filter(e => (e.edgeQuality || 0) >= 55).length,
-    },
-    systemStatus: independentSignals.getStatus(),
-  });
-});
-
-// ─── YouTube Tracker ──────────────────────────────────────────────────
-app.get('/api/intel/youtube/status', (req, res) => {
-  if (!youtubeTracker) return res.json({ available: false });
-  res.json({
-    available: true,
-    ...youtubeTracker.getStatus(),
-    trackedVideos: youtubeTracker.getTrackedVideos(),
-  });
-});
-
-app.post('/api/intel/youtube/analyze', async (req, res) => {
-  if (!youtubeTracker) return res.status(400).json({ error: 'YouTube tracker not available' });
-  const { question, endDate } = req.body;
-  try {
-    const signal = await youtubeTracker.getYouTubeSignal({ question, endDate, conditionId: 'manual-' + Date.now() });
-    res.json({ signal });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/intel/youtube/creators', (req, res) => {
-  // Return known creator database info
-  const CREATORS = {
-    'mrbeast':       { name: 'MrBeast', avgFirst24h: 80000000, avgFirst48h: 120000000 },
-    'pewdiepie':     { name: 'PewDiePie', avgFirst24h: 8000000, avgFirst48h: 15000000 },
-    'markrober':     { name: 'Mark Rober', avgFirst24h: 20000000, avgFirst48h: 35000000 },
-    'mkbhd':         { name: 'MKBHD', avgFirst24h: 5000000, avgFirst48h: 10000000 },
-    'loganpaul':     { name: 'Logan Paul', avgFirst24h: 10000000, avgFirst48h: 18000000 },
-    'ksi':           { name: 'KSI', avgFirst24h: 8000000, avgFirst48h: 14000000 },
-    'ishowspeed':    { name: 'IShowSpeed', avgFirst24h: 12000000, avgFirst48h: 20000000 },
-    'airrack':       { name: 'Airrack', avgFirst24h: 15000000, avgFirst48h: 25000000 },
-    'dude perfect':  { name: 'Dude Perfect', avgFirst24h: 15000000, avgFirst48h: 25000000 },
-    'ryan trahan':   { name: 'Ryan Trahan', avgFirst24h: 10000000, avgFirst48h: 18000000 },
-  };
-  res.json({ creators: CREATORS });
-});
-
-// ─── Trending YouTube Markets (auto-discover + analyze) ──────────────
-app.get('/api/intel/youtube/trending', async (req, res) => {
-  if (!youtubeTracker) return res.json({ markets: [], error: 'YouTube tracker not available' });
-  try {
-    const allMarkets = markets.getCachedMarkets();
-    // Filter to YouTube-related markets
-    const ytRegex = /youtube|video|views|watch|stream|subscriber|upload|MrBeast|PewDiePie|Mark Rober|MKBHD|Logan Paul|KSI|IShowSpeed|Airrack|Dude Perfect|Ryan Trahan/i;
-    const ytMarkets = allMarkets.filter(m => ytRegex.test(m.question));
-
-    // Analyze each market with the YouTube tracker
-    const analyzed = [];
-    for (const mkt of ytMarkets.slice(0, 20)) {
-      try {
-        const signal = await youtubeTracker.getYouTubeSignal({
-          question: mkt.question,
-          endDate: mkt.endDate,
-          conditionId: mkt.conditionId,
-          yesPrice: mkt.yesPrice,
-        });
-
-        const edge = signal?.prob != null ? (signal.prob - mkt.yesPrice) : null;
-        const absEdge = edge != null ? Math.abs(edge) : 0;
-        const suggestion = edge != null
-          ? (edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : 'HOLD')
-          : 'NO DATA';
-
-        analyzed.push({
-          conditionId: mkt.conditionId,
-          question: mkt.question,
-          slug: mkt.slug,
-          yesPrice: mkt.yesPrice,
-          noPrice: mkt.noPrice,
-          volume24hr: mkt.volume24hr,
-          liquidity: mkt.liquidity,
-          endDate: mkt.endDate,
-          signal: signal ? {
-            prob: signal.prob,
-            confidence: signal.confidence,
-            detail: signal.detail,
-            currentViews: signal.currentViews,
-            projectedViews: signal.projectedViews,
-            targetViews: signal.targetViews,
-            velocity: signal.velocity,
-            channel: signal.channel,
-            videoTitle: signal.videoTitle,
-            isBaseline: signal.isBaseline || false,
-          } : null,
-          edge: edge != null ? Math.round(edge * 1000) / 1000 : null,
-          absEdge: Math.round(absEdge * 1000) / 1000,
-          suggestion,
-          suggestedSide: edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : null,
-          suggestedPrice: edge > 0.05 ? mkt.yesPrice : edge < -0.05 ? mkt.noPrice : null,
-          edgePct: edge != null ? Math.round(edge * 10000) / 100 : null,
-        });
-      } catch (err) {
-        analyzed.push({
-          conditionId: mkt.conditionId,
-          question: mkt.question,
-          slug: mkt.slug,
-          yesPrice: mkt.yesPrice,
-          volume24hr: mkt.volume24hr,
-          endDate: mkt.endDate,
-          signal: null,
-          edge: null,
-          suggestion: 'ERROR',
-          error: err.message,
-        });
-      }
-    }
-
-    // Sort by absolute edge descending (best opportunities first)
-    analyzed.sort((a, b) => (b.absEdge || 0) - (a.absEdge || 0));
-
-    res.json({
-      markets: analyzed,
-      total: ytMarkets.length,
-      analyzed: analyzed.length,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Twitter Tracker ──────────────────────────────────────────────────
-app.get('/api/intel/twitter/status', (req, res) => {
-  if (!twitterTracker) return res.json({ available: false });
-  res.json({
-    available: true,
-    ...twitterTracker.getStatus(),
-    trackedAccounts: twitterTracker.getTrackedAccounts(),
-  });
-});
-
-app.post('/api/intel/twitter/analyze', async (req, res) => {
-  if (!twitterTracker) return res.status(400).json({ error: 'Twitter tracker not available' });
-  const { question, endDate } = req.body;
-  try {
-    const signal = await twitterTracker.getTwitterSignal({ question, endDate, conditionId: 'manual-' + Date.now() });
-    res.json({ signal });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/intel/twitter/simulate', (req, res) => {
-  if (!twitterTracker) return res.status(400).json({ error: 'Twitter tracker not available' });
-  const { username, currentCount, targetCount, hoursRemaining } = req.body;
-  try {
-    const result = twitterTracker.calculateTweetProbability(
-      username || 'elonmusk',
-      Number(currentCount) || 0,
-      Number(targetCount) || 120,
-      Number(hoursRemaining) || 168
-    );
-    const pattern = twitterTracker.buildPattern(username || 'elonmusk');
-    res.json({ result, pattern });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/intel/twitter/accounts', (req, res) => {
-  if (!twitterTracker) return res.json({ accounts: {} });
-  const TRACKED_ACCOUNTS = {
-    'elonmusk':        { name: 'Elon Musk', avgDailyTweets: 35, stdDev: 12, topics: ['tech', 'space', 'politics', 'crypto', 'ai'] },
-    'realdonaldtrump': { name: 'Donald Trump', avgDailyTweets: 15, stdDev: 8, topics: ['politics'] },
-    'joebiden':        { name: 'Joe Biden', avgDailyTweets: 5, stdDev: 3, topics: ['politics'] },
-    'vaborehim':       { name: 'Vitalik Buterin', avgDailyTweets: 8, stdDev: 5, topics: ['crypto', 'tech'] },
-    'caborehim':       { name: 'CZ (Binance)', avgDailyTweets: 10, stdDev: 6, topics: ['crypto'] },
-  };
-  res.json({ accounts: TRACKED_ACCOUNTS });
-});
-
-app.get('/api/intel/twitter/trending', async (req, res) => {
-  if (!twitterTracker) return res.json({ markets: [], error: 'Twitter tracker not available' });
-  try {
-    const allMarkets = markets.getCachedMarkets();
-    const twRegex = /tweet|twitter|post.*on x|elon.*tweet|trump.*tweet|@\w+.*tweet|post.*x\.com|weekly.*tweet|daily.*tweet/i;
-    const twMarkets = allMarkets.filter(m => twRegex.test(m.question));
-
-    const analyzed = [];
-    for (const mkt of twMarkets.slice(0, 20)) {
-      try {
-        const signal = await twitterTracker.getTwitterSignal({
-          question: mkt.question,
-          endDate: mkt.endDate,
-          conditionId: mkt.conditionId,
-          yesPrice: mkt.yesPrice,
-        });
-
-        const edge = signal?.prob != null ? (signal.prob - mkt.yesPrice) : null;
-        const absEdge = edge != null ? Math.abs(edge) : 0;
-        const suggestion = edge != null
-          ? (edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : 'HOLD')
-          : 'NO DATA';
-
-        analyzed.push({
-          conditionId: mkt.conditionId,
-          question: mkt.question,
-          slug: mkt.slug,
-          yesPrice: mkt.yesPrice,
-          noPrice: mkt.noPrice,
-          volume24hr: mkt.volume24hr,
-          liquidity: mkt.liquidity,
-          endDate: mkt.endDate,
-          signal: signal ? {
-            prob: signal.prob,
-            confidence: signal.confidence,
-            detail: signal.detail,
-            currentCount: signal.currentCount,
-            targetCount: signal.targetCount,
-            username: signal.username,
-            hoursRemaining: signal.hoursRemaining,
-            dataSource: signal.dataSource,
-            isBaseline: signal.isBaseline || false,
-          } : null,
-          edge: edge != null ? Math.round(edge * 1000) / 1000 : null,
-          absEdge: Math.round(absEdge * 1000) / 1000,
-          suggestion,
-          suggestedSide: edge > 0.05 ? 'YES' : edge < -0.05 ? 'NO' : null,
-          edgePct: edge != null ? Math.round(edge * 10000) / 100 : null,
-        });
-      } catch (err) {
-        analyzed.push({
-          conditionId: mkt.conditionId,
-          question: mkt.question,
-          slug: mkt.slug,
-          yesPrice: mkt.yesPrice,
-          volume24hr: mkt.volume24hr,
-          endDate: mkt.endDate,
-          signal: null,
-          edge: null,
-          suggestion: 'ERROR',
-          error: err.message,
-        });
-      }
-    }
-
-    analyzed.sort((a, b) => (b.absEdge || 0) - (a.absEdge || 0));
-
-    res.json({
-      markets: analyzed,
-      total: twMarkets.length,
-      analyzed: analyzed.length,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Cultural Events ──────────────────────────────────────────────────
-app.get('/api/intel/cultural/status', (req, res) => {
-  if (!culturalEvents) return res.json({ available: false });
-  res.json({ available: true, ...culturalEvents.getStatus() });
-});
-
-app.get('/api/intel/cultural/youtube-impact/:creator', async (req, res) => {
-  if (!culturalEvents) return res.json({ available: false });
-  try {
-    const impact = await culturalEvents.getYouTubeImpact(req.params.creator);
-    res.json(impact);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/intel/cultural/elon-impact', async (req, res) => {
-  if (!culturalEvents) return res.json({ available: false });
-  try {
-    const impact = await culturalEvents.getElonTweetImpact();
-    res.json(impact);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Public Track Record (no auth) ───────────────────────────────────
-app.get('/api/public/track-record', (req, res) => {
-  try {
-    const record = edgeResolver ? edgeResolver.getTrackRecord() : null;
-    const resFile = path.join(__dirname, 'logs/edge-resolutions.json');
-    let allEdges = [];
-    try {
-      const raw = JSON.parse(fs.readFileSync(resFile, 'utf8'));
-      allEdges = raw.resolutions || [];
-    } catch { /* empty */ }
-
-    // Build a sanitized public view
-    const pending = allEdges.filter(e => !e.resolved);
-    const resolved = allEdges.filter(e => e.resolved);
-
-    // Grade distribution of ALL tracked edges
-    const gradeDistribution = {};
-    for (const e of allEdges) {
-      const g = e.edgeGrade || '?';
-      if (!gradeDistribution[g]) gradeDistribution[g] = 0;
-      gradeDistribution[g]++;
-    }
-
-    // Source count distribution
-    const sourceCountDist = {};
-    for (const e of allEdges) {
-      const sc = e.sourceCount || 0;
-      const bucket = sc >= 6 ? '6+' : String(sc);
-      if (!sourceCountDist[bucket]) sourceCountDist[bucket] = 0;
-      sourceCountDist[bucket]++;
-    }
-
-    // Active edges (pending) — show questions, grades, divergence ranges
-    const activeEdges = pending
-      .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
-      .map(e => ({
-        question: e.question,
-        edgeGrade: e.edgeGrade,
-        edgeDirection: e.edgeDirection,
-        divergence: e.divergence,
-        sourceCount: e.sourceCount,
-        recordedAt: e.recordedAt,
-        marketPrice: e.marketPrice,
-        ourProb: e.ourProb,
-      }));
-
-    // Resolved edges — full detail
-    const resolvedEdges = resolved
-      .sort((a, b) => new Date(b.resolvedAt) - new Date(a.resolvedAt))
-      .map(e => ({
-        question: e.question,
-        edgeGrade: e.edgeGrade,
-        edgeDirection: e.edgeDirection,
-        outcome: e.outcome === 1 ? 'YES' : 'NO',
-        pnlPp: e.pnlPp,
-        weWereBetter: e.weWereBetter,
-        ourProb: e.ourProb,
-        marketPrice: e.marketPrice,
-        resolvedAt: e.resolvedAt,
-        recordedAt: e.recordedAt,
-      }));
-
-    // Timeline: edges recorded per day
-    const timeline = {};
-    for (const e of allEdges) {
-      const day = e.recordedAt?.slice(0, 10);
-      if (day) {
-        if (!timeline[day]) timeline[day] = { recorded: 0, resolved: 0 };
-        timeline[day].recorded++;
-        if (e.resolved) timeline[day].resolved++;
-      }
-    }
-
-    res.json({
-      summary: record?.summary || { totalEdges: allEdges.length, resolvedEdges: resolved.length, wins: 0, losses: 0, totalPnLpp: 0, pending: pending.length },
-      hypothetical: record?.hypothetical || { totalBets: 0, totalReturn: 0, roi: 0 },
-      byGrade: record?.byGrade || {},
-      gradeDistribution,
-      sourceCountDist,
-      activeEdges,
-      resolvedEdges,
-      timeline,
-      lastUpdated: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Track record unavailable' });
-  }
-});
-
-// ─── Track Record & Resolution ───────────────────────────────────────
-
-// Get track record (resolved edges, P&L, accuracy)
-app.get('/api/intel/track-record', (req, res) => {
-  if (!edgeResolver) return res.json({ available: false, summary: { totalEdges: 0, resolvedEdges: 0, wins: 0, losses: 0, totalPnLpp: 0 }, pending: 0, recent: [], byGrade: {}, hypothetical: { totalBets: 0, totalReturn: 0, roi: 0 } });
-  res.json(edgeResolver.getTrackRecord());
-});
-
-// Manually trigger resolution check
-app.post('/api/intel/check-resolutions', async (req, res) => {
-  if (!edgeResolver) return res.status(503).json({ error: 'Edge resolver not loaded' });
-  try {
-    const result = await edgeResolver.checkResolutions(async (conditionId) => {
-      // Try Polymarket first
-      const pm = markets.getCachedMarkets().find(m => m.conditionId === conditionId);
-      if (pm) return pm;
-      // Try Kalshi
-      if (kalshiMarkets) {
-        const km = kalshiMarkets.getCachedMarkets().find(m => m.conditionId === conditionId);
-        if (km) return km;
-      }
-      return null;
-    });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Webhook / Discord Alerts ────────────────────────────────────────
-
+// ─── Webhook Helpers ─────────────────────────────────────────────────
 const WEBHOOK_FILE = path.join(__dirname, 'logs/webhook-config.json');
 let webhookConfig = { urls: [], enabled: false, minQuality: 55, minEdge: 'STRONG' };
 try {
   if (fs.existsSync(WEBHOOK_FILE)) {
     webhookConfig = { ...webhookConfig, ...JSON.parse(fs.readFileSync(WEBHOOK_FILE, 'utf8')) };
-    log.info('SERVER', `Loaded webhook config: ${webhookConfig.urls.length} URLs, enabled=${webhookConfig.enabled}`);
   }
 } catch { /* fresh start */ }
 
-// Auto-configure Discord from env
 if (process.env.DISCORD_WEBHOOK_URL) {
-  if (!webhookConfig.urls.includes(process.env.DISCORD_WEBHOOK_URL)) {
-    webhookConfig.urls.push(process.env.DISCORD_WEBHOOK_URL);
-  }
+  if (!webhookConfig.urls.includes(process.env.DISCORD_WEBHOOK_URL)) webhookConfig.urls.push(process.env.DISCORD_WEBHOOK_URL);
   webhookConfig.enabled = true;
-  log.info('SERVER', `Discord webhook loaded from env: ${process.env.DISCORD_WEBHOOK_URL.slice(0, 50)}...`);
 }
 
 function saveWebhookConfig() {
-  try { fs.promises.writeFile(WEBHOOK_FILE, JSON.stringify(webhookConfig, null, 2)); } catch { /* ok */ }
+  fs.promises.writeFile(WEBHOOK_FILE, JSON.stringify(webhookConfig, null, 2)).catch(() => {});
 }
 
-// Get webhook config
-app.get('/api/intel/webhooks', (req, res) => {
-  res.json({
-    enabled: webhookConfig.enabled,
-    urlCount: webhookConfig.urls.length,
-    minQuality: webhookConfig.minQuality,
-    minEdge: webhookConfig.minEdge,
-    hasUrls: webhookConfig.urls.length > 0,
-  });
-});
-
-// Set webhook config
-app.post('/api/intel/webhooks', (req, res) => {
-  const { url, enabled, minQuality, minEdge } = req.body;
-  if (url) {
-    if (!webhookConfig.urls.includes(url)) webhookConfig.urls.push(url);
-  }
-  if (typeof enabled === 'boolean') webhookConfig.enabled = enabled;
-  if (typeof minQuality === 'number') webhookConfig.minQuality = minQuality;
-  if (minEdge) webhookConfig.minEdge = minEdge;
-  saveWebhookConfig();
-  res.json({ status: 'updated', config: { enabled: webhookConfig.enabled, urlCount: webhookConfig.urls.length, minQuality: webhookConfig.minQuality } });
-});
-
-// Delete webhook URL
-app.delete('/api/intel/webhooks', (req, res) => {
-  const { url } = req.body;
-  if (url) webhookConfig.urls = webhookConfig.urls.filter(u => u !== url);
-  saveWebhookConfig();
-  res.json({ status: 'deleted', urlCount: webhookConfig.urls.length });
-});
-
-// Fire alerts to all configured webhooks
 async function fireWebhookAlerts(edges) {
+  // Telegram signals now handled separately in runAutoScan with per-user filtering
   if (!webhookConfig.enabled || webhookConfig.urls.length === 0) return;
-
   const filtered = edges.filter(e =>
     (e.edgeQuality || 0) >= webhookConfig.minQuality &&
     (e.edgeSignal === 'STRONG' || (webhookConfig.minEdge === 'MODERATE' && e.edgeSignal === 'MODERATE'))
@@ -1826,152 +309,664 @@ async function fireWebhookAlerts(edges) {
   for (const url of webhookConfig.urls) {
     try {
       await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(message),
-        signal: AbortSignal.timeout(5000),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message), signal: AbortSignal.timeout(5000),
       });
-      log.info('WEBHOOK', `Alert sent to ${url.slice(0, 40)}... (${filtered.length} edges)`);
+      log.info('WEBHOOK', `Alert sent to ${url.slice(0, 40)}...`);
     } catch (err) {
-      log.warn('WEBHOOK', `Failed to send to ${url.slice(0, 40)}: ${err.message}`);
+      log.warn('WEBHOOK', `Failed: ${err.message}`);
     }
   }
 }
 
-// ─── Debug: Build info endpoint ──────────────────────────────────────
-app.get('/api/debug/build', (req, res) => {
-  const candidates = [
-    path.join(__dirname, '..', 'build'),
-    path.join(__dirname, 'build'),
-    path.join(process.cwd(), 'build'),
-    path.join(process.cwd(), '..', 'build'),
-  ];
-  const found = candidates.find(p => fs.existsSync(path.join(p, 'index.html')));
-  // List files in key directories for debugging
-  let rootFiles = [], cwdFiles = [], parentFiles = [];
-  try { rootFiles = fs.readdirSync('/app').slice(0, 30); } catch(e) { rootFiles = [e.message]; }
-  try { cwdFiles = fs.readdirSync(process.cwd()).slice(0, 30); } catch(e) { cwdFiles = [e.message]; }
-  try { parentFiles = fs.readdirSync(path.join(__dirname, '..')).slice(0, 30); } catch(e) { parentFiles = [e.message]; }
-  res.json({ candidates, found: found || null, cwd: process.cwd(), dirname: __dirname, rootFiles, cwdFiles, parentFiles });
+// ═══════════════════════════════════════════════════════════════════════
+// MIDDLEWARE STACK
+// ═══════════════════════════════════════════════════════════════════════
+
+// CORS
+const allowedOrigins = ['http://localhost:3000', process.env.FRONTEND_URL].filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
+    if (process.env.NODE_ENV === 'production') return cb(new Error(`Origin ${origin} not allowed`), false);
+    cb(null, true);
+  },
+  credentials: true,
+}));
+
+app.use(express.json({ limit: '1mb' }));
+app.set('etag', false);
+
+// ─── Rate Limiting ───────────────────────────────────────────────────
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000;
+const RATE_LIMIT_MAX = 600;
+
+function rateLimit(req, res, next) {
+  if (req.path === '/api/health') return next();
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  let record = rateLimitMap.get(ip);
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW) { record = { windowStart: now, count: 0 }; rateLimitMap.set(ip, record); }
+  record.count++;
+  res.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
+  res.set('X-RateLimit-Remaining', String(Math.max(0, RATE_LIMIT_MAX - record.count)));
+  if (record.count > RATE_LIMIT_MAX) return res.status(429).json({ error: 'Too many requests', retryAfter: Math.ceil((record.windowStart + RATE_LIMIT_WINDOW - now) / 1000) });
+  next();
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitMap) { if (now - record.windowStart > RATE_LIMIT_WINDOW * 2) rateLimitMap.delete(ip); }
+}, 300000);
+
+app.use(rateLimit);
+
+// ─── Security Headers ────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('X-XSS-Protection', '1; mode=block');
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
 });
 
-// ─── Production: Serve React Frontend ────────────────────────────────
-// Try multiple paths — Railway may flatten structure differently than local dev
+// Request logger
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => log.info('HTTP', `${req.method} ${req.url} → ${res.statusCode} (${Date.now() - start}ms)`));
+  next();
+});
+
+// Authentication
+app.use(authMiddleware);
+
+// ═══════════════════════════════════════════════════════════════════════
+// CORE ROUTES (kept in server.js — tiny, auth-specific)
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/health', (req, res) => {
+  const memUsage = process.memoryUsage();
+  res.json({
+    status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString(),
+    version: require('./package.json').version || '1.0.0',
+    memory: { heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB', rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB' },
+    markets: markets.getCachedMarkets().length,
+    scanner: { running: scanRunning, cachedEdges: cachedScanResults.length },
+    components: healthMonitor ? healthMonitor.getStatus() : null,
+    ws: wsServer ? wsServer.getStats() : null,
+    optimizer: strategyOptimizer ? { report: strategyOptimizer.getReport() } : null,
+    ensemble: probabilityEnsemble ? { report: probabilityEnsemble.getReport() } : null,
+    newsStream: newsStream ? newsStream.getStatus() : null,
+    logCleanup: logCleanup ? { diskUsage: logCleanup.getDiskUsage() } : null,
+  });
+});
+
+if (eventPush) {
+  app.get('/api/events', eventPush.sseHandler);
+  app.get('/api/events/status', (req, res) => res.json({ clients: eventPush.getClientCount(), available: true }));
+}
+
+app.get('/api/auth/key', (req, res) => res.json({ key: getKey() }));
+app.post('/api/auth/verify', (req, res) => res.json({ valid: true }));
+app.post('/api/auth/regenerate', (req, res) => res.json({ key: regenerateKey() }));
+
+// ═══════════════════════════════════════════════════════════════════════
+// MOUNT ALL ROUTE MODULES
+// ═══════════════════════════════════════════════════════════════════════
+
+mountRoutes(app, {
+  // Core
+  scanner, executor, riskManager, resolver, markets, client, oddsApi,
+  paperTrader, config, database,
+  // Kalshi
+  kalshiClient, kalshiMarkets,
+  // Intelligence
+  wsClient, newsSignal, independentSignals, edgeResolver,
+  accaBuilder, picksTracker, picksLearner,
+  // Social
+  youtubeTracker, twitterTracker, culturalEvents,
+  // Helpers
+  alerts, watchlist, signalTracker,
+  // New Alpha Engines
+  newMarketDetector, newsReactor, panicDipDetector,
+  calibrationCollector, executionPipeline,
+  // Infrastructure (10/10)
+  healthMonitor, logCleanup, strategyOptimizer,
+  probabilityEnsemble, wsServer, newsStream,
+  // Scanner state (mutable, shared by reference)
+  scanState: { get cachedScanResults() { return cachedScanResults; }, get lastScanTime() { return lastScanTime; }, get scanRunning() { return scanRunning; }, get SCAN_INTERVAL() { return SCAN_INTERVAL; }, runAutoScan },
+  // Webhook helpers
+  webhooks: { config: webhookConfig, save: saveWebhookConfig, fire: fireWebhookAlerts },
+  // Telegram
+  telegramBot,
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// STATIC SERVING & SPA FALLBACK
+// ═══════════════════════════════════════════════════════════════════════
+
 const buildCandidates = [
-  path.join(__dirname, '..', 'build'),   // local dev: bot/../build
-  path.join(__dirname, 'build'),          // Railway: /app/build
-  path.join(process.cwd(), 'build'),      // cwd/build
-  path.join(process.cwd(), '..', 'build'),// cwd/../build
+  path.join(__dirname, '..', 'build'),
+  path.join(__dirname, 'build'),
+  path.join(process.cwd(), 'build'),
 ];
 const buildPath = buildCandidates.find(p => fs.existsSync(path.join(p, 'index.html')));
+
 if (buildPath) {
   app.use(express.static(buildPath));
-  // Client-side routing: serve index.html for any non-API route
   app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(buildPath, 'index.html'));
-    }
+    if (!req.path.startsWith('/api')) res.sendFile(path.join(buildPath, 'index.html'));
   });
   log.info('SERVER', `Serving React build from ${buildPath}`);
 } else {
-  log.warn('SERVER', `No React build found at ${buildPath} — frontend will not be served`);
-  app.get('/', (req, res) => {
-    res.json({ error: 'Frontend not built', buildPath, hint: 'Run npm run build in project root', dirname: __dirname });
-  });
+  log.warn('SERVER', 'No React build found — frontend will not be served');
+  app.get('/', (req, res) => res.json({ error: 'Frontend not built', hint: 'Run npm run build in project root' }));
 }
 
-// ─── Start Server ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// ENVIRONMENT AUTO-CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════
+
+async function configureEnvironment() {
+  // Odds API
+  if (process.env.ODDS_API_KEY) {
+    try {
+      oddsApi.setApiKey(process.env.ODDS_API_KEY);
+      log.info('SERVER', 'Odds API key loaded from environment');
+      const oddsStart = Date.now();
+      oddsApi.fetchAllOdds().then(ev => {
+        log.info('SERVER', `Auto-fetched ${ev.length} bookmaker events`);
+        if (healthMonitor) healthMonitor.recordSuccess('bookmaker-odds', Date.now() - oddsStart, { count: ev.length });
+      }).catch(err => { if (healthMonitor) healthMonitor.recordError('bookmaker-odds', err.message); });
+      setInterval(() => {
+        const t = Date.now();
+        oddsApi.fetchAllOdds()
+          .then(ev => { if (healthMonitor) healthMonitor.recordSuccess('bookmaker-odds', Date.now() - t, { count: ev.length }); })
+          .catch(err => { if (healthMonitor) healthMonitor.recordError('bookmaker-odds', err.message); });
+      }, 30 * 60 * 1000);
+    } catch (err) { log.warn('SERVER', `Odds API setup failed: ${err.message}`); }
+  }
+
+  // LLM
+  if (process.env.OPENAI_API_KEY && independentSignals) {
+    try {
+      independentSignals.llm.configure({
+        apiKey: process.env.OPENAI_API_KEY,
+        provider: process.env.LLM_PROVIDER || 'openai',
+        model: process.env.LLM_MODEL || undefined,
+      });
+      log.info('SERVER', `LLM configured: provider=${process.env.LLM_PROVIDER || 'openai'}`);
+    } catch (err) { log.warn('SERVER', `LLM setup failed: ${err.message}`); }
+  }
+
+  // YouTube
+  if (process.env.YOUTUBE_API_KEY) {
+    if (independentSignals?.youtube?.setApiKey) independentSignals.youtube.setApiKey(process.env.YOUTUBE_API_KEY);
+    if (youtubeTracker?.setApiKey) youtubeTracker.setApiKey(process.env.YOUTUBE_API_KEY);
+    log.info('SERVER', 'YouTube tracker API key loaded');
+  }
+
+  // Twitter
+  if (process.env.RAPIDAPI_KEY) {
+    if (independentSignals?.twitter) try { independentSignals.twitter.setApiKey(process.env.RAPIDAPI_KEY); } catch (err) { log.debug('SERVER', 'Twitter API key set failed: ' + err.message); }
+    if (twitterTracker?.setApiKey) try { twitterTracker.setApiKey(process.env.RAPIDAPI_KEY); } catch (err) { log.debug('SERVER', 'Twitter tracker API key set failed: ' + err.message); }
+    log.info('SERVER', 'Twitter RapidAPI fallback key loaded');
+  } else if (twitterTracker) {
+    log.info('SERVER', 'Twitter tracker running FREE (Nitter scraping)');
+  }
+
+  // Cultural events + News
+  if (process.env.NEWSDATA_API_KEY && independentSignals?.culturalEvents) {
+    try { independentSignals.culturalEvents.setNewsApiKey(process.env.NEWSDATA_API_KEY); } catch (err) { log.debug('SERVER', 'Cultural events API key set failed: ' + err.message); }
+  }
+
+  // Polymarket CLOB API credentials (for authenticated trading)
+  if (process.env.POLY_API_KEY) {
+    try {
+      const clobExecutor = optionalRequire('./polymarket/clobExecutor');
+      if (clobExecutor) {
+        const privateKey = process.env.POLYGON_PRIVATE_KEY || null;
+        const initialized = await clobExecutor.initialize(privateKey, {
+          apiKey: process.env.POLY_API_KEY,
+          apiSecret: process.env.POLY_API_SECRET,
+          apiPassphrase: process.env.POLY_PASSPHRASE,
+          dryRun: !privateKey, // dry-run if no private key
+        });
+        if (initialized) {
+          log.info('SERVER', 'Polymarket CLOB executor initialized with API credentials');
+        } else {
+          log.info('SERVER', 'Polymarket CLOB API keys loaded (no wallet key — dry-run mode)');
+        }
+      }
+    } catch (err) { log.warn('SERVER', `CLOB executor setup failed: ${err.message}`); }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STARTUP + SCHEDULED TASKS
+// ═══════════════════════════════════════════════════════════════════════
+
 const PORT = config.PORT;
+let server;
 
-app.listen(PORT, () => {
+server = app.listen(PORT, () => {
   log.info('SERVER', `📊 Market PlayMaker Intelligence API running on http://localhost:${PORT}`);
-  log.info('SERVER', `   🔑 Auth:      API key authentication ${process.env.AUTH_DISABLED === 'true' ? 'DISABLED' : 'ENABLED'}`);
-  log.info('SERVER', `   📊 Dashboard: http://localhost:3000/polymarket`);
-  log.info('SERVER', `   🔍 Markets:   http://localhost:${PORT}/api/markets`);
-  log.info('SERVER', `   🎯 Signals:   http://localhost:${PORT}/api/opportunities`);
-  log.info('SERVER', `   📈 Status:    http://localhost:${PORT}/api/bot/status`);
-  log.info('SERVER', `   🔔 Alerts:    http://localhost:${PORT}/api/intel/alerts`);
-  log.info('SERVER', `   ⭐ Watchlist: http://localhost:${PORT}/api/intel/watchlist`);
-  log.info('SERVER', `   🧠 LLM:       http://localhost:${PORT}/api/intel/independent/llm/status`);
-  log.info('SERVER', `   🔬 Sources:   http://localhost:${PORT}/api/intel/independent/status`);
-  log.info('SERVER', `   📊 Record:    http://localhost:${PORT}/api/intel/track-record`);
-  log.info('SERVER', `   🎯 Picks:     http://localhost:${PORT}/api/picks/track-record`);
+  log.info('SERVER', `   Dashboard: http://localhost:3000/polymarket`);
+  log.info('SERVER', `   Health:    http://localhost:${PORT}/api/health`);
 
-  // ─── Start Auto-Scanner ──────────────────────────────────────────
-  // Wait for markets to load, then run first scan
-  const scanStartDelay = 20000; // 20s after startup for markets to cache
-  setTimeout(async () => {
-    const mktCount = markets.getCachedMarkets().length;
-    if (mktCount > 0) {
-      log.info('SCANNER', `Starting initial auto-scan (${mktCount} markets loaded)...`);
-      await runAutoScan();
-    } else {
-      log.warn('SCANNER', 'No markets loaded yet, will start scanning on next interval');
-    }
-  }, scanStartDelay);
+  // ═══════════════════════════════════════════════════════════════════
+  // INITIALIZE INFRASTRUCTURE MODULES (10/10 upgrades)
+  // ═══════════════════════════════════════════════════════════════════
 
-  // Schedule recurring scans every 15 minutes
+  // WebSocket server — must init first (uses HTTP server)
+  if (wsServer) {
+    try {
+      wsServer.initialize(server, { origin: allowedOrigins });
+      log.info('SERVER', '🔌 WebSocket server initialized (Socket.IO)');
+    } catch (err) { log.warn('SERVER', `WebSocket init failed: ${err.message}`); }
+  }
+
+  // Health monitor — heartbeat for all components
+  if (healthMonitor) {
+    try {
+      healthMonitor.start({
+        onAlert: (alert) => {
+          log.warn('HEALTH', `Component ${alert.component} is ${alert.status}: ${alert.message || ''}`);
+          if (alert.status === 'down') {
+            const msg = `⚠️ *Component Down*\n\`${alert.component}\` — ${alert.message || 'no response'}`;
+            telegramBot.sendToAll?.(msg)?.catch(() => {});
+          }
+          if (wsServer) wsServer.healthUpdate(alert);
+        },
+      });
+      log.info('SERVER', '🏥 Health monitor started');
+    } catch (err) { log.warn('SERVER', `Health monitor failed: ${err.message}`); }
+  }
+
+  // Log cleanup — prevents unbounded file growth
+  if (logCleanup) {
+    try {
+      logCleanup.start();
+      log.info('SERVER', '🧹 Log cleanup started (6h cycle)');
+    } catch (err) { log.warn('SERVER', `Log cleanup failed: ${err.message}`); }
+  }
+
+  // Strategy optimizer — Thompson Sampling for allocation
+  if (strategyOptimizer) {
+    try {
+      strategyOptimizer.initialize(executor);
+      strategyOptimizer.start();
+      log.info('SERVER', '🎲 Strategy optimizer started (30min cycle)');
+    } catch (err) { log.warn('SERVER', `Strategy optimizer failed: ${err.message}`); }
+  }
+
+  // Probability ensemble — multi-model predictions
+  if (probabilityEnsemble) {
+    try {
+      probabilityEnsemble.initialize(database);
+      probabilityEnsemble.start();
+      log.info('SERVER', '🧠 Probability ensemble started');
+    } catch (err) { log.warn('SERVER', `Probability ensemble failed: ${err.message}`); }
+  }
+
+  // News stream — multi-source streaming news
+  if (newsStream) {
+    try {
+      newsStream.start({
+        healthMonitor,
+        onBreakingNews: (article) => {
+          log.info('NEWS', `🔴 Breaking: "${article.title?.slice(0, 80)}" (score: ${article.impactScore})`);
+          if (wsServer) wsServer.newsBreakAlert(article);
+          // Feed to news reactor for market matching
+          if (newsReactor?.ingestArticle) newsReactor.ingestArticle(article);
+        },
+      });
+      log.info('SERVER', '📰 News stream started (13 sources, 4 tiers)');
+    } catch (err) { log.warn('SERVER', `News stream failed: ${err.message}`); }
+  }
+
+  configureEnvironment();
+
+  // Initialize Telegram bot
+  telegramBot.initialize(process.env.TELEGRAM_BOT_TOKEN, {
+    scanner, executor, paperTrader, markets, client, config,
+    scanState: { get cachedScanResults() { return cachedScanResults; }, get lastScanTime() { return lastScanTime; }, get scanRunning() { return scanRunning; }, runAutoScan },
+  });
+
+  // Initialize BTC Bot (5-minute scanner)
+  btcBot.initialize({
+    sendToAll: (msg) => telegramBot.sendToAll ? telegramBot.sendToAll(msg) : null,
+    sendTo: telegramBot.sendTo,
+    bankroll: parseFloat(process.env.BTC_BOT_BANKROLL || '1000'),
+  });
+
+  // Initialize BTC 5-Min Sniper (real-time Binance + Polymarket)
+  btcSniper.initialize({
+    sendToAll: (msg) => telegramBot.sendToAll ? telegramBot.sendToAll(msg) : null,
+    sendTo: telegramBot.sendTo,
+    bankroll: parseFloat(process.env.SNIPER_BANKROLL || '1000'),
+  });
+
+  // Auto-fetch markets
+  const mktStart = Date.now();
+  markets.refreshMarkets()
+    .then(mktList => {
+      log.info('SERVER', `Fetched ${mktList.length} Polymarket markets`);
+      if (healthMonitor) healthMonitor.recordSuccess('polymarket-api', Date.now() - mktStart, { count: mktList.length });
+    })
+    .catch(err => {
+      log.warn('SERVER', `Market fetch failed: ${err.message}`);
+      if (healthMonitor) healthMonitor.recordError('polymarket-api', err.message);
+    });
   setInterval(() => {
-    runAutoScan().catch(err => log.error('SCANNER', `Scheduled scan failed: ${err.message}`));
-  }, SCAN_INTERVAL);
-  log.info('SCANNER', `Auto-scanner enabled: every ${SCAN_INTERVAL / 60000} min, ${SCAN_MARKETS} markets per scan`);
+    const t = Date.now();
+    markets.refreshMarkets()
+      .then(mktList => { if (healthMonitor) healthMonitor.recordSuccess('polymarket-api', Date.now() - t, { count: mktList.length }); })
+      .catch(err => { if (healthMonitor) healthMonitor.recordError('polymarket-api', err.message); });
+  }, 15 * 60 * 1000);
 
-  // Backfill existing edges from history into resolution tracker
+  // ═══════════════════════════════════════════════════════════════════
+  // NEW ALPHA ENGINES — Start after market cache warms
+  // ═══════════════════════════════════════════════════════════════════
+  setTimeout(() => {
+    const cachedMkts = markets.getCachedMarkets();
+
+    // 1. New Market Detector — polls every 30s for newly listed markets
+    if (newMarketDetector) {
+      try {
+        // Seed known markets from cache to avoid false positives on first run
+        if (cachedMkts.length > 0) newMarketDetector.seedFromCache(cachedMkts);
+        newMarketDetector.start({
+          onNewMarket: (market, analysis) => {
+            log.info('SERVER', `🆕 New market detected: "${analysis.question?.slice(0, 60)}" (score: ${analysis.score})`);
+            if (healthMonitor) healthMonitor.recordSuccess('new-market-detector', 0, { score: analysis.score });
+            // Push to execution pipeline
+            if (executionPipeline && analysis.opportunity) {
+              executionPipeline.fromNewMarketDetector(market, analysis);
+            }
+            // Telegram alert for high-score new markets
+            if (analysis.score >= 40) {
+              const msg = `🆕 *New Market Detected*\n"${analysis.question?.slice(0, 100)}"\nScore: ${analysis.score} | Liq: $${analysis.liquidity?.toFixed(0)}\n${analysis.opportunity ? `⚡ Edge: ${(analysis.opportunity.estimatedEdge * 100).toFixed(1)}% ${analysis.opportunity.side}` : ''}`;
+              telegramBot.sendToAll?.(msg)?.catch(() => {});
+            }
+          },
+          onMispricedMarket: (market, analysis, opp) => {
+            log.info('SERVER', `🎯 Mispriced new market: "${analysis.question?.slice(0, 60)}" — ${opp.type} edge: ${(opp.estimatedEdge * 100).toFixed(1)}%`);
+          },
+        });
+        log.info('SERVER', '🆕 New market detector started (30s poll)');
+      } catch (err) { log.warn('SERVER', `New market detector failed: ${err.message}`); }
+    }
+
+    // 2. Rapid News Reactor — polls RSS every 45s for breaking news
+    if (newsReactor) {
+      try {
+        newsReactor.start({
+          onNewsSignal: (signal) => {
+            log.info('SERVER', `🚨 News signal: "${signal.headline?.slice(0, 60)}" → ${signal.side} ${signal.market?.slice(0, 40)} (edge: ${(signal.estimatedEdge * 100).toFixed(1)}%)`);
+            if (healthMonitor) healthMonitor.recordSuccess('news-reactor', 0, { edge: signal.estimatedEdge });
+            // Push to execution pipeline
+            if (executionPipeline) {
+              executionPipeline.fromNewsReactor(signal);
+            }
+            // Telegram alert for breaking news signals
+            if (signal.isBreaking || signal.estimatedEdge > 0.05) {
+              const msg = `🚨 *Breaking News Signal*\n"${signal.headline?.slice(0, 100)}"\n→ ${signal.side} "${signal.market?.slice(0, 80)}"\nEdge: ${(signal.estimatedEdge * 100).toFixed(1)}% | Impact: ${(signal.impactScore * 100).toFixed(0)}%`;
+              telegramBot.sendToAll?.(msg)?.catch(() => {});
+            }
+          },
+        });
+        log.info('SERVER', '🚨 Rapid news reactor started (45s poll)');
+      } catch (err) { log.warn('SERVER', `News reactor failed: ${err.message}`); }
+    }
+
+    // 3. Panic Dip Detector — monitors price drops across all markets
+    if (panicDipDetector) {
+      try {
+        panicDipDetector.start({
+          onDipSignal: (dip) => {
+            log.info('SERVER', `🔻 Panic dip: "${dip.question?.slice(0, 50)}" dropped ${(dip.dropPct * 100).toFixed(1)}% — edge: ${(dip.netEdge * 100).toFixed(1)}%`);
+            if (healthMonitor) healthMonitor.recordSuccess('panic-dip-detector', 0, { dropPct: dip.dropPct });
+            // Push to execution pipeline
+            if (executionPipeline) {
+              executionPipeline.fromPanicDip(dip);
+            }
+            // Telegram alert for significant dips
+            if (dip.score >= 50 && !dip.newsJustified) {
+              const msg = `🔻 *Panic Dip Detected*\n"${dip.question?.slice(0, 100)}"\nDrop: ${(dip.dropPct * 100).toFixed(1)}% in ${dip.dropDurationMin}min\nEdge: ${(dip.netEdge * 100).toFixed(1)}% | Target: ${(dip.reversionTarget * 100).toFixed(0)}%\n${dip.newsJustified ? '⚠️ News-justified' : '✅ No adverse news'}`;
+              telegramBot.sendToAll?.(msg)?.catch(() => {});
+            }
+          },
+        });
+        // Feed initial price snapshots
+        if (cachedMkts.length > 0) panicDipDetector.recordAllSnapshots(cachedMkts);
+        log.info('SERVER', '🔻 Panic dip detector started');
+      } catch (err) { log.warn('SERVER', `Panic dip detector failed: ${err.message}`); }
+    }
+
+    // 4. Calibration Collector — actively seeks resolution data
+    if (calibrationCollector) {
+      try {
+        calibrationCollector.start();
+        log.info('SERVER', '📊 Calibration collector started (10min poll)');
+      } catch (err) { log.warn('SERVER', `Calibration collector failed: ${err.message}`); }
+    }
+
+  }, 15000); // Wait 15s for market cache to warm
+
+  // ═══════════════════════════════════════════════════════════════════
+  // HEALTH HEARTBEATS — report running status for always-on modules
+  // ═══════════════════════════════════════════════════════════════════
+  if (healthMonitor) {
+    // Initial heartbeat after startup settles (30s)
+    setTimeout(() => {
+      // Report database health
+      if (database) {
+        try { database.db?.pragma('integrity_check'); healthMonitor.recordSuccess('sqlite-db', 0); }
+        catch (err) { healthMonitor.recordError('sqlite-db', err.message); }
+      }
+      // Report Telegram health
+      if (telegramBot?.isActive?.()) healthMonitor.recordSuccess('telegram-bot', 0);
+      // Report executor / risk-manager health (they're loaded and ready)
+      if (executor) healthMonitor.recordSuccess('executor', 0, { status: 'ready' });
+      if (riskManager) healthMonitor.recordSuccess('risk-manager', 0, { status: 'ready' });
+      // Report signal sources
+      if (independentSignals) healthMonitor.recordSuccess('independent-signals', 0, { status: 'ready' });
+      if (probabilityEnsemble) healthMonitor.recordSuccess('probability-model', 0, { status: 'ready' });
+      // Report alpha engines
+      if (newMarketDetector?.getStatus?.()?.running) healthMonitor.recordSuccess('new-market-detector', 0, { status: 'running' });
+      if (newsReactor?.getStatus?.()?.running) healthMonitor.recordSuccess('news-reactor', 0, { status: 'running' });
+      if (panicDipDetector?.getStatus?.()?.running) healthMonitor.recordSuccess('panic-dip-detector', 0, { status: 'running' });
+      if (calibrationCollector?.getStatus?.()?.running) healthMonitor.recordSuccess('calibration-collector', 0, { status: 'running' });
+      if (executionPipeline) healthMonitor.recordSuccess('execution-pipeline', 0, { status: 'ready' });
+      if (edgeResolver) healthMonitor.recordSuccess('edge-resolver', 0, { status: 'ready' });
+      // Report data sources as loaded
+      if (newsSignal) healthMonitor.recordSuccess('news-signal', 0, { status: 'loaded' });
+      if (twitterTracker) healthMonitor.recordSuccess('twitter-tracker', 0, { status: 'loaded' });
+      if (youtubeTracker) healthMonitor.recordSuccess('youtube-tracker', 0, { status: 'loaded' });
+      if (culturalEvents) healthMonitor.recordSuccess('cultural-events', 0, { status: 'loaded' });
+      // Report API components
+      if (kalshiClient) healthMonitor.recordSuccess('kalshi-api', 0, { status: 'loaded' });
+      if (markets) healthMonitor.recordSuccess('gamma-api', 0, { status: 'loaded' });
+    }, 30000);
+
+    // Periodic heartbeat every 5 minutes for always-on components
+    setInterval(() => {
+      if (database) {
+        try { database.db?.pragma('integrity_check'); healthMonitor.recordSuccess('sqlite-db', 0); }
+        catch (err) { healthMonitor.recordError('sqlite-db', err.message); }
+      }
+      if (telegramBot?.isActive?.()) healthMonitor.recordSuccess('telegram-bot', 0);
+      if (executor) healthMonitor.recordSuccess('executor', 0, { status: 'ready' });
+      if (riskManager) healthMonitor.recordSuccess('risk-manager', 0, { status: 'ready' });
+      if (independentSignals) healthMonitor.recordSuccess('independent-signals', 0);
+      if (probabilityEnsemble) healthMonitor.recordSuccess('probability-model', 0);
+      if (newMarketDetector?.getStatus?.()?.running) healthMonitor.recordSuccess('new-market-detector', 0);
+      if (newsReactor?.getStatus?.()?.running) healthMonitor.recordSuccess('news-reactor', 0);
+      if (panicDipDetector?.getStatus?.()?.running) healthMonitor.recordSuccess('panic-dip-detector', 0);
+      if (calibrationCollector?.getStatus?.()?.running) healthMonitor.recordSuccess('calibration-collector', 0);
+      if (executionPipeline) healthMonitor.recordSuccess('execution-pipeline', 0);
+      if (edgeResolver) healthMonitor.recordSuccess('edge-resolver', 0);
+      if (newsSignal) healthMonitor.recordSuccess('news-signal', 0);
+      if (twitterTracker) healthMonitor.recordSuccess('twitter-tracker', 0);
+      if (youtubeTracker) healthMonitor.recordSuccess('youtube-tracker', 0);
+      if (culturalEvents) healthMonitor.recordSuccess('cultural-events', 0);
+      if (kalshiClient) healthMonitor.recordSuccess('kalshi-api', 0);
+      if (markets) healthMonitor.recordSuccess('gamma-api', 0);
+    }, 5 * 60 * 1000);
+  }
+
+  // Feed price snapshots to panic dip detector every scan cycle
+  if (panicDipDetector) {
+    setInterval(() => {
+      try {
+        const mkts = markets.getCachedMarkets();
+        if (mkts.length > 0) {
+          panicDipDetector.recordAllSnapshots(mkts);
+          const dips = panicDipDetector.detectDips(mkts);
+          panicDipDetector.updateActiveDips(mkts);
+        }
+      } catch (err) { log.debug('SERVER', `Dip scan failed: ${err.message}`); }
+    }, 60000); // Every 60 seconds
+  }
+
+  // Periodically process execution pipeline queue
+  if (executionPipeline) {
+    setInterval(() => {
+      executionPipeline.processQueue().catch(err => log.debug('SERVER', `Pipeline process failed: ${err.message}`));
+    }, 30000); // Every 30 seconds
+    // Save pipeline state periodically
+    setInterval(() => executionPipeline.saveState(), 5 * 60 * 1000);
+  }
+
+  // Auto-scanner (delayed for market cache to warm)
+  setTimeout(async () => {
+    if (markets.getCachedMarkets().length > 0) {
+      log.info('SCANNER', `Starting initial scan (${markets.getCachedMarkets().length} markets)...`);
+      await runAutoScan();
+    }
+  }, 20000);
+  setInterval(() => runAutoScan().catch(err => log.error('SCANNER', `Scheduled scan failed: ${err.message}`)), SCAN_INTERVAL);
+  log.info('SCANNER', `Auto-scanner: every ${SCAN_INTERVAL / 60000} min, ${SCAN_MARKETS} markets`);
+
+  // Start paper trade resolution checker (2026-03-11)
+  // Previously never started on boot — 174 paper trades sitting unresolved.
+  // This checks Polymarket API every 60s to resolve settled markets.
+  try {
+    paperTrader.startResolutionChecker();
+    log.info('SERVER', 'Paper trade resolution checker started (60s cycle)');
+  } catch (err) { log.warn('SERVER', `Paper trade resolution checker failed: ${err.message}`); }
+
+  // Backfill edges
   if (edgeResolver && independentSignals) {
     try {
       const history = independentSignals.getRecentEdges(500);
-      log.info('SERVER', `Backfill: found ${history.length} total edges in history`);
       let backfilled = 0;
       for (const e of history) {
-        if (e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE') {
-          edgeResolver.recordEdge(e);
-          backfilled++;
-        }
+        if (e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE') { edgeResolver.recordEdge(e); backfilled++; }
       }
       log.info('SERVER', `Backfilled ${backfilled} edges into resolution tracker`);
     } catch (err) { log.error('SERVER', 'Backfill failed:', err.message); }
   }
 
-  // Auto-check edge resolutions every 10 minutes (sports resolve fast)
+  // Auto-resolve edges every 10 min
   if (edgeResolver) {
     setInterval(async () => {
       try {
         const result = await edgeResolver.checkResolutions(async (conditionId) => {
           const pm = markets.getCachedMarkets().find(m => m.conditionId === conditionId);
           if (pm) return pm;
-          if (kalshiMarkets) {
-            const km = kalshiMarkets.getCachedMarkets().find(m => m.conditionId === conditionId);
-            if (km) return km;
-          }
+          if (kalshiMarkets) { const km = kalshiMarkets.getCachedMarkets().find(m => m.conditionId === conditionId); if (km) return km; }
+          try { const apiMarket = await client.getMarketById(conditionId); if (apiMarket) return apiMarket; } catch (err) { log.debug('SERVER', 'Market fetch by ID failed: ' + err.message); }
           return null;
         });
         if (result.resolved > 0) {
-          log.info('SERVER', `Auto-resolution: ${result.resolved} edges resolved out of ${result.checked} pending`);
+          log.info('SERVER', `Auto-resolution: ${result.resolved}/${result.checked} resolved`);
+          // Push resolution signals to Telegram users
+          if (result.resolutions?.length > 0) telegramBot.pushResolutionSignal(result.resolutions).catch(() => {});
         }
-      } catch { /* non-critical */ }
+      } catch (err) { log.debug('SERVER', 'Edge auto-resolution failed: ' + err.message); }
     }, 10 * 60 * 1000);
   }
 
-  // Auto-check picks resolutions every 30 minutes
+  // Auto-resolve picks every 30 min
   if (picksTracker) {
-    // Also snapshot any existing cached accas on startup
     if (accaBuilder) {
-      try {
-        const data = accaBuilder.getAccas();
-        if (data.accas?.length > 0) picksTracker.snapshotAccas(data.accas);
-      } catch { /* non-critical */ }
+      try { const data = accaBuilder.getAccas(); if (data.accas?.length > 0) picksTracker.snapshotAccas(data.accas); } catch (err) { log.debug('SERVER', 'Acca snapshot failed: ' + err.message); }
     }
     setInterval(async () => {
       try {
-        const apiKey = process.env.ODDS_API_KEY;
-        if (apiKey) {
-          const result = await picksTracker.checkAndResolve(apiKey);
-          if (result.legsResolved > 0) {
-            log.info('SERVER', `Picks resolution: ${result.legsResolved} legs resolved, ${result.scoresFetched} scores fetched`);
-          }
+        if (process.env.ODDS_API_KEY) {
+          const result = await picksTracker.checkAndResolve(process.env.ODDS_API_KEY);
+          if (result.legsResolved > 0) log.info('SERVER', `Picks: ${result.legsResolved} legs resolved`);
         }
-      } catch { /* non-critical */ }
+      } catch (err) { log.debug('SERVER', 'Picks auto-resolution failed: ' + err.message); }
     }, 30 * 60 * 1000);
-    log.info('SERVER', '🎯 Picks tracker: auto-resolution every 30 min');
+    log.info('SERVER', 'Picks tracker: auto-resolution every 30 min');
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// GRACEFUL SHUTDOWN
+// ═══════════════════════════════════════════════════════════════════════
+
+function gracefulShutdown(signal) {
+  log.info('SERVER', `${signal} received — shutting down gracefully...`);
+
+  // Stop Telegram polling
+  try { telegramBot.stop(); } catch { /* ignore */ }
+
+  // Stop BTC bot
+  try { btcBot.stop(); } catch { /* ignore */ }
+
+  // Stop BTC Sniper
+  try { btcSniper.stop(); } catch { /* ignore */ }
+
+  // Stop new alpha engines
+  try { if (newMarketDetector) newMarketDetector.stop(); } catch { /* ignore */ }
+  try { if (newsReactor) newsReactor.stop(); } catch { /* ignore */ }
+  try { if (panicDipDetector) panicDipDetector.stop(); } catch { /* ignore */ }
+  try { if (calibrationCollector) calibrationCollector.stop(); } catch { /* ignore */ }
+  try { if (executionPipeline) executionPipeline.saveState(); } catch { /* ignore */ }
+
+  // Stop infrastructure modules
+  try { if (newsStream) newsStream.stop(); } catch { /* ignore */ }
+  try { if (probabilityEnsemble) probabilityEnsemble.stop(); } catch { /* ignore */ }
+  try { if (strategyOptimizer) strategyOptimizer.stop(); } catch { /* ignore */ }
+  try { if (logCleanup) logCleanup.stop(); } catch { /* ignore */ }
+  try { if (healthMonitor) healthMonitor.stop(); } catch { /* ignore */ }
+  try { if (wsServer) wsServer.close(); } catch { /* ignore */ }
+
+  // Checkpoint SQLite WAL
+  try { if (logCleanup) logCleanup.checkpointDatabase(); } catch { /* ignore */ }
+
+  // Stop accepting new connections
+  server.close(() => {
+    log.info('SERVER', 'HTTP server closed');
+
+    // Flush pending data
+    try {
+      if (cachedScanResults.length > 0) {
+        fs.writeFileSync(SCAN_CACHE_FILE, JSON.stringify({
+          results: cachedScanResults, timestamp: lastScanTime?.toISOString(),
+        }, null, 2));
+      }
+    } catch (err) { log.debug('SERVER', 'Failed to flush scan cache on shutdown: ' + err.message); }
+
+    try { saveWebhookConfig(); } catch (err) { log.debug('SERVER', 'Failed to save webhook config on shutdown: ' + err.message); }
+
+    log.info('SERVER', 'Shutdown complete');
+    process.exit(0);
+  });
+
+  // Force shutdown after 10s
+  setTimeout(() => {
+    log.error('SERVER', 'Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

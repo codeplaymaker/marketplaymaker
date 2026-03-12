@@ -17,6 +17,16 @@ const log = require('../utils/logger');
 
 const RESOLUTIONS_FILE = path.join(__dirname, '../logs/edge-resolutions.json');
 const PNL_FILE = path.join(__dirname, '../logs/edge-pnl.json');
+const TRADE_RECORD_FILE = path.join(__dirname, '../logs/trade-record.json');
+
+// Trade record: persistent log of every trade signal + resolution + PnL
+let tradeRecord = [];
+try {
+  if (fs.existsSync(TRADE_RECORD_FILE)) {
+    tradeRecord = JSON.parse(fs.readFileSync(TRADE_RECORD_FILE, 'utf8')).trades || [];
+    log.info('RESOLVER', `Loaded ${tradeRecord.length} trade records`);
+  }
+} catch { /* fresh start */ }
 
 // Load existing resolution data
 let resolutions = [];
@@ -38,7 +48,8 @@ function save() {
   try {
     fs.writeFileSync(RESOLUTIONS_FILE, JSON.stringify({ resolutions, savedAt: new Date().toISOString() }, null, 2));
     fs.writeFileSync(PNL_FILE, JSON.stringify({ ...pnlTracker, savedAt: new Date().toISOString() }, null, 2));
-  } catch { /* non-critical */ }
+    fs.writeFileSync(TRADE_RECORD_FILE, JSON.stringify({ trades: tradeRecord, savedAt: new Date().toISOString() }, null, 2));
+  } catch (err) { log.debug('RESOLVER', 'Failed to save resolution data: ' + err.message); }
 }
 
 /**
@@ -107,6 +118,23 @@ function recordEdge(edge) {
   pnlTracker.totalEdges++;
   save();
   log.info('RESOLVER', `Tracking edge: "${edge.question?.slice(0, 50)}" (${edge.edgeGrade}, ${edge.edgeDirection})`);
+
+  // Also add to trade record
+  addTradeRecord({
+    conditionId: edge.conditionId,
+    question: edge.question,
+    source: edge.source || 'scanner',
+    strategy: edge.strategy || edge.edgeSource || 'autoScan',  // FIX: pass strategy through
+    side: edge.edgeDirection === 'BUY_YES' ? 'YES' : 'NO',
+    entryPrice: edge.edgeDirection === 'BUY_YES' ? edge.marketPrice : (1 - edge.marketPrice),
+    ourProb: edge.prob,
+    marketPrice: edge.marketPrice,
+    edgePp: (edge.divergence || 0) * 100,
+    edgeGrade: edge.edgeGrade,
+    edgeQuality: edge.edgeQuality,
+    sourceCount: edge.sourceCount || edge.validatedSourceCount || 0,
+    openedAt: new Date().toISOString(),
+  });
 }
 
 /**
@@ -141,26 +169,49 @@ async function checkResolutions(getMarketFn) {
   if (pending.length === 0) return { checked: 0, resolved: 0 };
 
   let resolved = 0;
+  const BATCH_SIZE = 20; // Don't blast API — check 20 per cycle
+  const DELAY_MS = 300;  // 300ms between API calls
 
-  for (const edge of pending) {
+  // Prioritize oldest edges first (most likely to have resolved)
+  const batch = pending.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)).slice(0, BATCH_SIZE);
+
+  for (const edge of batch) {
     try {
       const market = await getMarketFn(edge.conditionId);
       if (!market) continue;
 
-      // Check if market has resolved
-      const isResolved = market.closed || market.resolved || market.result != null;
+      // Check if market has resolved — support both Gamma and CLOB formats
+      // CLOB format: { closed, resolved, result, tokens: [{ winner: true, outcome: 'Yes' }] }
+      // Gamma format: { closed, resolved, resolution, outcomePrices }
+      const isResolved = market.resolved || market.result != null ||
+        (market.closed && !market.acceptingOrders) ||
+        (market.tokens && market.tokens.some(t => t.winner === true));
       if (!isResolved) continue;
 
-      // Determine outcome
+      // Determine outcome from multiple possible formats
       let outcome = null;
-      if (market.resolution != null) {
+
+      // 1. Check CLOB tokens[].winner (most reliable)
+      if (market.tokens && Array.isArray(market.tokens)) {
+        const winnerToken = market.tokens.find(t => t.winner === true);
+        if (winnerToken) {
+          outcome = winnerToken.outcome === 'Yes' ? 1 : 0;
+        }
+      }
+
+      // 2. Check result field
+      if (outcome == null && market.result != null) {
+        if (market.result === 'yes' || market.result === 'Yes') outcome = 1;
+        else if (market.result === 'no' || market.result === 'No') outcome = 0;
+      }
+
+      // 3. Check resolution field
+      if (outcome == null && market.resolution != null) {
         outcome = market.resolution; // 1 = YES, 0 = NO
-      } else if (market.result === 'yes' || market.result === 'Yes') {
-        outcome = 1;
-      } else if (market.result === 'no' || market.result === 'No') {
-        outcome = 0;
-      } else if (market.yesPrice != null) {
-        // If price went to 0 or 1, infer resolution
+      }
+
+      // 4. Infer from extreme prices
+      if (outcome == null && market.yesPrice != null) {
         if (market.yesPrice >= 0.95) outcome = 1;
         else if (market.yesPrice <= 0.05) outcome = 0;
       }
@@ -208,6 +259,19 @@ async function checkResolutions(getMarketFn) {
         pnlTracker.betterRate = Math.round(pnlTracker.betterThanMarket / pnlTracker.resolvedEdges * 100);
       }
 
+      // Also resolve matching trade record entry
+      const tradeEntry = tradeRecord.find(t => t.conditionId === edge.conditionId && !t.resolved);
+      if (tradeEntry) {
+        const tradePnL = pnlPp * 0.1; // $10 stake
+        tradeEntry.resolved = true;
+        tradeEntry.outcome = outcome === 1 ? 'YES' : 'NO';
+        tradeEntry.resolvedAt = new Date().toISOString();
+        tradeEntry.pnl = Math.round(tradePnL * 100) / 100;
+        tradeEntry.pnlPp = Math.round(pnlPp * 10) / 10;
+        tradeEntry.won = pnlPp > 0;
+        tradeEntry.weWereBetter = weWereBetter;
+      }
+
       resolved++;
       log.info('RESOLVER',
         `✅ Resolved: "${edge.question?.slice(0, 40)}" → ${outcome === 1 ? 'YES' : 'NO'} | ` +
@@ -216,9 +280,13 @@ async function checkResolutions(getMarketFn) {
     } catch (err) {
       // Non-critical — will retry next cycle
     }
+
+    // Throttle API calls
+    if (DELAY_MS > 0) await new Promise(r => setTimeout(r, DELAY_MS));
   }
 
   if (resolved > 0) save();
+  log.info('RESOLVER', `Resolution check: ${resolved}/${batch.length} resolved (${pending.length} total pending)`);
   return { checked: pending.length, resolved };
 }
 
@@ -276,6 +344,200 @@ function getTrackRecord() {
 }
 
 /**
+ * Add a trade to the persistent trade record.
+ * This captures EVERY edge signal — scanner, YouTube, Twitter, etc.
+ */
+function addTradeRecord(trade) {
+  // Dedup by conditionId
+  if (tradeRecord.find(t => t.conditionId === trade.conditionId && !t.resolved)) return;
+
+  tradeRecord.push({
+    id: tradeRecord.length + 1,
+    conditionId: trade.conditionId,
+    question: trade.question,
+    source: trade.source || 'scanner',  // 'scanner' | 'youtube' | 'twitter' | 'manual'
+    strategy: trade.strategy || '?',     // FIX: Record strategy (was always '?' before 2026-03-11)
+    side: trade.side,                    // 'YES' | 'NO'
+    entryPrice: trade.entryPrice,        // price we'd buy at
+    ourProb: trade.ourProb,
+    marketPrice: trade.marketPrice,
+    edgePp: trade.edgePp,
+    edgeGrade: trade.edgeGrade || 'C',
+    edgeQuality: trade.edgeQuality || 0,
+    sourceCount: trade.sourceCount || 0,
+    openedAt: trade.openedAt || new Date().toISOString(),
+    timestamp: trade.openedAt || new Date().toISOString(),  // Consistent timestamp field
+    resolved: false,
+    outcome: null,
+    resolvedAt: null,
+    pnl: null,
+    won: null,
+  });
+  save();
+}
+
+/**
+ * Record a YouTube or Twitter edge into the trade record.
+ * Called by the trending endpoints on the server.
+ */
+function recordTrendingEdge(edge) {
+  if (!edge?.conditionId || !edge?.question) return;
+  if (Math.abs(edge.edge || 0) < 0.03) return; // Skip tiny edges
+
+  const direction = (edge.edge || 0) > 0 ? 'BUY_YES' : 'BUY_NO';
+  const side = direction === 'BUY_YES' ? 'YES' : 'NO';
+  const entryPrice = direction === 'BUY_YES' ? (edge.yesPrice || edge.marketPrice || 0.5) : (edge.noPrice || (1 - (edge.yesPrice || edge.marketPrice || 0.5)));
+
+  // Also record in the main resolutions array so it gets resolved
+  const existing = resolutions.find(r => r.conditionId === edge.conditionId && !r.resolved);
+  if (!existing) {
+    resolutions.push({
+      conditionId: edge.conditionId,
+      question: edge.question,
+      ourProb: edge.prob || (direction === 'BUY_YES' ? entryPrice + Math.abs(edge.edge) : (1 - entryPrice) - Math.abs(edge.edge)),
+      marketPrice: edge.yesPrice || edge.marketPrice || 0.5,
+      divergence: edge.edge || 0,
+      edgeDirection: direction,
+      edgeSignal: Math.abs(edge.edge || 0) > 0.15 ? 'STRONG' : 'MODERATE',
+      edgeQuality: edge.edgeQuality || (Math.abs(edge.edge || 0) > 0.3 ? 80 : 60),
+      edgeGrade: edge.edgeGrade || (Math.abs(edge.edge || 0) > 0.3 ? 'A' : 'B'),
+      sourceCount: 1,
+      recordedAt: new Date().toISOString(),
+      resolved: false,
+      outcome: null,
+      resolvedAt: null,
+      pnlPp: null,
+      source: edge.source || 'trending',
+      priceHistory: [{
+        marketPrice: edge.yesPrice || edge.marketPrice || 0.5,
+        ourProb: edge.prob || 0.5,
+        divergence: edge.edge || 0,
+        timestamp: Date.now(),
+      }],
+      edgeDecay: null,
+    });
+    pnlTracker.totalEdges++;
+  }
+
+  // Add to trade record
+  addTradeRecord({
+    conditionId: edge.conditionId,
+    question: edge.question,
+    source: edge.source || 'trending',
+    side,
+    entryPrice,
+    ourProb: edge.prob || 0.5,
+    marketPrice: edge.yesPrice || edge.marketPrice || 0.5,
+    edgePp: (edge.edge || 0) * 100,
+    edgeGrade: edge.edgeGrade || (Math.abs(edge.edge || 0) > 0.3 ? 'A' : 'B'),
+    edgeQuality: edge.edgeQuality || 60,
+    sourceCount: 1,
+  });
+
+  save();
+  log.info('RESOLVER', `Recorded trending edge: "${edge.question?.slice(0, 50)}" (${edge.source}, ${direction}, ${((edge.edge || 0) * 100).toFixed(1)}%)`);
+}
+
+/**
+ * Build PnL chart data from resolved trades.
+ * Returns time-series of cumulative PnL suitable for charting.
+ */
+function getPnLChart() {
+  const allResolved = resolutions.filter(r => r.resolved && r.pnlPp != null);
+  if (allResolved.length === 0) {
+    // Build from trade record if resolutions empty
+    const resolvedTrades = tradeRecord.filter(t => t.resolved && t.pnl != null);
+    if (resolvedTrades.length === 0) return { series: [], summary: pnlTracker };
+
+    resolvedTrades.sort((a, b) => new Date(a.resolvedAt) - new Date(b.resolvedAt));
+    let cumPnL = 0;
+    const series = resolvedTrades.map(t => {
+      cumPnL += t.pnl;
+      return {
+        date: t.resolvedAt?.slice(0, 10),
+        pnl: Math.round(t.pnl * 100) / 100,
+        cumPnl: Math.round(cumPnL * 100) / 100,
+        question: t.question?.slice(0, 50),
+        source: t.source,
+        side: t.side,
+        won: t.won,
+      };
+    });
+    return { series, summary: pnlTracker };
+  }
+
+  // Sort by resolution date
+  allResolved.sort((a, b) => new Date(a.resolvedAt) - new Date(b.resolvedAt));
+
+  let cumPnL = 0;
+  const series = allResolved.map(r => {
+    // Hypothetical $10 per trade
+    const tradePnL = (r.pnlPp || 0) * 0.1; // pnlPp is in percentage points, $10 stake
+    cumPnL += tradePnL;
+
+    return {
+      date: r.resolvedAt?.slice(0, 10),
+      pnl: Math.round(tradePnL * 100) / 100,
+      cumPnl: Math.round(cumPnL * 100) / 100,
+      edgePp: r.pnlPp,
+      question: r.question?.slice(0, 50),
+      grade: r.edgeGrade,
+      source: r.source || 'scanner',
+      side: r.edgeDirection === 'BUY_YES' ? 'YES' : 'NO',
+      outcome: r.outcome === 1 ? 'YES' : 'NO',
+      won: r.pnlPp > 0,
+      weWereBetter: r.weWereBetter,
+    };
+  });
+
+  // Also aggregate by day
+  const dailyMap = {};
+  for (const pt of series) {
+    if (!pt.date) continue;
+    if (!dailyMap[pt.date]) dailyMap[pt.date] = { date: pt.date, dailyPnl: 0, trades: 0, wins: 0 };
+    dailyMap[pt.date].dailyPnl += pt.pnl;
+    dailyMap[pt.date].trades++;
+    if (pt.won) dailyMap[pt.date].wins++;
+  }
+  const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+  let dailyCum = 0;
+  for (const d of daily) {
+    dailyCum += d.dailyPnl;
+    d.cumPnl = Math.round(dailyCum * 100) / 100;
+    d.dailyPnl = Math.round(d.dailyPnl * 100) / 100;
+    d.winRate = d.trades > 0 ? Math.round((d.wins / d.trades) * 100) : 0;
+  }
+
+  return {
+    trades: series,
+    daily,
+    summary: {
+      ...pnlTracker,
+      totalTrades: allResolved.length,
+      cumPnl: Math.round(cumPnL * 100) / 100,
+      avgTradeReturn: allResolved.length > 0 ? Math.round((cumPnL / allResolved.length) * 100) / 100 : 0,
+    },
+  };
+}
+
+/**
+ * Get the full trade history (open + closed) for the UI.
+ */
+function getTradeHistory({ limit = 100, status = 'all' } = {}) {
+  let filtered = [...tradeRecord];
+  if (status === 'open') filtered = filtered.filter(t => !t.resolved);
+  if (status === 'closed') filtered = filtered.filter(t => t.resolved);
+  
+  filtered.sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt));
+  return {
+    trades: filtered.slice(0, limit),
+    total: filtered.length,
+    open: tradeRecord.filter(t => !t.resolved).length,
+    closed: tradeRecord.filter(t => t.resolved).length,
+  };
+}
+
+/**
  * Get pending edge for resolution check
  */
 function getPending() {
@@ -284,8 +546,18 @@ function getPending() {
 
 module.exports = {
   recordEdge,
+  recordTrendingEdge,
+  addTradeRecord,
   checkResolutions,
   getTrackRecord,
   getPending,
   getEdgeDecayAnalysis,
+  getPnLChart,
+  getTradeHistory,
+  /** @internal Test-only: reset all in-memory state */
+  _resetForTest() {
+    resolutions.length = 0;
+    tradeRecord.length = 0;
+    Object.assign(pnlTracker, { totalEdges: 0, resolvedEdges: 0, wins: 0, losses: 0, push: 0, totalPnLpp: 0, hypotheticalROI: 0, winRate: 0, avgPnLPp: 0, betterThanMarket: 0, betterRate: 0 });
+  },
 };

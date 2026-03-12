@@ -22,6 +22,8 @@ const UserApiForm = lazy(() => import('./components/UserApiForm'));
 const Polymarket = lazy(() => import('./components/Polymarket'));
 const TrackRecord = lazy(() => import('./components/TrackRecord'));
 const Playbook = lazy(() => import('./components/Playbook'));
+const ICTAlerts = lazy(() => import('./components/ICTAlerts'));
+const PurchasePage = lazy(() => import('./components/PurchasePage'));
 
 function App() {
   return (
@@ -37,6 +39,11 @@ function App() {
                   <Route path="/blog" element={<Blog />} />
                   <Route path="/track-record" element={<TrackRecord />} />
                   <Route path="/playbook" element={<Playbook />} />
+                  <Route path="/ict-alerts" element={
+                    <ProtectedRoute>
+                      <ICTAlerts />
+                    </ProtectedRoute>
+                  } />
                   <Route path="/login" element={<Login />} />
                   <Route path="/signup" element={<Signup />} />
                   <Route
@@ -80,8 +87,13 @@ function App() {
                     }
                   />
                   <Route path="/polymarket" element={
-                    <ProtectedRoute>
+                    <ProtectedRoute subscribedOnly>
                       <Polymarket />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/purchase" element={
+                    <ProtectedRoute>
+                      <PurchasePage />
                     </ProtectedRoute>
                   } />
                   <Route path="*" element={<NotFound />} />

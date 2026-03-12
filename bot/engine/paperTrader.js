@@ -41,8 +41,11 @@ function getProbModel() {
 const DATA_FILE = path.join(__dirname, '../logs/paper-trades.json');
 const LEARNING_FILE = path.join(__dirname, '../logs/learning-state.json');
 const MAX_HISTORY = 2000;
-const DEDUP_WINDOW_MS = 300000;          // 5 min — don't re-record same opp
-const ARB_DEDUP_WINDOW_MS = 1800000;    // 30 min — arbs persist across scans, need longer dedup
+// DEDUP FIX (2026-03-11): Changed from 5-min window to per-market-lifetime.
+// Old 5-min window caused same market to be bet 7.4x on average (726 trades on 128 markets).
+// Now: one paper trade per (conditionId, strategy, side) for the lifetime of the market.
+const DEDUP_WINDOW_MS = Infinity;        // Per-market lifetime — never re-bet same position
+const ARB_DEDUP_WINDOW_MS = Infinity;    // Per-market lifetime for arbs too
 const RESOLUTION_CHECK_MS = 60000;      // Check resolutions every 60 seconds
 const MAX_RESOLUTION_BATCH = 15;        // Max API calls per resolution check cycle (rate limit friendly)
 const DEFAULT_PAPER_BANKROLL = 1000;    // $1000 starting simulated bankroll
@@ -147,12 +150,11 @@ function recordScanResults(opportunities, maxRecord = 20) {
   for (const opp of topOpps) {
     const key = `${opp.conditionId}:${opp.strategy}:${opp.side}`;
 
-    // Dedup: arbs persist longer across scans; other strategies 5 min
-    const dedupWindow = opp.strategy === 'ARBITRAGE' ? ARB_DEDUP_WINDOW_MS : DEDUP_WINDOW_MS;
-    const existing = paperTrades.find(
-      t => t.key === key && (now - new Date(t.recordedAt).getTime()) < dedupWindow
-    );
-    if (existing) continue;
+    // Dedup: one trade per (conditionId, strategy, side) across lifetime of market
+    // Also check resolved trades to avoid re-entering markets we already tracked
+    const existingActive = paperTrades.find(t => t.key === key);
+    const existingResolved = resolvedTrades.find(t => t.key === key);
+    if (existingActive || existingResolved) continue;
 
     // Don't open trades we can't afford
     if (simBankroll <= 1) continue;
@@ -551,15 +553,23 @@ async function checkResolutions() {
 
       let outcome = null;
 
-      // Best: use the actual resolved flag + payout data
+      // Best: use the resolution/result field from CLOB response
       if (market.resolved && market.resolution) {
         outcome = market.resolution.toUpperCase();
+      } else if (market.resolved && market.result) {
+        outcome = market.result.toUpperCase();
       }
 
-      // Fallback: check if payout prices are deterministic
+      // Fallback: check token winner flags
+      if (!outcome && market.tokens) {
+        const yesToken = market.tokens.find(t => t.outcome === 'Yes');
+        if (yesToken?.winner === true) outcome = 'YES';
+        else if (yesToken?.winner === false && market.resolved) outcome = 'NO';
+      }
+
+      // Fallback: check price extremes (works with both CLOB and Gamma formats)
       if (!outcome) {
-        const outcomePrices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
-        const yesPrice = parseFloat(outcomePrices[0] || 0.5);
+        const yesPrice = market.yesPrice ?? (market.outcomePrices ? parseFloat(JSON.parse(market.outcomePrices)[0] || 0.5) : 0.5);
         if (yesPrice >= 0.95) outcome = 'YES';
         else if (yesPrice <= 0.05) outcome = 'NO';
       }

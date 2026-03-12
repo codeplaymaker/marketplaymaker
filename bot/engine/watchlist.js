@@ -25,7 +25,7 @@ try {
 function save() {
   try {
     fs.promises.writeFile(WATCHLIST_FILE, JSON.stringify(watchlist, null, 2));
-  } catch { /* non-critical */ }
+  } catch (err) { log.debug('WATCHLIST', 'Failed to save watchlist: ' + err.message); }
 }
 
 function add(market, notes = '') {

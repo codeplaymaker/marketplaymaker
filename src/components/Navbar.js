@@ -14,6 +14,7 @@ const Nav = styled.nav`
   top: 0;
   z-index: 100;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  font-family: 'Inter', sans-serif;
 
   @media (min-width: 768px) {
     padding: 1rem 2rem;
@@ -178,8 +179,10 @@ const MobileMenu = styled.div`
 
 const NAV_LINKS = [
   { to: '/', label: 'Home', auth: false },
-  { to: '/polymarket', label: 'Polymarket Bot', auth: false },
+  { to: '/polymarket', label: 'Polymarket Bot', auth: true, adminOnly: true },
   { to: '/track-record', label: 'Track Record', auth: false },
+  { to: '/playbook', label: 'Playbook', auth: false },
+  { to: '/ict-alerts', label: 'ICT Alerts', auth: true },
   { to: '/blog', label: 'Blog', auth: false },
   { to: '/trade-plan', label: 'Trade Plan', auth: true },
   { to: '/connect-api', label: 'ConnectAPI', auth: true },
@@ -238,9 +241,11 @@ const Navbar = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, closeMenu]);
 
+  const ADMIN_EMAIL = 'marketplaymaker@gmail.com';
+
   const filteredLinks = NAV_LINKS.filter(link => {
     if (link.auth && !user) return false;
-    if (link.adminOnly && (!user || !user.isAdmin)) return false;
+    if (link.adminOnly && (!user || (user.email !== ADMIN_EMAIL && !user.isAdmin))) return false;
     return true;
   });
 

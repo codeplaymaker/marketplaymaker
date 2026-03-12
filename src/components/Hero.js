@@ -1,97 +1,117 @@
 import React from 'react';
-import styled from 'styled-components';
 import logo2 from '../components/logo/logo1.png';
 import { useNavigate } from 'react-router-dom';
+import SpectrumSVG from './visuals/SpectrumSVG';
 
-const HeroSection = styled.section`
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=DM+Sans:wght@400;500&family=Orbitron:wght@400;500&display=swap');
-
-  background-color: #000;
-  color: #fff;
-  padding: 2.5rem 1.25rem;
-  text-align: left;
-  position: relative;
-  overflow: hidden;
-
-  @media (min-width: 768px) {
-    padding: 4rem 2rem;
-  }
-`;
-
-const HeroLogo = styled.img`
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 100%;
-  height: auto;
-  max-width: 600px;
-  opacity: 0.1;
-  z-index: 1;
-`;
-
-const HeroContent = styled.div`
-  position: relative;
-  z-index: 2;
-  max-width: 600px;
-`;
-
-const HeroHeading = styled.h1`
-  font-size: 2rem;
-  margin-bottom: 1rem;
-  color: #f0f0f0;
-  font-family: 'Inter', sans-serif;
-
-  @media (min-width: 768px) {
-    font-size: 3rem;
-  }
-`;
-
-const HeroSubheading = styled.p`
-  font-size: 1.25rem;
-  margin-bottom: 2rem;
-  color: #c0c0c0;
-  font-family: 'DM Sans', sans-serif;
-
-  @media (min-width: 768px) {
-    font-size: 2rem;
-  }
-`;
-
-const HeroButton = styled.button`
-  padding: 0.75rem 1.5rem;
-  background-color: #ff4136;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  font-size: 1rem;
-  cursor: pointer;
-  font-family: 'Orbitron', sans-serif;
-  transition: background-color 0.3s, transform 0.2s;
-
-  &:hover {
-    background-color: #e33e2d;
-    transform: translateY(-2px);
-  }
-
-  &:focus-visible {
-    outline: 2px solid #ff4136;
-    outline-offset: 2px;
-  }
-`;
+const S = {
+  section: {
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    color: '#fff',
+    padding: '8rem 1.25rem',
+    fontFamily: "'Inter', sans-serif",
+  },
+  logo: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '100%',
+    maxWidth: '600px',
+    height: 'auto',
+    opacity: 0.1,
+    zIndex: 1,
+    pointerEvents: 'none',
+  },
+  content: {
+    position: 'relative',
+    zIndex: 2,
+    maxWidth: '640px',
+    margin: '0 auto',
+  },
+  label: {
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    letterSpacing: '0.2em',
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
+    marginBottom: '1.5rem',
+  },
+  h1: {
+    fontSize: 'clamp(2rem, 5vw, 3.5rem)',
+    fontWeight: 700,
+    letterSpacing: '-0.025em',
+    lineHeight: 1.1,
+    marginBottom: '1.5rem',
+    color: '#f0f0f0',
+  },
+  sub: {
+    fontSize: 'clamp(1rem, 2.5vw, 1.25rem)',
+    lineHeight: 1.6,
+    color: 'rgba(255,255,255,0.55)',
+    marginBottom: '2.5rem',
+    maxWidth: '520px',
+  },
+  btns: {
+    display: 'flex',
+    gap: '1rem',
+    flexWrap: 'wrap',
+  },
+  primary: {
+    padding: '0.875rem 2rem',
+    backgroundColor: '#fff',
+    color: '#000',
+    border: 'none',
+    borderRadius: '9999px',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif",
+  },
+  secondary: {
+    padding: '0.875rem 2rem',
+    backgroundColor: 'transparent',
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: '9999px',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif",
+  },
+};
 
 const Hero = () => {
   const navigate = useNavigate();
 
   return (
-    <HeroSection>
-      <HeroLogo src={logo2} alt="" aria-hidden="true" />
-      <HeroContent>
-        <HeroHeading>Empower Your Investments</HeroHeading>
-        <HeroSubheading>Unlocking Smarter Decisions for Every Investor</HeroSubheading>
-        <HeroButton onClick={() => navigate('/signup')}>Get Started</HeroButton>
-      </HeroContent>
-    </HeroSection>
+    <section style={S.section}>
+      <img src={logo2} alt="" aria-hidden="true" style={S.logo} />
+      <div style={S.content}>
+        <p style={S.label}>MarketPlaymaker</p>
+        <h1 style={S.h1}>
+          Markets move fast.<br />
+          Most traders move blind.
+        </h1>
+        <p style={S.sub}>
+          Playbooks, real-time edge detection, and a prediction market scanner that finds mispriced bets before the crowd does.
+        </p>
+        <div style={S.btns}>
+          <button onClick={() => navigate('/signup')} style={S.primary}>
+            Get started free
+          </button>
+          <button onClick={() => navigate('/track-record')} style={S.secondary}>
+            See the track record
+          </button>
+        </div>
+
+        {/* Visual Device: Spectrum — NOISE → EDGE */}
+        <div style={{ marginTop: '4rem' }}>
+          <SpectrumSVG />
+        </div>
+      </div>
+    </section>
   );
 };
 

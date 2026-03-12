@@ -3,6 +3,11 @@ const { estimateSlippage } = require('./fees');
 const log = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
+const { retry } = require('../utils/retry');
+
+// SQLite persistence (primary, with JSON fallback)
+let database = null;
+try { database = require('./database'); } catch { /* not available */ }
 
 const TRADES_FILE = path.join(__dirname, '..', 'logs', 'executed-trades.json');
 
@@ -34,6 +39,34 @@ function saveTrades() {
     fs.writeFileSync(TRADES_FILE, JSON.stringify(executedTrades, null, 2));
   } catch (err) {
     log.warn('EXECUTOR', `Failed to save trades: ${err.message}`);
+  }
+}
+
+// Persist trade to SQLite (primary) alongside JSON (fallback)
+function persistTrade(trade) {
+  if (database && database.isReady()) {
+    try {
+      database.insertTrade({
+        conditionId: trade.conditionId,
+        market: trade.market,
+        slug: trade.slug,
+        side: trade.side,
+        positionSize: trade.positionSize,
+        price: trade.fillPrice || trade.price,
+        edge: trade.edge,
+        trueProb: trade.estimatedProb,
+        strategy: trade.strategy,
+        qualityGrade: trade.qualityGrade,
+        qualityScore: trade.score,
+        mode: trade.mode?.toLowerCase() || 'paper',
+        metadata: { orderType: trade.orderType, slippage: trade.slippage, shares: trade.shares },
+      });
+      log.debug('EXECUTOR', `Trade persisted to SQLite: ${trade.market?.slice(0, 50)}`);
+    } catch (err) {
+      log.warn('EXECUTOR', `SQLite trade insert failed: ${err.message}`);
+    }
+  } else {
+    log.debug('EXECUTOR', `SQLite not ready (database=${!!database}, isReady=${database?.isReady?.()}), trade saved to JSON only`);
   }
 }
 
@@ -239,6 +272,7 @@ function simulateTrade(trade, opportunity) {
 
   executedTrades.push(executedTrade);
   saveTrades();
+  persistTrade(executedTrade);
   riskManager.addPosition(executedTrade);
 
   log.logTrade({
@@ -301,6 +335,7 @@ function simulateTWAP(trade, opportunity) {
 
   executedTrades.push(executedTrade);
   saveTrades();
+  persistTrade(executedTrade);
   riskManager.addPosition(executedTrade);
 
   log.logTrade({
@@ -470,13 +505,28 @@ async function executeLiveTrade(trade) {
       return { ...trade, status: 'REJECTED', reason: 'No token ID for this market' };
     }
 
-    const result = await clobExecutor.placeTrade({
-      tokenId,
-      side: 'BUY',
-      price: trade.price,
-      size: trade.positionSize,
-      maxSlippage: 0.02,
-    });
+    // Execute with retry logic for transient failures
+    const result = await retry(
+      () => clobExecutor.placeTrade({
+        tokenId,
+        side: 'BUY',
+        price: trade.price,
+        size: trade.positionSize,
+        maxSlippage: 0.02,
+      }),
+      {
+        retries: 2,
+        baseDelay: 500,
+        maxDelay: 3000,
+        shouldRetry: (err) => {
+          // Retry on network errors, not business logic errors
+          const msg = err.message || '';
+          return msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET') ||
+                 msg.includes('fetch failed') || msg.includes('network') ||
+                 msg.includes('502') || msg.includes('503');
+        },
+      }
+    );
 
     if (result.status === 'SLIPPAGE_EXCEEDED' || result.status === 'INSUFFICIENT_FUNDS') {
       return { ...trade, status: 'REJECTED', reason: result.status, detail: result };
@@ -494,6 +544,7 @@ async function executeLiveTrade(trade) {
 
     executedTrades.push(executedTrade);
     saveTrades();
+    persistTrade(executedTrade);
 
     if (result.status !== 'DRY_RUN') {
       riskManager.addPosition(executedTrade);
@@ -502,7 +553,7 @@ async function executeLiveTrade(trade) {
     log.info('EXECUTOR', `[${result.status}] ${trade.side} $${trade.positionSize} @ ${trade.price} "${trade.market}"`);
     return executedTrade;
   } catch (err) {
-    log.error('EXECUTOR', `Live trade failed: ${err.message}`);
+    log.error('EXECUTOR', `Live trade failed after retries: ${err.message}`);
     return { ...trade, status: 'REJECTED', reason: err.message };
   }
 }

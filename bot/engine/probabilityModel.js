@@ -376,14 +376,31 @@ function detectCategory(category, question) {
  *
  * Also uses finer 2.5% buckets (up from 5%) for more precision.
  */
-function recordResolution(marketYesPrice, outcome, signals = {}) {
-  const bucket = priceBucket(marketYesPrice);
-  if (!calibration.buckets[bucket]) {
-    calibration.buckets[bucket] = { total: 0, resolvedYes: 0 };
+/**
+ * Record a market resolution for calibration.
+ *
+ * CRITICAL FIX: The `isRandomSample` flag breaks the circular feedback loop.
+ * - isRandomSample=true: This resolution came from random market monitoring
+ *   (not from the bot's own edge detection). Safe to use for calibration.
+ * - isRandomSample=false: This came from an edge the bot detected.
+ *   BIASED sample — only record signal performance, NOT calibration buckets.
+ *
+ * Old behavior: recorded ALL resolutions into calibration → created a feedback
+ * loop where the model trained on its own biased selections → 47% win rate.
+ */
+function recordResolution(marketYesPrice, outcome, signals = {}, isRandomSample = false) {
+  const isYes = outcome === 'YES' || outcome === 'Yes' || outcome === 1 || outcome === true;
+
+  // Only update calibration buckets from RANDOM (unbiased) samples
+  if (isRandomSample) {
+    const bucket = priceBucket(marketYesPrice);
+    if (!calibration.buckets[bucket]) {
+      calibration.buckets[bucket] = { total: 0, resolvedYes: 0 };
+    }
+    calibration.buckets[bucket].total++;
+    if (isYes) calibration.buckets[bucket].resolvedYes++;
+    calibration.totalRecorded++;
   }
-  calibration.buckets[bucket].total++;
-  if (outcome === 'YES') calibration.buckets[bucket].resolvedYes++;
-  calibration.totalRecorded++;
 
   // Track which signals were correct (with rolling window for decay detection)
   for (const [sigName, sigData] of Object.entries(signals)) {
@@ -692,9 +709,10 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
   };
 
   // 1. Orderbook Imbalance (logLR from bid/ask asymmetry)
+  // WEIGHT SLASHED: orderbook imbalance proved to be noise (47% accuracy)
   if (orderbook) {
     const ob = orderbookSignal(orderbook, marketProb);
-    const w = getSignalWeight('Orderbook', 0.30);
+    const w = getSignalWeight('Orderbook', 0.05);
     if (ob.logLR !== 0) {
       const scaledLR = ob.logLR * w;
       totalLogLR += scaledLR;
@@ -703,9 +721,10 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
   }
 
   // 2. Price Stability
+  // WEIGHT SLASHED: stability proved to be noise
   if (priceHistory) {
     const ps = stabilitySignal(priceHistory);
-    const w = getSignalWeight('Stability', 0.20);
+    const w = getSignalWeight('Stability', 0.05);
     if (ps.logLR !== 0) {
       const scaledLR = ps.logLR * w;
       totalLogLR += scaledLR;
@@ -714,27 +733,31 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
   }
 
   // 3. Time Decay
+  // WEIGHT SLASHED: time decay proved unhelpful for edge detection
   const td = timeDecaySignal(market.endDate, marketProb);
   if (td.logLR !== 0) {
-    const w = getSignalWeight('TimeDec', 0.15);
+    const w = getSignalWeight('TimeDec', 0.03);
     const scaledLR = td.logLR * w;
     totalLogLR += scaledLR;
     signals.push({ name: 'TimeDec', ...td, weight: r4(w), scaledLR: r4(scaledLR) });
   }
 
-  // 4. Historical Calibration (highest weight when data available)
+  // 4. Historical Calibration
+  // WEIGHT SLASHED: old calibration was poisoned by biased sampling
+  // Will rebuild over time with RANDOM market samples only
   const hc = historicalCalibrationSignal(marketProb);
   if (hc.logLR !== 0) {
-    const w = getSignalWeight('Calibration', 0.35);
+    const w = getSignalWeight('Calibration', 0.08);
     const scaledLR = hc.logLR * w;
     totalLogLR += scaledLR;
     signals.push({ name: 'Calibration', ...hc, weight: r4(w), scaledLR: r4(scaledLR) });
   }
 
   // 5. Orderbook Depth Profile
+  // WEIGHT SLASHED: depth profile proved to be noise
   if (orderbook) {
     const dp = depthProfileSignal(orderbook, marketProb);
-    const w = getSignalWeight('DepthProfile', 0.10);
+    const w = getSignalWeight('DepthProfile', 0.03);
     if (dp.logLR !== 0) {
       const scaledLR = dp.logLR * w;
       totalLogLR += scaledLR;
@@ -747,7 +770,7 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
     try {
       const ns = newsSignal.getSentimentSignal(market);
       if (ns && ns.logLR !== 0) {
-        const w = getSignalWeight('News', 0.15);
+        const w = getSignalWeight('News', 0.08);
         const scaledLR = ns.logLR * w;
         totalLogLR += scaledLR;
         signals.push({
@@ -764,7 +787,7 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
           },
         });
       }
-    } catch { /* news signal optional */ }
+    } catch (err) { log.debug('PROB_MODEL', 'News signal fetch failed: ' + err.message); }
   }
 
   // 7. Bookmaker Consensus (highest-alpha external signal)
@@ -773,7 +796,8 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
     const divergence = bmProb - marketProb;
     const bmLogLR = probToLogOdds(bmProb) - probToLogOdds(marketProb);
     // Scale by number of bookmakers (more consensus = more confidence)
-    const bmWeight = Math.min(bookmakerData.bookmakerCount / 8, 1) * 0.40;
+    // BOOSTED: bookmakers are the #1 source of real alpha
+    const bmWeight = Math.min(bookmakerData.bookmakerCount / 6, 1) * 0.70;
     const scaledLR = bmLogLR * bmWeight;
     totalLogLR += scaledLR;
     signals.push({
@@ -804,7 +828,7 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
       independentData.confidence === 'HIGH' ? 1.0 :
       independentData.confidence === 'MEDIUM' ? 0.7 : 0.4;
     const sourceMultiplier = Math.min(independentData.sourceCount / 3, 1);
-    const baseWeight = 0.45; // Highest-alpha signal when available
+    const baseWeight = 0.60; // BOOSTED: external sources are real information
     const indWeight = getSignalWeight('Independent', baseWeight) * confMultiplier * sourceMultiplier;
 
     const scaledLR = indLogLR * indWeight;
@@ -842,7 +866,20 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
 
   // ─── Posterior = Prior + Evidence ───
   const posteriorLogOdds = priorLogOdds + dampedLogLR;
-  const estimatedProb = logOddsToProb(posteriorLogOdds);
+  let estimatedProb = logOddsToProb(posteriorLogOdds);
+
+  // ─── HARD CAP: Prevent wild deviations from market price ───
+  // The market is RIGHT much more often than our model.
+  // Without EXTERNAL confirmation (bookmaker), cap deviation at ±3%.
+  // With bookmaker consensus, allow up to ±12%.
+  const hasExternalSignal = (bookmakerData && bookmakerData.bookmakerCount >= 5)
+    || (independentData && independentData.sourceCount >= 2);
+  const maxDeviation = hasExternalSignal ? 0.12 : 0.03;
+  const deviation = estimatedProb - marketProb;
+  if (Math.abs(deviation) > maxDeviation) {
+    estimatedProb = marketProb + Math.sign(deviation) * maxDeviation;
+    signals.push({ name: 'HardCap', capped: true, maxDeviation, originalDeviation: r4(deviation) });
+  }
   const edge = estimatedProb - marketProb;
   const absEdge = Math.abs(edge);
 
