@@ -254,6 +254,19 @@ function optimize() {
       action = 'disabled';
     }
 
+    // Rule 5: Re-enable previously disabled strategies if they show recovery
+    // Check 7d window which has fresher data — if win rate recovers above 40%
+    // and they have enough recent trades, give them another chance on probation
+    if (!tracker.enabled && tracker.winRate7d >= 0.40 && tracker.trades.filter(t => {
+      return (Date.now() - new Date(t.timestamp).getTime()) < 7 * 24 * 60 * 60 * 1000;
+    }).length >= 5) {
+      tracker.enabled = true;
+      tracker.allocation = 0.5; // Probation: half allocation
+      tracker.demotionReason = null;
+      action = 're-enabled_probation';
+      log.info('OPTIMIZER', `Re-enabled ${name} on probation (7d WR: ${(tracker.winRate7d * 100).toFixed(0)}%)`);
+    }
+
     tracker.lastOptimized = new Date().toISOString();
     tracker.allocation = Math.round(tracker.allocation * 100) / 100;
     results.push({ strategy: name, action, allocation: tracker.allocation, sample: Math.round(sample * 1000) / 1000 });

@@ -31,6 +31,7 @@ const log = require('./utils/logger');
 const client = require('./polymarket/client');
 const { getCryptoSignal, parseCryptoQuestion } = require('./data/cryptoData');
 const userStore = require('./userStore');
+const paperTrader = require('./engine/paperTrader');
 const fs = require('fs');
 const path = require('path');
 
@@ -47,23 +48,48 @@ const CONFIG = {
   minVolume24h: 10000,               // $10k minimum 24h volume
 
   // Edge thresholds
-  minEdgePct: 0.025,                 // 2.5% minimum edge (raw)
-  minNetEdgePct: 0.015,              // 1.5% minimum edge net of fees
-  strongEdgePct: 0.06,               // 6%+ = STRONG signal
+  minEdgePct: 0.04,                  // 4% minimum edge (raw) — raised from 2.5%
+  minNetEdgePct: 0.025,              // 2.5% minimum edge net of fees — raised from 1.5%
+  strongEdgePct: 0.08,               // 8%+ = STRONG signal — raised from 6%
   feeRate: 0.02,                     // 2% Polymarket fee on profits
-  slippageBase: 0.003,               // 0.3% base slippage
+  slippageBase: 0.005,               // 0.5% base slippage — raised from 0.3%
 
   // Risk & sizing
-  maxTradeSizeUsd: 100,              // Max $100 per trade
-  maxBtcExposure: 0.25,              // Max 25% of bankroll in BTC markets
-  maxSingleMarket: 0.08,             // Max 8% in any single market
-  kellyFraction: 0.20,               // 1/5 Kelly (conservative)
-  maxOpenPositions: 15,              // Max 15 BTC positions
+  maxTradeSizeUsd: 50,               // Max $50 per trade — reduced from $100
+  maxBtcExposure: 0.15,              // Max 15% of bankroll in BTC markets — reduced from 25%
+  maxSingleMarket: 0.05,             // Max 5% in any single market — reduced from 8%
+  kellyFraction: 0.12,               // ~1/8 Kelly (very conservative) — reduced from 0.20
+  maxOpenPositions: 8,               // Max 8 BTC positions — reduced from 15
   bankroll: 1000,                    // Default bankroll (overridden from env)
+
+  // Time & price safety guards
+  minMinutesToExpiry: 30,            // Don't trade markets expiring within 30 minutes
+  minUpDownMinutesToExpiry: 10,      // UP_OR_DOWN: 10 min minimum (faster cycle)
+  minPrice: 0.05,                    // Reject if entry price < 5 cents (market decided)
+  maxPrice: 0.95,                    // Reject if entry price > 95 cents (market decided)
+
+  // Drawdown circuit breaker
+  maxDailyLoss: 30,                  // Stop trading after $30 daily loss
+  maxConsecutiveLosses: 3,           // Pause after 3 consecutive losses
+  consecutiveLossCooldownMs: 30 * 60 * 1000, // 30 min cooldown after consecutive losses
+  maxDrawdownPct: 0.08,              // Stop if total P&L drawdown exceeds 8% of bankroll
+
+  // Correlated exposure limits
+  maxCorrelatedExposure: 0.10,       // Max 10% of bankroll in correlated markets
+  correlationKeywords: ['dip', 'drop', 'crash', 'fall', 'below'], // Keywords that indicate correlated downside bets
+
+  // Stop-loss (price target markets only — Up/Down resolve too fast)
+  stopLoss: {
+    enabled: true,
+    maxLossPct: 0.50,                // Cut if position value drops 50%+ from entry
+    minHoldMinutes: 30,              // Don't stop-loss within first 30min (let price settle)
+    checkIntervalMs: 5 * 60 * 1000, // Check every 5 min (same as scan cycle)
+    onlyPriceTargets: true,          // Only apply to PRICE_TARGET markets, not UP_OR_DOWN
+  },
 
   // Cooldowns
   tradeCooldownMs: 3 * 60 * 1000,   // 3 min between trades on same market
-  maxTradesPerCycle: 5,              // Max 5 new trades per scan cycle
+  maxTradesPerCycle: 3,              // Max 3 new trades per scan cycle — reduced from 5
 
   // State file
   stateFile: path.join(__dirname, 'logs', 'btc-bot-state.json'),
@@ -82,6 +108,14 @@ let trackedMarkets = [];             // All active BTC markets
 let positions = [];                  // Open positions
 let tradeHistory = [];               // Completed trades
 let marketCooldowns = new Map();     // conditionId → last trade timestamp
+
+// Drawdown tracking
+let dailyPnL = 0;
+let dailyTrades = 0;
+let lastTradeDay = null;
+let consecutiveLosses = 0;
+let lastConsecutiveLossPause = 0;
+let peakPnL = 0;
 
 // Stats
 let stats = {
@@ -186,6 +220,19 @@ async function discoverBtcMarkets() {
     if (liquidity < CONFIG.minLiquidity) continue;
     if (volume < CONFIG.minVolume24h) continue;
 
+    // ★ CRITICAL: Skip expired or near-expiry markets
+    const endTime = m.endDate ? new Date(m.endDate).getTime() : 0;
+    if (endTime > 0 && endTime <= Date.now()) {
+      continue; // Market already ended — DO NOT TRADE
+    }
+    const minTTL = parsed.type === 'UP_OR_DOWN'
+      ? CONFIG.minUpDownMinutesToExpiry
+      : CONFIG.minMinutesToExpiry;
+    const minutesLeft = endTime > 0 ? (endTime - Date.now()) / 60000 : Infinity;
+    if (minutesLeft < minTTL) {
+      continue; // Too close to expiry — illiquid, prices unreliable
+    }
+
     const outcomePrices = m.outcomePrices ? JSON.parse(m.outcomePrices) : [];
     const tokenIds = m.clobTokenIds ? JSON.parse(m.clobTokenIds) : [];
     const outcomes = m.outcomes ? JSON.parse(m.outcomes) : ['Yes', 'No'];
@@ -268,6 +315,10 @@ async function analyzeMarket(market) {
   const marketYesPrice = market.yesPrice;
   const marketNoPrice = market.noPrice;
 
+  // ★ SAFETY: Reject extreme prices — market already decided
+  if (marketYesPrice < CONFIG.minPrice && marketNoPrice < CONFIG.minPrice) return null;
+  if (marketYesPrice > CONFIG.maxPrice && marketNoPrice > CONFIG.maxPrice) return null;
+
   // Which side has edge?
   // If model says YES is more likely than market prices → buy YES
   // If model says YES is less likely than market prices → buy NO
@@ -285,6 +336,11 @@ async function analyzeMarket(market) {
     entryPrice = marketNoPrice;
   } else {
     return null; // No edge
+  }
+
+  // ★ SAFETY: Reject extreme entry prices (the market has already been decided)
+  if (entryPrice < CONFIG.minPrice || entryPrice > CONFIG.maxPrice) {
+    return null;
   }
 
   // Orderbook confirmation: boost/penalize edge
@@ -373,7 +429,56 @@ async function analyzeMarket(market) {
  * Uses the existing clobExecutor or paper-trades.
  */
 async function executeTrade(analysis) {
-  const { market, side, entryPrice, kellySize, netEdge, confidence, strength } = analysis;
+  const { market, side, entryPrice, kellySize, rawEdge, netEdge, confidence, strength } = analysis;
+
+  // ★ CRITICAL: Final safety check — never trade expired markets
+  if (market.endDate) {
+    const endTime = new Date(market.endDate).getTime();
+    const minutesLeft = (endTime - Date.now()) / 60000;
+    if (minutesLeft <= 0) {
+      log.warn('BTC-BOT', `BLOCKED: "${market.question}" already expired (${minutesLeft.toFixed(0)}min ago)`);
+      return null;
+    }
+    const minTTL = market.type === 'UP_OR_DOWN'
+      ? (CONFIG.minUpDownMinutesToExpiry || 10)
+      : (CONFIG.minMinutesToExpiry || 30);
+    if (minutesLeft < minTTL) {
+      log.warn('BTC-BOT', `BLOCKED: "${market.question}" expires in ${minutesLeft.toFixed(0)}min (need ${minTTL})`);
+      return null;
+    }
+  }
+
+  // ★ SAFETY: Final price sanity check
+  if (entryPrice < CONFIG.minPrice || entryPrice > CONFIG.maxPrice) {
+    log.warn('BTC-BOT', `BLOCKED: entry price ${entryPrice} outside safe range [${CONFIG.minPrice}-${CONFIG.maxPrice}]`);
+    return null;
+  }
+
+  // ★ DRAWDOWN CIRCUIT BREAKER
+  const today = new Date().toDateString();
+  if (today !== lastTradeDay) {
+    dailyPnL = 0;
+    dailyTrades = 0;
+    lastTradeDay = today;
+  }
+  if (dailyPnL <= -CONFIG.maxDailyLoss) {
+    log.warn('BTC-BOT', `BLOCKED: Daily loss limit ($${CONFIG.maxDailyLoss}) hit. P&L today: $${dailyPnL.toFixed(2)}`);
+    return null;
+  }
+  if (consecutiveLosses >= CONFIG.maxConsecutiveLosses) {
+    const cooldownLeft = CONFIG.consecutiveLossCooldownMs - (Date.now() - lastConsecutiveLossPause);
+    if (cooldownLeft > 0) {
+      log.warn('BTC-BOT', `BLOCKED: ${consecutiveLosses} consecutive losses — cooling down (${(cooldownLeft / 60000).toFixed(0)}min left)`);
+      return null;
+    }
+    // Cooldown expired, reset
+    consecutiveLosses = 0;
+  }
+  // Check max drawdown from peak
+  if (peakPnL > 0 && (peakPnL - stats.totalPnL) > CONFIG.bankroll * CONFIG.maxDrawdownPct) {
+    log.warn('BTC-BOT', `BLOCKED: Drawdown ${(peakPnL - stats.totalPnL).toFixed(2)} exceeds ${(CONFIG.maxDrawdownPct * 100)}% of bankroll`);
+    return null;
+  }
 
   // Cooldown check
   const lastTrade = marketCooldowns.get(market.conditionId);
@@ -392,6 +497,20 @@ async function executeTrade(analysis) {
   if (currentExposure + kellySize > CONFIG.bankroll * CONFIG.maxBtcExposure) {
     log.info('BTC-BOT', `BTC exposure cap reached ($${currentExposure.toFixed(0)}/${(CONFIG.bankroll * CONFIG.maxBtcExposure).toFixed(0)})`);
     return null;
+  }
+
+  // ★ CORRELATED EXPOSURE CHECK
+  // Group positions by correlation (same-direction BTC bets)
+  const qLower = market.question.toLowerCase();
+  const isDownsideBet = CONFIG.correlationKeywords.some(kw => qLower.includes(kw));
+  if (isDownsideBet) {
+    const correlatedExposure = positions
+      .filter(p => CONFIG.correlationKeywords.some(kw => p.question.toLowerCase().includes(kw)))
+      .reduce((s, p) => s + p.size, 0);
+    if (correlatedExposure + kellySize > CONFIG.bankroll * CONFIG.maxCorrelatedExposure) {
+      log.info('BTC-BOT', `Correlated exposure cap reached ($${correlatedExposure.toFixed(0)}/${(CONFIG.bankroll * CONFIG.maxCorrelatedExposure).toFixed(0)}) — skipping "${market.question.slice(0, 40)}"`);
+      return null;
+    }
   }
 
   const tokenId = side === 'YES' ? market.yesTokenId : market.noTokenId;
@@ -441,6 +560,30 @@ async function executeTrade(analysis) {
   marketCooldowns.set(market.conditionId, Date.now());
   stats.totalTradesPlaced++;
   saveState();
+
+  // ─── Route to Paper Trader for unified tracking ──────────────
+  try {
+    const ptOpp = {
+      conditionId: market.conditionId,
+      market: market.question,
+      strategy: 'BTC_BOT',
+      side: side,                     // Already YES/NO
+      score: Math.round(Math.min(100, Math.abs(netEdge) * 500 + 40)),  // Scale edge to 0-100
+      confidence: confidence,
+      price: entryPrice,
+      yesPrice: market.yesPrice,
+      noPrice: market.noPrice,
+      positionSize: kellySize,
+      endDate: market.endDate,
+      edge: rawEdge,
+      netEdge: netEdge,
+      riskLevel: strength === 'STRONG' ? 'LOW' : strength === 'MODERATE' ? 'MEDIUM' : 'HIGH',
+      liquidity: market.liquidity || 50000,
+    };
+    paperTrader.recordScanResults([ptOpp]);
+  } catch (ptErr) {
+    log.warn('BTC-BOT', `Paper trader bridge failed: ${ptErr.message}`);
+  }
 
   log.info('BTC-BOT', `₿ TRADE: ${side} ${market.question} | $${kellySize.toFixed(2)} @ ${(entryPrice * 100).toFixed(1)}¢ | edge: ${(netEdge * 100).toFixed(2)}% | ${position.liveStatus}`);
 
@@ -512,6 +655,134 @@ async function executeCopyTrades(analysis, adminPosition) {
   }
 }
 
+// ─── Stop-Loss Checker (price target markets only) ───────────────────
+
+/**
+ * Check open PRICE_TARGET positions for stop-loss conditions.
+ * If the current market price has moved against us by > maxLossPct,
+ * close the position early to cut losses.
+ *
+ * Logic:
+ *  - Only applies to PRICE_TARGET markets (Up/Down resolve too fast)
+ *  - Position must be held for at least minHoldMinutes
+ *  - If current side price dropped 50%+ from entry → thesis is broken, cut it
+ *
+ * On Polymarket, "cutting" means selling the token back. For paper trades,
+ * we mark it as STOPPED and record the loss at current price.
+ */
+async function checkStopLosses() {
+  if (!CONFIG.stopLoss.enabled) return [];
+
+  const stopped = [];
+
+  for (const pos of positions) {
+    if (pos.status !== 'OPEN') continue;
+
+    // Only price target markets
+    if (CONFIG.stopLoss.onlyPriceTargets && pos.type !== 'PRICE_TARGET') continue;
+
+    // Must have been held for minimum time
+    const holdMs = Date.now() - new Date(pos.openedAt).getTime();
+    if (holdMs < CONFIG.stopLoss.minHoldMinutes * 60 * 1000) continue;
+
+    try {
+      const market = await client.getMarketById(pos.conditionId);
+      if (!market || market.resolved) continue; // Let resolution checker handle resolved markets
+
+      // Get current price of our side
+      const currentPrice = pos.side === 'YES'
+        ? (market.yesPrice ?? null)
+        : (market.noPrice ?? null);
+
+      if (currentPrice === null) continue;
+
+      // Calculate how much value we've lost
+      // entry: 80¢, current: 35¢ → lossRatio = (0.80 - 0.35) / 0.80 = 0.5625 = 56% loss
+      const lossRatio = (pos.entryPrice - currentPrice) / pos.entryPrice;
+
+      // Store current mark-to-market on every check
+      pos.currentPrice = currentPrice;
+      pos.unrealizedPnL = Math.round(((currentPrice - pos.entryPrice) * pos.shares) * 100) / 100;
+
+      if (lossRatio >= CONFIG.stopLoss.maxLossPct) {
+        // THESIS BROKEN — cut the position
+        const exitValue = currentPrice * pos.shares;
+        const pnl = Math.round((exitValue - pos.size) * 100) / 100;
+
+        pos.status = 'STOPPED';
+        pos.exitPrice = currentPrice;
+        pos.payout = Math.round(exitValue * 100) / 100;
+        pos.pnl = pnl;
+        pos.stoppedAt = new Date().toISOString();
+        pos.stopReason = `Price dropped ${(lossRatio * 100).toFixed(0)}% (${(pos.entryPrice * 100).toFixed(1)}¢ → ${(currentPrice * 100).toFixed(1)}¢)`;
+
+        // Try live sell if we have a live position
+        if (pos.liveStatus !== 'PAPER' && pos.tokenId) {
+          try {
+            const clobExecutor = require('./polymarket/clobExecutor');
+            if (clobExecutor.getStatus().initialized) {
+              await clobExecutor.placeTrade({
+                tokenId: pos.tokenId,
+                side: 'SELL',
+                price: currentPrice,
+                size: pos.shares,
+                maxSlippage: 0.03,
+              });
+              pos.liveExitStatus = 'SUBMITTED';
+            }
+          } catch { pos.liveExitStatus = 'FAILED'; }
+        }
+
+        // Update stats (counts as a loss)
+        stats.totalTradesLost++;
+        consecutiveLosses++;
+        if (consecutiveLosses >= CONFIG.maxConsecutiveLosses) {
+          lastConsecutiveLossPause = Date.now();
+        }
+        stats.totalPnL = Math.round((stats.totalPnL + pnl) * 100) / 100;
+        dailyPnL += pnl;
+        if (stats.totalPnL > peakPnL) peakPnL = stats.totalPnL;
+        if (!stats.worstTrade || pnl < stats.worstTrade.pnl) {
+          stats.worstTrade = { market: pos.question, pnl: pos.pnl };
+        }
+        const total = stats.totalTradesWon + stats.totalTradesLost;
+        stats.winRate = total > 0 ? Math.round((stats.totalTradesWon / total) * 100) : 0;
+
+        stopped.push(pos);
+
+        log.warn('BTC-BOT', `🛑 STOP-LOSS: "${pos.question}" | ${pos.side} ${(pos.entryPrice * 100).toFixed(1)}¢ → ${(currentPrice * 100).toFixed(1)}¢ | P&L: $${pnl.toFixed(2)} | ${pos.stopReason}`);
+
+        // Telegram alert
+        if (telegramSend) {
+          telegramSend([
+            `🛑 BTC Bot Stop-Loss Triggered`,
+            ``,
+            `${pos.question}`,
+            `${pos.side} @ ${(pos.entryPrice * 100).toFixed(1)}¢ → ${(currentPrice * 100).toFixed(1)}¢`,
+            `P&L: $${pnl.toFixed(2)} (cut ${(lossRatio * 100).toFixed(0)}% loss)`,
+            ``,
+            `Held for ${(holdMs / 3600000).toFixed(1)}h`,
+            `📊 Running: ${stats.totalPnL >= 0 ? '+' : ''}$${stats.totalPnL.toFixed(2)}`,
+          ].join('\n'));
+        }
+      }
+    } catch (err) {
+      log.warn('BTC-BOT', `Stop-loss check failed for ${pos.conditionId}: ${err.message}`);
+    }
+  }
+
+  if (stopped.length > 0) {
+    // Move stopped positions to trade history
+    for (const pos of stopped) {
+      tradeHistory.push(pos);
+    }
+    positions = positions.filter(p => p.status === 'OPEN');
+    saveState();
+  }
+
+  return stopped;
+}
+
 // ─── Resolution Checker ──────────────────────────────────────────────
 
 /**
@@ -544,10 +815,22 @@ async function checkResolutions() {
         // Update stats
         if (won) {
           stats.totalTradesWon++;
+          consecutiveLosses = 0; // Reset streak on win
         } else {
           stats.totalTradesLost++;
+          consecutiveLosses++;
+          if (consecutiveLosses >= CONFIG.maxConsecutiveLosses) {
+            lastConsecutiveLossPause = Date.now();
+            log.warn('BTC-BOT', `⚠️ ${consecutiveLosses} consecutive losses — entering ${(CONFIG.consecutiveLossCooldownMs / 60000).toFixed(0)}min cooldown`);
+            if (telegramSend) {
+              telegramSend(`⚠️ BTC Bot: ${consecutiveLosses} consecutive losses — pausing for ${(CONFIG.consecutiveLossCooldownMs / 60000).toFixed(0)} minutes`);
+            }
+          }
         }
         stats.totalPnL = Math.round((stats.totalPnL + pnl) * 100) / 100;
+        dailyPnL += pnl;
+        // Track peak P&L for drawdown calculation
+        if (stats.totalPnL > peakPnL) peakPnL = stats.totalPnL;
         if (!stats.bestTrade || pnl > stats.bestTrade.pnl) stats.bestTrade = { market: pos.question, pnl: pos.pnl };
         if (!stats.worstTrade || pnl < stats.worstTrade.pnl) stats.worstTrade = { market: pos.question, pnl: pos.pnl };
 
@@ -668,7 +951,10 @@ async function runScan() {
       }
     }
 
-    // 5. Check resolutions
+    // 5. Check stop-losses on price target positions
+    const stopped = await checkStopLosses();
+
+    // 6. Check resolutions
     const resolved = await checkResolutions();
 
     // 6. Push alerts
@@ -703,6 +989,13 @@ async function runScan() {
         alertLines.push(`✅ Resolved: ${resolved.length}`);
       }
 
+      if (stopped.length > 0) {
+        alertLines.push(`🛑 Stop-losses: ${stopped.length}`);
+        for (const s of stopped) {
+          alertLines.push(`   ${s.side} "${s.question.slice(0, 35)}" — cut at ${(s.exitPrice * 100).toFixed(1)}¢ (P&L: $${s.pnl.toFixed(2)})`);
+        }
+      }
+
       alertLines.push(
         `━━━━━━━━━━━━━━━━━━`,
         `📊 P&L: ${stats.totalPnL >= 0 ? '+' : ''}$${stats.totalPnL.toFixed(2)} | WR: ${stats.winRate}% | Pos: ${positions.length}`,
@@ -718,7 +1011,7 @@ async function runScan() {
     saveState();
 
     const elapsed = ((Date.now() - cycleStart) / 1000).toFixed(1);
-    log.info('BTC-BOT', `═══ Scan #${scanCount} done: ${analyses.length} edges, ${tradesThisCycle} trades, ${resolved.length} resolved (${elapsed}s) ═══`);
+    log.info('BTC-BOT', `═══ Scan #${scanCount} done: ${analyses.length} edges, ${tradesThisCycle} trades, ${resolved.length} resolved, ${stopped.length} stopped (${elapsed}s) ═══`);
 
   } catch (err) {
     log.error('BTC-BOT', `Scan cycle failed: ${err.message}`);

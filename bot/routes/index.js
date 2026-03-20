@@ -15,6 +15,7 @@ const createWatchlistRoutes = require('./watchlist');
 const createICTRoutes       = require('./ict');
 const createAlphaRoutes     = require('./alpha');
 const createInfraRoutes     = require('./infra');
+const createMiroFishRoutes  = require('./mirofish');
 
 module.exports = function mountRoutes(app, deps) {
   // Markets & Opportunities
@@ -80,5 +81,12 @@ module.exports = function mountRoutes(app, deps) {
     probabilityEnsemble: deps.probabilityEnsemble,
     wsServer: deps.wsServer,
     newsStream: deps.newsStream,
+  }));
+
+  // MiroFish multi-agent simulation engine + Strategy Lab
+  app.use('/api', createMiroFishRoutes({
+    miroFishSignal: deps.miroFishSignal,
+    markets: deps.markets,
+    strategies: deps.strategies,
   }));
 };

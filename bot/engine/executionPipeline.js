@@ -36,11 +36,13 @@ let executor = null;
 let riskManager = null;
 let edgeResolver = null;
 let scanner = null;
+let paperTrader = null;
 
 try { executor = require('./executor'); } catch { /* required */ }
 try { riskManager = require('./riskManager'); } catch { /* required */ }
 try { edgeResolver = require('./edgeResolver'); } catch { /* optional */ }
 try { scanner = require('./scanner'); } catch { /* optional */ }
+try { paperTrader = require('./paperTrader'); } catch { /* optional */ }
 
 // ─── State ───────────────────────────────────────────────────────────
 let signalQueue = [];                 // Pending signals to process
@@ -232,6 +234,58 @@ async function processQueue() {
  */
 async function processSignal(signal) {
   const startTime = Date.now();
+
+  // ─── Learning Gate ─────────────────────────────────────────────────
+  // Consult paper trader's learning system before executing real trades.
+  // If a pattern has been blocked by the learning system, don't risk real money on it.
+  if (paperTrader) {
+    try {
+      const side = signal.side || 'YES';
+      // Map pipeline source names → scanner strategy names used in learningState
+      const SOURCE_TO_STRATEGY = {
+        newMarketDetector: 'NEW_MARKET',
+        newsReactor: 'NEWS_BREAK',
+        panicDipDetector: 'PANIC_DIP',
+        scanner: 'PROVEN_EDGE',
+      };
+      const strategy = SOURCE_TO_STRATEGY[signal.source] || signal.type || signal.source || 'DEFAULT';
+
+      // Check pattern block (e.g., WHALE_DETECTION:YES blocked after 0W/8L)
+      if (paperTrader.isPatternBlocked(strategy, side)) {
+        signal.status = 'REJECTED_LEARNING';
+        signal.riskReason = `Pattern ${strategy}:${side} blocked by learning system`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        log.info('PIPELINE', `Learning blocked: ${signal.market?.slice(0, 50)} — ${signal.riskReason}`);
+        return { signal, result: null, reason: signal.riskReason };
+      }
+
+      // Also check all related strategy variations — a signal type like
+      // BREAKING_NEWS maps to NEWS_BREAK, but also check the raw type
+      if (signal.type && signal.type !== strategy && paperTrader.isPatternBlocked(signal.type, side)) {
+        signal.status = 'REJECTED_LEARNING';
+        signal.riskReason = `Pattern ${signal.type}:${side} blocked by learning system`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        log.info('PIPELINE', `Learning blocked (type): ${signal.market?.slice(0, 50)} — ${signal.riskReason}`);
+        return { signal, result: null, reason: signal.riskReason };
+      }
+
+      // Check learned threshold — don't execute below profitable score
+      const learned = paperTrader.getLearnedThreshold(strategy);
+      if (learned && learned.sampleSize >= 5 && (signal.score || 0) < learned.profitCutoff) {
+        signal.status = 'REJECTED_LEARNING';
+        signal.riskReason = `Score ${signal.score || 0} below learned profitable threshold ${learned.profitCutoff} for ${strategy}`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        log.info('PIPELINE', `Learning threshold blocked: ${signal.market?.slice(0, 50)} — score ${signal.score} < ${learned.profitCutoff}`);
+        return { signal, result: null, reason: signal.riskReason };
+      }
+    } catch (err) {
+      log.debug('PIPELINE', `Learning gate check failed: ${err.message}`);
+      // Proceed if learning check fails — don't block real trades on learning errors
+    }
+  }
 
   // Risk check
   if (riskManager) {

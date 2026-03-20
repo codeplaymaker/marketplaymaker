@@ -83,12 +83,61 @@ const probabilityEnsemble = optionalRequire('./engine/probabilityEnsemble');
 const wsServer            = optionalRequire('./engine/wsServer');
 const newsStream          = optionalRequire('./engine/newsStream');
 
+// MiroFish local simulator — auto-start if no external MiroFish backend configured
+const localSimulator = optionalRequire('./mirofish/localSimulator');
+if (localSimulator && !process.env.MIROFISH_URL) {
+  // Start synchronously-ish: the simulator binds fast (~10ms) and we set env vars
+  // so subsequent modules see the correct config
+  process.env.MIROFISH_URL = `http://localhost:${localSimulator.PORT}`;
+  config.mirofish.enabled = true;
+  config.mirofish.baseUrl = process.env.MIROFISH_URL;
+  localSimulator.start().then((srv) => {
+    if (srv) {
+      log.info('SERVER', `🧪 Local MiroFish simulator started on port ${localSimulator.PORT}`);
+    } else {
+      log.info('SERVER', `🧪 MiroFish backend already running on port ${localSimulator.PORT}`);
+    }
+  }).catch(err => {
+    log.warn('SERVER', `Local MiroFish sim failed: ${err.message}`);
+    config.mirofish.enabled = false;
+  });
+}
+
+// MiroFish multi-agent simulation engine
+const miroFishSignal      = optionalRequire('./mirofish/signal');
+
+// MiroFish Strategy Lab — self-testing, suggestion, and evolution
+const strategyTester      = optionalRequire('./mirofish/strategyTester');
+const strategySuggester   = optionalRequire('./mirofish/strategySuggester');
+const strategyEvolver     = optionalRequire('./mirofish/strategyEvolver');
+const paramApplicator     = optionalRequire('./mirofish/paramApplicator');
+
 if (healthMonitor) log.info('SERVER', 'Health monitor loaded');
 if (logCleanup) log.info('SERVER', 'Log cleanup loaded');
 if (strategyOptimizer) log.info('SERVER', 'Strategy optimizer loaded');
 if (probabilityEnsemble) log.info('SERVER', 'Probability ensemble loaded');
 if (wsServer) log.info('SERVER', 'WebSocket server loaded');
 if (newsStream) log.info('SERVER', 'News stream loaded');
+
+if (miroFishSignal) log.info('SERVER', 'MiroFish simulation engine loaded');
+if (strategyTester) log.info('SERVER', 'MiroFish strategy tester loaded');
+if (strategySuggester) log.info('SERVER', 'MiroFish strategy suggester loaded');
+if (strategyEvolver) log.info('SERVER', 'MiroFish strategy evolver loaded');
+
+// ─── Auto-apply evolved strategy params ───────────────────────────────
+if (paramApplicator && config.mirofish?.strategyLab?.autoApplyEvolved !== false) {
+  try {
+    const applied = paramApplicator.applyAll(config);
+    const count = applied.filter(r => r.applied).length;
+    if (count > 0) {
+      log.info('SERVER', `Applied evolved params to ${count} strategies`);
+    } else {
+      log.info('SERVER', 'No evolved params met fitness threshold — using defaults');
+    }
+  } catch (err) {
+    log.warn('SERVER', `Failed to apply evolved params: ${err.message}`);
+  }
+}
 
 if (kalshiClient)  log.info('SERVER', 'Kalshi modules loaded');
 if (edgeResolver)  log.info('SERVER', 'Edge resolver loaded');
@@ -237,6 +286,130 @@ async function runAutoScan() {
     // Webhook alerts for A-grade STRONG edges (sane only)
     const strongEdges = saneEntries.filter(e => e.edgeSignal === 'STRONG' && (e.edgeQuality || 0) >= 55);
     if (strongEdges.length > 0) fireWebhookAlerts(strongEdges).catch(() => {});
+
+    // ─── MiroFish: Queue & process multi-agent simulations ───
+    // MiroFish excels at politics/geopolitics markets where bookmakers don't exist.
+    // We assess markets for suitability and run simulations in batch.
+    if (miroFishSignal && config.mirofish?.enabled) {
+      try {
+        // Assess and queue high-priority political/geopolitical markets
+        const queued = miroFishSignal.assessAndQueue(allMarkets, config.mirofish.maxQueueSize || 10);
+
+        // Process batch simulations (runs top 2 queued markets through MiroFish)
+        const mfResults = await miroFishSignal.processSimulationBatch(
+          allMarkets,
+          config.mirofish.maxSimulationsPerBatch || 2
+        );
+
+        if (mfResults.length > 0) {
+          log.info('SCANNER', `MiroFish: ${mfResults.length} simulation(s) completed, ${queued} queued`);
+
+          // Push MiroFish results as Telegram alerts for significant divergences
+          const mfAlerts = mfResults
+            .filter(r => r.prob != null)
+            .map(r => {
+              const market = allMarkets.find(m => m.conditionId === r.conditionId);
+              const marketPrice = market?.yesPrice || 0.5;
+              const divergence = r.prob - marketPrice;
+              return {
+                question: r.question,
+                conditionId: r.conditionId,
+                marketPrice,
+                prob: r.prob,
+                divergence,
+                absDivergence: Math.abs(divergence),
+                edgeSignal: Math.abs(divergence) >= 0.08 ? 'STRONG' : 'MODERATE',
+                edgeQuality: r.confidence === 'HIGH' ? 70 : r.confidence === 'MEDIUM' ? 55 : 40,
+                edgeGrade: r.confidence === 'HIGH' ? 'B' : 'C',
+                edgeDirection: divergence > 0 ? 'BUY_YES' : 'BUY_NO',
+                sourceCount: r.methodCount || 1,
+                miroFishSimulation: true,
+                reasoning: r.reasoning,
+              };
+            })
+            .filter(a => a.absDivergence >= 0.05); // Only alert for 5%+ divergence
+
+          if (mfAlerts.length > 0) {
+            telegramBot.pushEdgeAlert(mfAlerts).catch(() => {});
+            log.info('SCANNER', `MiroFish: ${mfAlerts.length} edge alert(s) pushed to Telegram`);
+          }
+        }
+      } catch (err) {
+        log.debug('SCANNER', `MiroFish batch failed: ${err.message}`);
+      }
+    }
+
+    // ─── MiroFish Strategy Lab: Periodic self-testing & evolution ───
+    // Runs every ~24h (checks a timestamp file). Tests all strategies against
+    // simulated markets, generates LLM suggestions, and evolves parameters.
+    if (strategyTester && config.mirofish?.strategyLab?.enabled) {
+      try {
+        const labStateFile = path.join(__dirname, 'logs/mirofish-lab-lastrun.json');
+        let lastLabRun = 0;
+        try { lastLabRun = JSON.parse(fs.readFileSync(labStateFile, 'utf8')).lastRun || 0; } catch { /* first run */ }
+        const labInterval = config.mirofish?.strategyLab?.intervalHours || 24;
+
+        if (Date.now() - lastLabRun > labInterval * 60 * 60 * 1000) {
+          log.info('STRATEGY_LAB', 'Starting periodic strategy self-test...');
+
+          // 1. Run full test suite in background
+          const strategyModules = [
+            optionalRequire('./strategies/provenEdge'),
+            optionalRequire('./strategies/arbitrage'),
+            optionalRequire('./strategies/noBets'),
+            optionalRequire('./strategies/sportsEdge'),
+          ].filter(Boolean);
+
+          strategyTester.runFullTestSuite(strategyModules, { category: 'politics' })
+            .then(async (suiteResults) => {
+              log.info('STRATEGY_LAB', 'Full test suite completed');
+
+              // 2. Generate LLM suggestions if we have results
+              if (strategySuggester && suiteResults) {
+                try {
+                  await strategySuggester.generateSuggestions({ validate: true });
+                  log.info('STRATEGY_LAB', 'Strategy suggestions generated');
+                } catch (err) {
+                  log.debug('STRATEGY_LAB', `Suggestions failed: ${err.message}`);
+                }
+              }
+
+              // 3. Evolve parameters for top strategies
+              if (strategyEvolver) {
+                try {
+                  await strategyEvolver.evolveAllStrategies({
+                    category: 'politics',
+                    populationSize: 12,
+                    generations: 6,
+                  });
+                  log.info('STRATEGY_LAB', 'Strategy evolution completed');
+                } catch (err) {
+                  log.debug('STRATEGY_LAB', `Evolution failed: ${err.message}`);
+                }
+              }
+
+              // Update last run timestamp
+              fs.promises.writeFile(labStateFile, JSON.stringify({ lastRun: Date.now() })).catch(() => {});
+
+              // 4. Push summary to Telegram
+              telegramBot.pushEdgeAlert([{
+                question: '🧪 Strategy Lab Report',
+                conditionId: 'strategy-lab',
+                edgeSignal: 'INFO',
+                edgeQuality: 0,
+                edgeGrade: 'LAB',
+                reasoning: `Strategy self-test complete. ${strategyModules.length} strategies tested. Check /api/mirofish/lab/status for details.`,
+                miroFishStrategyLab: true,
+              }]).catch(() => {});
+            })
+            .catch(err => {
+              log.debug('STRATEGY_LAB', `Strategy lab failed: ${err.message}`);
+            });
+        }
+      } catch (err) {
+        log.debug('STRATEGY_LAB', `Strategy lab setup error: ${err.message}`);
+      }
+    }
 
     // OLD independent-signal alerts DISABLED — 47% historical win rate = noise.
     // Only proven edge alerts (bookmaker-validated, cross-platform arb, orderbook arb) are pushed above.
@@ -435,6 +608,15 @@ mountRoutes(app, {
   // Infrastructure (10/10)
   healthMonitor, logCleanup, strategyOptimizer,
   probabilityEnsemble, wsServer, newsStream,
+  // MiroFish simulation engine
+  miroFishSignal,
+  // Strategy modules (for MiroFish strategy lab)
+  strategies: {
+    provenEdge: optionalRequire('./strategies/provenEdge'),
+    arbitrage: optionalRequire('./strategies/arbitrage'),
+    noBets: optionalRequire('./strategies/noBets'),
+    sportsEdge: optionalRequire('./strategies/sportsEdge'),
+  },
   // Scanner state (mutable, shared by reference)
   scanState: { get cachedScanResults() { return cachedScanResults; }, get lastScanTime() { return lastScanTime; }, get scanRunning() { return scanRunning; }, get SCAN_INTERVAL() { return SCAN_INTERVAL; }, runAutoScan },
   // Webhook helpers
@@ -635,19 +817,73 @@ server = app.listen(PORT, () => {
     scanState: { get cachedScanResults() { return cachedScanResults; }, get lastScanTime() { return lastScanTime; }, get scanRunning() { return scanRunning; }, runAutoScan },
   });
 
+  // Wire paper trader notifications → Telegram
+  paperTrader.setNotifyCallback((event, data) => {
+    if (!telegramBot.isActive()) return;
+    if (event === 'NEW_TRADES') {
+      telegramBot.pushPaperTradeSignal(data).catch(() => {});
+    } else if (event === 'RESOLUTIONS') {
+      telegramBot.pushResolutionSignal(data).catch(() => {});
+    }
+  });
+
+  // Daily P&L digest — fires every 6 hours via Telegram
+  let lastDailyDigest = null;
+  log.info('SERVER', 'P&L digest timer started');
+  setInterval(() => {
+    const active = telegramBot.isActive();
+    if (!active) { log.debug('SERVER', 'Digest skipped: Telegram not active'); return; }
+    const now = new Date();
+    // Send at roughly 00:00, 06:00, 12:00, 18:00 UTC — or if never sent
+    if (lastDailyDigest && (now - lastDailyDigest) < 5.5 * 3600 * 1000) return;
+    lastDailyDigest = now;
+    try {
+      const perf = paperTrader.getPerformance();
+      const stats = paperTrader.getStats();
+      const start = perf.startingBankroll || 50;
+      const pnl = perf.totalPnL || 0;
+      const roi = perf.roi || perf.bankrollReturn || 0;
+      const wr = perf.winRate || 0;
+      const pending = perf.pendingResolution || 0;
+      const resolved = perf.resolvedCount || 0;
+      const bankroll = perf.simBankroll || start;
+      const icon = pnl >= 0 ? '📈' : '📉';
+      const msg = `${icon} *Paper P&L Digest*\n\n`
+        + `💰 Bankroll: *$${bankroll.toFixed(2)}* (started $${start})\n`
+        + `📊 P&L: *${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}* (${roi >= 0 ? '+' : ''}${roi.toFixed(1)}% ROI)\n`
+        + `🎯 Win Rate: *${wr.toFixed(0)}%* (${resolved} resolved)\n`
+        + `⏳ Pending: ${pending} trades\n`
+        + (perf.sharpe ? `📐 Sharpe: ${perf.sharpe} | Max DD: $${(perf.maxDrawdown || 0).toFixed(2)}\n` : '')
+        + (stats?.learningVersion > 0 ? `🧠 Learning v${stats.learningVersion} (${stats.totalResolutions || 0} resolutions)\n` : '')
+        + `\n_Next digest in ~6 hours_`;
+      telegramBot.sendToAll(msg).catch(() => {});
+      log.info('SERVER', `📊 P&L digest sent (bankroll: $${bankroll.toFixed(2)}, ${resolved} resolved, ${pending} pending)`);
+    } catch (e) { log.debug('SERVER', `Daily digest error: ${e.message}`); }
+  }, 60 * 1000); // Check every minute
+
   // Initialize BTC Bot (5-minute scanner)
   btcBot.initialize({
     sendToAll: (msg) => telegramBot.sendToAll ? telegramBot.sendToAll(msg) : null,
     sendTo: telegramBot.sendTo,
-    bankroll: parseFloat(process.env.BTC_BOT_BANKROLL || '1000'),
+    bankroll: parseFloat(process.env.BTC_BOT_BANKROLL || '50'),
   });
 
   // Initialize BTC 5-Min Sniper (real-time Binance + Polymarket)
   btcSniper.initialize({
     sendToAll: (msg) => telegramBot.sendToAll ? telegramBot.sendToAll(msg) : null,
     sendTo: telegramBot.sendTo,
-    bankroll: parseFloat(process.env.SNIPER_BANKROLL || '1000'),
+    bankroll: parseFloat(process.env.SNIPER_BANKROLL || '50'),
   });
+
+  // Auto-start BTC bots after initialization
+  try {
+    btcBot.start();
+    log.info('SERVER', '₿ BTC Bot auto-started');
+  } catch (e) { log.warn('SERVER', `BTC Bot auto-start failed: ${e.message}`); }
+  try {
+    btcSniper.start();
+    log.info('SERVER', '⚡ BTC Sniper auto-started');
+  } catch (e) { log.warn('SERVER', `BTC Sniper auto-start failed: ${e.message}`); }
 
   // Auto-fetch markets
   const mktStart = Date.now();

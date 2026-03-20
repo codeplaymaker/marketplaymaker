@@ -850,20 +850,28 @@ async function pushEdgeAlert(edges) {
     const modCount = userEdges.filter(e => e.edgeSignal === 'MODERATE').length;
     const label = [strongCount && `${strongCount} strong`, modCount && `${modCount} moderate`].filter(Boolean).join(', ');
 
-    let text = `📡 *Trade Signal* — ${label}\n\n`;
+    // Determine source label for header
+    const hasProven = userEdges.some(e => e.provenEdge);
+    const hasMiro = userEdges.some(e => e.miroFishSimulation);
+    const hasLab = userEdges.some(e => e.miroFishStrategyLab);
+    const sourceTag = hasLab ? '🧪 STRATEGY LAB' : hasMiro ? '🐟 MIROFISH' : hasProven ? '🎯 PROVEN' : '📡 SCAN';
+
+    let text = `${sourceTag} *Signal* — ${label}\n\n`;
     for (const e of userEdges.slice(0, 8)) {
       const isProven = e.provenEdge;
-      const icon = isProven ? '🎯' : e.edgeSignal === 'STRONG' ? '🟢' : '🟡';
+      const isMiro = e.miroFishSimulation;
+      const icon = isProven ? '🎯' : isMiro ? '🐟' : e.edgeSignal === 'STRONG' ? '🟢' : '🟡';
+      const srcLabel = isProven ? 'PROVEN' : isMiro ? 'MIROFISH' : 'SCAN';
       const mktPrice = ((e.marketPrice || 0) * 100).toFixed(0);
       const estPrice = ((e.prob || 0) * 100).toFixed(0);
       const div = (Math.abs(e.divergence || 0) * 100).toFixed(1);
       text += `${icon} *${truncate(e.question || 'Unknown', 50)}*\n`;
       if (isProven) {
-        text += `   ${e.edgeDirection || ''} | Net edge: ${div}%\n`;
+        text += `   ${srcLabel} | ${e.edgeDirection || ''} | Net edge: ${div}%\n`;
         text += `   Grade: ${e.edgeGrade || '?'} | Quality: ${e.edgeQuality || 0}/100\n`;
         if (e.riskNote) text += `   ${truncate(e.riskNote, 80)}\n`;
       } else {
-        text += `   Mkt: ${mktPrice}% → Est: ${estPrice}% (${div}pp)\n`;
+        text += `   ${srcLabel} | Mkt: ${mktPrice}% → Est: ${estPrice}% (${div}pp)\n`;
         text += `   Quality: ${e.edgeQuality || 0}/100 | ${e.edgeDirection || ''}\n`;
       }
       text += `\n`;
@@ -893,11 +901,16 @@ async function pushPaperTradeSignal(trades) {
     const sig = user.signals || {};
     if (!sig.paper) continue;
 
-    let text = `📝 *Paper Trade Signal* — ${trades.length} new\n\n`;
+    // Group trades by strategy for header summary
+    const stratCounts = {};
+    for (const t of trades) { const s = t.strategy || 'AUTO'; stratCounts[s] = (stratCounts[s] || 0) + 1; }
+    const stratSummary = Object.entries(stratCounts).map(([s, n]) => `${n}× ${s}`).join(', ');
+
+    let text = `📝 *Paper Trade* — ${trades.length} new (${stratSummary})\n\n`;
     for (const t of trades.slice(0, 5)) {
+      const stratTag = (t.strategy || 'AUTO').toUpperCase();
       text += `• *${truncate(t.question || t.market || 'Unknown', 45)}*\n`;
-      text += `   ${t.side || '?'} @ ${((t.entryPrice || t.price || 0) * 100).toFixed(0)}%`;
-      text += ` | ${t.strategy || 'auto'}\n\n`;
+      text += `   ${stratTag} ${t.side || '?'} @ ${((t.entryPrice || t.price || 0) * 100).toFixed(0)}%\n\n`;
     }
     if (trades.length > 5) text += `_…and ${trades.length - 5} more_`;
     await sendTo(user.chatId, text);
@@ -915,11 +928,18 @@ async function pushResolutionSignal(resolutions) {
     const sig = user.signals || {};
     if (!sig.resolution) continue;
 
-    let text = `🏁 *Market Resolved* — ${resolutions.length} market${resolutions.length > 1 ? 's' : ''}\n\n`;
+    // Group resolutions by strategy for header
+    const rStratCounts = {};
+    for (const r of resolutions) { const s = r.strategy || 'UNKNOWN'; rStratCounts[s] = (rStratCounts[s] || 0) + 1; }
+    const rStratSummary = Object.entries(rStratCounts).map(([s, n]) => `${n}× ${s}`).join(', ');
+
+    let text = `🏁 *Resolved* — ${resolutions.length} market${resolutions.length > 1 ? 's' : ''} (${rStratSummary})\n\n`;
     for (const r of resolutions.slice(0, 5)) {
       const icon = r.pnl > 0 ? '✅' : r.pnl < 0 ? '❌' : '⚪';
+      const stratTag = (r.strategy || '?').toUpperCase();
+      const sideTag = r.side ? ` ${r.side.toUpperCase()}` : '';
       text += `${icon} *${truncate(r.question || r.market || 'Unknown', 45)}*\n`;
-      text += `   Result: ${r.outcome || r.result || '?'}`;
+      text += `   ${stratTag}${sideTag} → ${r.outcome || r.result || '?'}`;
       if (r.pnl != null) text += ` | P&L: ${r.pnl >= 0 ? '+' : ''}$${r.pnl.toFixed(2)}`;
       text += `\n\n`;
     }
@@ -941,12 +961,18 @@ async function pushOpportunitySignal(opportunities) {
     const filtered = opportunities.filter(o => (o.score || 0) >= 50).slice(0, 5);
     if (filtered.length === 0) continue;
 
-    let text = `⚡ *Opportunity Signal* — ${filtered.length} found\n\n`;
+    // Group opportunities by strategy for header
+    const oStratCounts = {};
+    for (const o of filtered) { const s = o.strategy || 'AUTO'; oStratCounts[s] = (oStratCounts[s] || 0) + 1; }
+    const oStratSummary = Object.entries(oStratCounts).map(([s, n]) => `${n}× ${s}`).join(', ');
+
+    let text = `⚡ *Opportunity* — ${filtered.length} found (${oStratSummary})\n\n`;
     for (const o of filtered) {
       const conf = o.confidence === 'HIGH' ? '🟢' : o.confidence === 'MEDIUM' ? '🟡' : '⚪';
+      const stratTag = (o.strategy || '?').toUpperCase();
       text += `${conf} *${truncate(o.question || o.market || 'Unknown', 45)}*\n`;
-      text += `   Score: ${o.score || 0} | Edge: ${((o.edge || 0) * 100).toFixed(1)}%\n`;
-      text += `   ${o.strategy || ''} | ${o.side || '?'} @ ${((o.price || 0) * 100).toFixed(0)}%\n\n`;
+      text += `   ${stratTag} | Score: ${o.score || 0} | Edge: ${((o.edge || 0) * 100).toFixed(1)}%\n`;
+      text += `   ${o.side || '?'} @ ${((o.price || 0) * 100).toFixed(0)}%\n\n`;
     }
     await sendTo(user.chatId, text);
   }

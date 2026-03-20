@@ -25,6 +25,10 @@ const log = require('../utils/logger');
 const fees = require('../engine/fees');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
+
+// Mutable config — paramApplicator can override these at startup
+const CONF = () => config.strategies?.provenEdge || {};
 
 let oddsApi = null;
 try {
@@ -235,9 +239,10 @@ function findBookmakerEdges(markets) {
     // STRICT requirements — only trade when we're very confident
     // With 15+ bookmakers, we can be confident with 4% divergence
     // With fewer, require 5%+
-    const minDivergence = bookmakerCount >= 15 ? 0.04 : 0.05;
+    const baseMinDiv = CONF().minDivergence || 0.05;
+    const minDivergence = bookmakerCount >= 15 ? Math.max(0.04, baseMinDiv - 0.01) : baseMinDiv;
     if (absDivergence < minDivergence) continue;
-    if (bookmakerCount < 6) continue;        // Need 6+ bookmakers
+    if (bookmakerCount < (CONF().minBookmakers || 6)) continue;        // Need 6+ bookmakers
     
     // Pinnacle confirmation (sharpest book in the world)
     // If Pinnacle disagrees with the consensus direction, skip
@@ -259,7 +264,7 @@ function findBookmakerEdges(markets) {
 
     // Kelly sizing: quarter-Kelly with external probability
     const kellySize = fees.feeAdjustedKelly(
-      externalProb, entryPrice, 1000, 0.03, market.liquidity, 0.25
+      externalProb, entryPrice, 1000, CONF().maxExposurePct || 0.03, market.liquidity, CONF().kellyFraction || 0.25
     );
     if (kellySize < 5) continue;
 
@@ -355,6 +360,7 @@ function findBookmakerEdges(markets) {
       confidence: netEdge >= 0.05 && bookmakerCount >= 15 ? 'HIGH' : 'MEDIUM',
       riskLevel: netEdge >= 0.05 && bookmakerCount >= 15 ? 'LOW' : 'MEDIUM',
       riskNote: `${bookmakerCount} sportsbooks consensus: ${(bm.consensusProb * 100).toFixed(1)}% vs Polymarket ${(market.yesPrice * 100).toFixed(1)}%. ${side} at ${(entryPrice * 100).toFixed(0)}¢ for ${(netEdge * 100).toFixed(1)}% net edge. ${clvSignal ? '✓ CLV confirmed' : '⏳ CLV pending'}`,
+      endDate: market.endDate || null,
     });
   }
 

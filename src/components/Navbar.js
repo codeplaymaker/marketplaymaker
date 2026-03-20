@@ -180,6 +180,7 @@ const MobileMenu = styled.div`
 const NAV_LINKS = [
   { to: '/', label: 'Home', auth: false },
   { to: '/polymarket', label: 'Polymarket Bot', auth: true, adminOnly: true },
+  { to: '/mirofish', label: 'MiroFish Lab', auth: true, adminOnly: true },
   { to: '/track-record', label: 'Track Record', auth: false },
   { to: '/playbook', label: 'Playbook', auth: false },
   { to: '/ict-alerts', label: 'ICT Alerts', auth: true },

@@ -29,6 +29,10 @@ let culturalEvents = null;
 try { youtubeTracker = require('./youtubeTracker'); } catch { /* optional */ }
 try { twitterTracker = require('./twitterTracker'); } catch { /* optional */ }
 try { culturalEvents = require('./culturalEvents'); } catch { /* optional */ }
+
+// MiroFish multi-agent simulation signal
+let miroFishSignal = null;
+try { miroFishSignal = require('../mirofish/signal'); } catch { /* optional */ }
 const { crossPlatformLikelihood } = require('./searchUtils');
 const log = require('../utils/logger');
 const fs = require('fs');
@@ -51,6 +55,7 @@ const SOURCE_WEIGHTS = {
   expert:    { weight: 0.18, label: 'Manifold Markets' },
   kalshi:    { weight: 0.18, label: 'Kalshi Cross-Reference' },
   llm:       { weight: 0.15, label: 'LLM Analysis' },
+  mirofish:  { weight: 0.32, label: 'MiroFish Agent Simulation' },
 };
 
 // History of signals for tracking accuracy over time
@@ -354,6 +359,30 @@ async function getIndependentSignal(market, options = {}) {
     );
   }
 
+  // MiroFish multi-agent simulation — cached results from pre-simulated markets
+  if (miroFishSignal) {
+    tasks.push(
+      miroFishSignal.getMiroFishSignal(market)
+        .then(r => {
+          if (r?.prob != null) {
+            results.mirofish = {
+              prob: r.prob,
+              confidence: r.confidence || 'MEDIUM',
+              sources: ['MiroFish Agent Simulation'],
+              detail: r.detail,
+              cached: r.cached || false,
+              matchQuality: r.matchQuality ?? 0.85,
+              matchValidated: r.matchValidated ?? true,
+              category: r.category,
+              methodCount: r.methodCount,
+              reasoning: r.reasoning,
+            };
+          }
+        })
+        .catch(err => log.warn('INDSIG', `MiroFish signal failed: ${err.message}`))
+    );
+  }
+
   await Promise.allSettled(tasks);
 
   // ─── 2. Compute weighted consensus ───────────────────────────────
@@ -441,7 +470,7 @@ async function getIndependentSignal(market, options = {}) {
   let edgeQuality = 0;
 
   // Data source quality tiers
-  const HARD_DATA_SOURCES = ['bookmaker', 'crypto', 'espn', 'stock', 'youtube', 'twitter']; // Real market data
+  const HARD_DATA_SOURCES = ['bookmaker', 'crypto', 'espn', 'stock', 'youtube', 'twitter', 'mirofish']; // Real market data + simulation
   const VALIDATED_SOURCES = ['polling', 'expert', 'kalshi']; // Cross-platform matches
   const SOFT_SOURCES = ['llm']; // AI analysis
 
@@ -755,6 +784,7 @@ function getStatus() {
     youtube: youtubeTracker ? youtubeTracker.getStatus() : { available: false },
     twitter: twitterTracker ? twitterTracker.getStatus() : { available: false },
     culturalEvents: culturalEvents ? culturalEvents.getStatus() : { available: false },
+    mirofish: miroFishSignal ? miroFishSignal.getStatus() : { available: false },
     history: {
       total: signalHistory.length,
       last24h: signalHistory.filter(s => Date.now() - s.timestamp < 86400000).length,
@@ -824,4 +854,5 @@ module.exports = {
   youtube: youtubeTracker,
   twitter: twitterTracker,
   culturalEvents,
+  mirofish: miroFishSignal,
 };

@@ -729,5 +729,7 @@ module.exports = {
   runStressTest,
   isDrawdownHalted,
   getDynamicRiskMultiplier,
+  setPeakBankroll: (val) => { peakBankroll = val; saveState(); },
+  getPeakBankroll: () => peakBankroll,
   reset,
 };

@@ -8,6 +8,7 @@ import TwitterTab from './polymarket/TwitterTab';
 import YouTubeTab from './polymarket/YouTubeTab';
 import MarketsTab from './polymarket/MarketsTab';
 import AlphaTab from './polymarket/AlphaTab';
+import PnLTab from './polymarket/PnLTab';
 import useSSE from '../hooks/useSSE';
 import useSocket from '../hooks/useSocket';
 
@@ -971,9 +972,10 @@ const Polymarket = () => {
 
         {/* Navigation Tabs */}
         <TabBar>
-          {['overview', 'signals', 'picks', 'markets', 'watchlist', 'alerts', 'sources', 'twitter', 'youtube', 'trades', 'analytics', 'alpha'].map((tab) => (
+          {['overview', 'pnl', 'signals', 'picks', 'markets', 'watchlist', 'alerts', 'sources', 'twitter', 'youtube', 'trades', 'analytics', 'alpha'].map((tab) => (
             <Tab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
               {tab === 'overview' && '📊 '}
+              {tab === 'pnl' && '💰 '}
               {tab === 'signals' && '🎯 '}
               {tab === 'picks' && '🏆 '}
               {tab === 'markets' && '🌐 '}
@@ -989,6 +991,11 @@ const Polymarket = () => {
             </Tab>
           ))}
         </TabBar>
+
+        {/* ── PNL TAB ───────────────────────────────────────────── */}
+        {activeTab === 'pnl' && (
+          <PnLTab ctx={{ api }} />
+        )}
 
         {/* ── OVERVIEW TAB ──────────────────────────────────────── */}
         {activeTab === 'overview' && (

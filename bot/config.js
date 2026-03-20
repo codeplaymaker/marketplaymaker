@@ -71,4 +71,29 @@ module.exports = {
     positionCheckMs: 10000,    // Check positions every 10s
     resolutionCheckMs: 60000,  // Check for market resolutions every 60s
   },
+
+  // MiroFish multi-agent simulation engine
+  mirofish: {
+    enabled: !!process.env.MIROFISH_URL,
+    baseUrl: process.env.MIROFISH_URL || 'http://localhost:5001',
+    maxSimulationsPerBatch: 2,     // Max markets to simulate per scan cycle
+    maxQueueSize: 10,              // Max markets in simulation queue
+    batchCooldownMs: 30 * 60000,   // 30 min between batch runs
+    simTimeoutMs: 10 * 60000,      // 10 min max per simulation
+    categories: ['geopolitics', 'politics', 'regulation', 'economics', 'tech', 'science'],
+
+    // Strategy Lab — self-testing, LLM suggestions, evolutionary optimization
+    strategyLab: {
+      enabled: true,                 // Enable periodic strategy self-testing
+      intervalHours: 24,             // Run strategy lab every N hours
+      scenariosPerTest: 5,           // Number of scenarios per strategy test
+      runsPerScenario: 3,            // Monte Carlo runs per scenario
+      evolutionPopulation: 15,       // Population size for evolutionary parameter search
+      evolutionGenerations: 8,       // Generations per evolution cycle
+      llmProvider: process.env.LLM_PROVIDER || 'openai',
+      llmModel: process.env.LLM_MODEL || 'gpt-4o-mini',
+      autoApplyEvolved: true,        // Auto-apply evolved params at startup if fitness > threshold
+      minFitnessThreshold: 10,       // Minimum fitness score to accept evolved params
+    },
+  },
 };

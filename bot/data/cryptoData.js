@@ -306,8 +306,6 @@ async function getCryptoSignal(market) {
   // ─── Handle "Up or Down" markets ────────────────────────────────
   if (parsed.type === 'UP_OR_DOWN') {
     // "Up or Down" = will price be higher than now at deadline?
-    // Use current price as the target (direction = ABOVE = "Up")
-    // Short-term crypto direction uses momentum + vol model
     const targetPrice = coinData.currentPrice;
     const prob = calculateProbability(
       coinData.currentPrice,
@@ -321,7 +319,7 @@ async function getCryptoSignal(market) {
     // For very short-term (< 1 day), momentum is more predictive
     let adjustedProb = prob;
     if (daysToDeadline < 1) {
-      // Intraday: heavily weight recent momentum
+      // Intraday: blend momentum with model
       const momentum = coinData.change24h > 0 ? 0.55 : 0.45;
       adjustedProb = prob * 0.3 + momentum * 0.7;
     } else if (daysToDeadline < 3) {
@@ -330,18 +328,34 @@ async function getCryptoSignal(market) {
       adjustedProb = prob * 0.6 + momentum * 0.4;
     }
 
-    adjustedProb = Math.max(0.05, Math.min(0.95, adjustedProb));
+    // ★ Market efficiency discount: pull our estimate toward 50% (the market prior)
+    // Short-term BTC direction is nearly random — our model has limited edge.
+    // The further our probability is from 50%, the more we should be skeptical.
+    const marketEfficiencyWeight = daysToDeadline < 0.5 ? 0.60 : daysToDeadline < 1 ? 0.50 : 0.35;
+    adjustedProb = adjustedProb * (1 - marketEfficiencyWeight) + 0.50 * marketEfficiencyWeight;
+
+    // ★ Volatility regime penalty: in high-vol regimes, direction is less predictable
+    if (coinData.annualizedVol > 0.80) {
+      adjustedProb = adjustedProb * 0.7 + 0.5 * 0.3;
+    } else if (coinData.annualizedVol > 0.60) {
+      adjustedProb = adjustedProb * 0.85 + 0.5 * 0.15;
+    }
+
+    adjustedProb = Math.max(0.15, Math.min(0.85, adjustedProb));
+
+    // Confidence is lower for Up/Down since it's nearly a coin flip
+    const confLevel = daysToDeadline <= 0.5 ? 'LOW' : daysToDeadline <= 1 ? 'MEDIUM' : 'LOW';
 
     const trendEmoji = coinData.change24h > 0 ? '📈' : '📉';
     const changePct = (coinData.change24h || 0).toFixed(1);
 
     return {
       prob: Math.round(adjustedProb * 1000) / 1000,
-      confidence: daysToDeadline <= 1 ? 'HIGH' : 'MEDIUM',
+      confidence: confLevel,
       source: 'Crypto Market Data',
-      matchQuality: 0.85, // Slightly lower for up/down vs specific price target
+      matchQuality: 0.70, // Lower quality for Up/Down — limited edge over the market
       matchValidated: true,
-      detail: `${parsed.coin.toUpperCase()} $${coinData.currentPrice.toLocaleString()} ${trendEmoji} ${changePct}% 24h, ${daysToDeadline < 1 ? (daysToDeadline * 24).toFixed(0) + 'h' : daysToDeadline.toFixed(0) + 'd'} remaining`,
+      detail: `${parsed.coin.toUpperCase()} $${coinData.currentPrice.toLocaleString()} ${trendEmoji} ${changePct}% 24h, ${daysToDeadline < 1 ? (daysToDeadline * 24).toFixed(0) + 'h' : daysToDeadline.toFixed(0) + 'd'} remaining, vol: ${(coinData.annualizedVol * 100).toFixed(0)}%`,
       currentPrice: coinData.currentPrice,
       targetPrice: coinData.currentPrice,
       direction: 'ABOVE',
@@ -353,7 +367,7 @@ async function getCryptoSignal(market) {
   }
 
   // ─── Handle price target markets ────────────────────────────────
-  const prob = calculateProbability(
+  let prob = calculateProbability(
     coinData.currentPrice,
     parsed.targetPrice,
     parsed.direction,
@@ -361,6 +375,19 @@ async function getCryptoSignal(market) {
     coinData.dailyVolatility,
     coinData.meanDailyReturn
   );
+
+  // ★ Market efficiency discount for price targets too
+  // If our model says 95% but market says 82%, the market usually knows something.
+  // Pull extreme probabilities toward the center to reduce false confidence.
+  if (prob > 0.90) prob = 0.90 + (prob - 0.90) * 0.5; // Halve the excess above 90%
+  if (prob < 0.10) prob = 0.10 - (0.10 - prob) * 0.5; // Halve the excess below 10%
+
+  // ★ Time-to-expiry scaling: more time = more uncertainty
+  // For markets > 14 days out, compress probability toward 50%
+  if (daysToDeadline > 14) {
+    const compressionFactor = Math.min(0.25, (daysToDeadline - 14) / 120);
+    prob = prob * (1 - compressionFactor) + 0.5 * compressionFactor;
+  }
 
   const pctFromTarget = ((parsed.targetPrice - coinData.currentPrice) / coinData.currentPrice * 100).toFixed(1);
   const volPct = (coinData.annualizedVol * 100).toFixed(0);

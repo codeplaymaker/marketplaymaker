@@ -36,6 +36,7 @@ const WebSocket = require('ws');
 const log = require('./utils/logger');
 const client = require('./polymarket/client');
 const userStore = require('./userStore');
+const ictEngine = require('./engine/ictEngine');
 const fs = require('fs');
 const path = require('path');
 
@@ -61,9 +62,9 @@ const CFG = {
   rocPeriod: 5,
 
   // Signal thresholds
-  signalThreshold: 35,          // |score| ≥ 35 = tradeable
-  strongSignalThreshold: 55,    // |score| ≥ 55 = strong
-  minConfidence: 0.55,          // 55%+ directional confidence
+  signalThreshold: 45,          // |score| ≥ 45 = tradeable — raised from 35
+  strongSignalThreshold: 65,    // |score| ≥ 65 = strong — raised from 55
+  minConfidence: 0.62,          // 62%+ directional confidence — raised from 55%
 
   // Trade flow
   flowWindowMs: 60000,          // 1-minute rolling window for buy/sell ratio
@@ -74,12 +75,19 @@ const CFG = {
   marketPollFastMs: 10000,      // 10s when we expect a market soon
 
   // Trading
-  maxTradeSize: 100,            // Max $100 per trade
-  kellyFraction: 0.15,          // 15% Kelly (aggressive for short-term)
+  maxTradeSize: 50,             // Max $50 per trade — reduced from $100
+  kellyFraction: 0.10,          // 10% Kelly (more conservative) — reduced from 15%
   bankroll: 1000,
-  maxDailyLoss: 50,             // Stop after $50 daily loss
-  maxDailyTrades: 20,           // Max 20 trades per day
-  cooldownMs: 30000,            // 30s between trades on same market
+  maxDailyLoss: 25,             // Stop after $25 daily loss — reduced from $50
+  maxDailyTrades: 10,           // Max 10 trades per day — reduced from 20
+  cooldownMs: 60000,            // 60s between trades on same market — raised from 30s
+
+  // Safety guards
+  minMinutesToExpiry: 5,        // Don't trade markets expiring within 5 minutes
+  minPrice: 0.08,               // Reject if entry price < 8 cents (market decided)
+  maxPrice: 0.92,               // Reject if entry price > 92 cents (market decided)
+  minRawEdge: 0.04,             // Need 4% raw edge minimum — raised from 2%
+  minNetEdge: 0.02,             // Need 2% net edge minimum — raised from 1%
 
   // State
   stateFile: path.join(__dirname, 'logs', 'btc-sniper-state.json'),
@@ -137,6 +145,9 @@ let currentSignal = {
   reasons: [],
   updatedAt: null,
 };
+
+// ICT analysis state (updated every 1m candle close)
+let lastIctAnalysis = null;
 
 // Active Polymarket "Up or Down" markets
 let activeMarkets = [];          // Current BTC Up/Down markets
@@ -574,15 +585,41 @@ function generateSignal() {
     : score < -CFG.signalThreshold ? 'DOWN'
     : 'NEUTRAL';
 
-  // Confidence: map |score| to 0.5-0.95 range
-  const confidence = 0.5 + (absScore / 100) * 0.45;
+  // ★ DEFLATED confidence curve — old curve was too generous
+  // Old: 0.5 + (absScore/100)*0.45 → score 45 = 70% confidence (too high!)
+  // New: 0.5 + (absScore/100)*0.30 → score 45 = 63.5%, score 65 = 69.5%
+  // Only scores 80+ reach 74%, preventing overconfident edge calculations
+  const confidence = 0.5 + (absScore / 100) * 0.30;
+
+  // ★ REQUIRE INDICATOR AGREEMENT — at least 3 indicators must align
+  // Count how many indicators agree with the direction
+  let agreeingIndicators = 0;
+  if (direction === 'UP') {
+    if (rsi > 50) agreeingIndicators++;
+    if (indicators.emaCross === 'BULLISH') agreeingIndicators++;
+    if (indicators.buyRatio > 0.52) agreeingIndicators++;
+    if (indicators.vwapDev > 0) agreeingIndicators++;
+    if (indicators.roc > 0) agreeingIndicators++;
+  } else if (direction === 'DOWN') {
+    if (rsi < 50) agreeingIndicators++;
+    if (indicators.emaCross === 'BEARISH') agreeingIndicators++;
+    if (indicators.buyRatio < 0.48) agreeingIndicators++;
+    if (indicators.vwapDev < 0) agreeingIndicators++;
+    if (indicators.roc < 0) agreeingIndicators++;
+  }
+  // If fewer than 3/5 indicators agree, downgrade to NEUTRAL
+  const effectiveDirection = (direction !== 'NEUTRAL' && agreeingIndicators < 3) ? 'NEUTRAL' : direction;
+  if (direction !== 'NEUTRAL' && effectiveDirection === 'NEUTRAL') {
+    reasons.push(`Only ${agreeingIndicators}/5 indicators agree — downgraded to NEUTRAL`);
+  }
 
   currentSignal = {
-    direction,
+    direction: effectiveDirection,
     score: Math.round(score * 10) / 10,
     confidence: Math.round(confidence * 1000) / 1000,
     reasons,
     strength: absScore >= CFG.strongSignalThreshold ? 'STRONG' : absScore >= CFG.signalThreshold ? 'MODERATE' : 'WEAK',
+    agreeingIndicators,
     updatedAt: new Date().toISOString(),
     price: lastPrice,
     indicators: { ...indicators },
@@ -600,14 +637,66 @@ function onCandleClose1m() {
   updateIndicators();
   const signal = generateSignal();
 
-  // Log meaningful signals
-  if (signal.direction !== 'NEUTRAL') {
-    const emoji = signal.direction === 'UP' ? '🟢' : '🔴';
-    log.info('SNIPER', `${emoji} Signal: ${signal.direction} (${signal.score}) @ $${lastPrice?.toLocaleString()} | ${signal.reasons.join(' | ')}`);
+  // ─── ICT Confluence Filter ──────────────────────────────────────
+  // Run ICT analysis on 1m candles when we have enough data (≥30)
+  if (candles1m.length >= 30) {
+    try {
+      // Map btcSniper candle format to ICT engine format (ts → time)
+      const ictCandles = candles1m.map(c => ({
+        open: c.open, high: c.high, low: c.low, close: c.close,
+        volume: c.volume, time: c.ts,
+      }));
+      lastIctAnalysis = ictEngine.analyze(ictCandles, { symbol: 'BTCUSDT', timeframe: '1m' });
+    } catch (err) {
+      log.warn('SNIPER', `ICT analysis error: ${err.message}`);
+      lastIctAnalysis = null;
+    }
   }
 
-  // Check if we should trade
+  // ★ BLOCK TRADES DURING WARMUP — need ICT data before trading
+  if (!lastIctAnalysis) {
+    if (signal.direction !== 'NEUTRAL' && candles1m.length < 30) {
+      log.info('SNIPER', `⏳ Warming up: ${candles1m.length}/30 candles — signal ${signal.direction} (${signal.score}) blocked until ICT ready`);
+    }
+    return; // Never trade without ICT confluence data
+  }
+
+  // Log meaningful signals
+  if (signal.direction !== 'NEUTRAL') {
+    const ictTag = lastIctAnalysis ? ` | ICT: ${lastIctAnalysis.confluence?.score || 0}/7 ${lastIctAnalysis.alertLevel}` : '';
+    const emoji = signal.direction === 'UP' ? '🟢' : '🔴';
+    log.info('SNIPER', `${emoji} Signal: ${signal.direction} (${signal.score}) @ $${lastPrice?.toLocaleString()} | ${signal.reasons.join(' | ')}${ictTag}`);
+  }
+
+  // Check if we should trade — require ICT confluence ≥ 4 (HIGH) for trade execution
   if (signal.direction !== 'NEUTRAL' && activeMarkets.length > 0) {
+    const ictScore = lastIctAnalysis?.confluence?.score || 0;
+    const ictBias = lastIctAnalysis?.bias || 'NEUTRAL';
+
+    // Gate: need ICT confluence ≥ 4 for HIGH alert
+    if (ictScore < 4) {
+      if (ictScore >= 2) {
+        log.info('SNIPER', `⏳ Signal blocked by ICT filter: confluence ${ictScore}/7 (need ≥4). Bias: ${ictBias}`);
+      }
+      return; // Not enough ICT confluence — skip trade
+    }
+
+    // Bonus: check ICT bias alignment with signal direction
+    const biasAligned = (signal.direction === 'UP' && ictBias === 'BULLISH') ||
+                        (signal.direction === 'DOWN' && ictBias === 'BEARISH');
+
+    if (!biasAligned && ictBias !== 'NEUTRAL') {
+      log.info('SNIPER', `⚠️ ICT bias (${ictBias}) conflicts with signal (${signal.direction}) — skipping`);
+      return; // ICT structure disagrees with signal direction
+    }
+
+    // ★ EXTRA: Require signal confidence above minimum
+    if (signal.confidence < CFG.minConfidence) {
+      log.info('SNIPER', `⚠️ Signal confidence ${(signal.confidence * 100).toFixed(0)}% below min ${(CFG.minConfidence * 100).toFixed(0)}% — skipping`);
+      return;
+    }
+
+    log.info('SNIPER', `✅ ICT confluence ${ictScore}/7 + bias ${ictBias} aligned — executing`);
     tryExecute(signal);
   }
 }
@@ -638,12 +727,20 @@ async function pollMarkets() {
       // Only markets that haven't expired yet
       if (end <= Date.now()) continue;
 
+      // ★ SAFETY: Skip markets too close to expiry
+      const minsLeft = (end - Date.now()) / 60000;
+      if (minsLeft < (CFG.minMinutesToExpiry || 5)) continue;
+
       const outcomePrices = m.outcomePrices ? JSON.parse(m.outcomePrices) : [];
       const tokenIds = m.clobTokenIds ? JSON.parse(m.clobTokenIds) : [];
       const outcomes = m.outcomes ? JSON.parse(m.outcomes) : ['Up', 'Down'];
 
       const upPrice = parseFloat(outcomePrices[0] || 0.5);
       const downPrice = parseFloat(outcomePrices[1] || 0.5);
+
+      // ★ SAFETY: Skip markets where prices indicate already decided
+      if (upPrice < (CFG.minPrice || 0.08) && downPrice < (CFG.minPrice || 0.08)) continue;
+      if (upPrice > (CFG.maxPrice || 0.92) && downPrice > (CFG.maxPrice || 0.92)) continue;
 
       newMarkets.push({
         question: m.question,
@@ -689,9 +786,11 @@ async function pollMarkets() {
           ].join('\n'));
         }
 
-        // Auto-execute if we have a signal
-        if (currentSignal.direction !== 'NEUTRAL') {
+        // Auto-execute if we have a signal AND ICT analysis is ready
+        if (currentSignal.direction !== 'NEUTRAL' && lastIctAnalysis) {
           tryExecute(currentSignal, nm);
+        } else if (!lastIctAnalysis) {
+          log.info('SNIPER', `⏳ New market detected but ICT not ready — will trade on next candle close`);
         }
       }
     }
@@ -733,13 +832,30 @@ async function tryExecute(signal, specificMarket = null) {
     // Skip if no time left
     if (market.minutesLeft < 0.5) continue;
 
+    // ★ CRITICAL: Skip expired markets (endDate already passed)
+    const endTime = market.endDate ? new Date(market.endDate).getTime() : 0;
+    if (endTime > 0 && endTime <= Date.now()) {
+      continue; // Market already ended — DO NOT TRADE
+    }
+
+    // ★ CRITICAL: Skip near-expiry markets
+    if (market.minutesLeft < (CFG.minMinutesToExpiry || 5)) {
+      continue; // Too close to expiry
+    }
+
     // Skip if already have position in this market
     if (positions.some(p => p.conditionId === market.conditionId)) continue;
 
     // Skip if price too far from 50/50 (market already decided)
     const maxPrice = Math.max(market.upPrice, market.downPrice);
-    if (maxPrice > 0.85) {
+    if (maxPrice > (CFG.maxPrice || 0.92)) {
       continue; // Market already strongly priced — no edge
+    }
+
+    // ★ CRITICAL: Skip extreme low prices (market already resolved/decided)
+    const minPrice = Math.min(market.upPrice, market.downPrice);
+    if (minPrice < (CFG.minPrice || 0.08) && maxPrice < (CFG.minPrice || 0.08)) {
+      continue; // Both sides near-zero — broken or already resolved
     }
 
     // ─── Edge calculation ─────────────────────────────────────
@@ -752,15 +868,20 @@ async function tryExecute(signal, specificMarket = null) {
 
     const rawEdge = ourProb - marketPrice;
 
-    // Need positive edge
-    if (rawEdge < 0.02) continue;  // At least 2% raw edge
+    // ★ SAFETY: Reject extreme entry prices (market already decided)
+    if (marketPrice < (CFG.minPrice || 0.08) || marketPrice > (CFG.maxPrice || 0.92)) {
+      continue; // Price indicates market is already decided
+    }
+
+    // Need positive edge — use configurable thresholds
+    if (rawEdge < (CFG.minRawEdge || 0.04)) continue;  // At least 4% raw edge
 
     // Net edge after fees
     const feeEstimate = marketPrice * 0.02; // 2% fee rate
     const slippageEstimate = 0.005;         // 0.5% typical
     const netEdge = rawEdge - feeEstimate - slippageEstimate;
 
-    if (netEdge < 0.01) continue; // Need 1% net edge minimum
+    if (netEdge < (CFG.minNetEdge || 0.02)) continue; // Need 2% net edge minimum
 
     // ─── Kelly sizing ─────────────────────────────────────────
     const b = (1 / marketPrice) - 1;
@@ -771,7 +892,7 @@ async function tryExecute(signal, specificMarket = null) {
     const tradeSize = Math.min(
       CFG.maxTradeSize,
       CFG.bankroll * kelly,
-      CFG.bankroll * 0.10  // Hard cap 10% per trade
+      CFG.bankroll * 0.05  // Hard cap 5% per trade — reduced from 10%
     );
 
     if (tradeSize < 2) continue;
@@ -820,6 +941,32 @@ async function tryExecute(signal, specificMarket = null) {
     dailyTrades++;
     stats.totalTrades++;
     saveState();
+
+    // ─── Route to Paper Trader for unified tracking ──────────────
+    try {
+      const paperTrader = require('./engine/paperTrader');
+      const ptSide = 'YES'; // Buying the directional outcome = YES
+      const ptOpp = {
+        conditionId: market.conditionId,
+        market: market.question,
+        strategy: 'BTC_SNIPER',
+        side: ptSide,
+        score: Math.round(Math.abs(signal.score)),       // 0-100 scale
+        confidence: signal.strength || 'MODERATE',
+        price: marketPrice,
+        yesPrice: marketPrice,
+        noPrice: 1 - marketPrice,
+        positionSize: tradeSize,
+        endDate: market.endDate,
+        edge: rawEdge,
+        netEdge: netEdge,
+        riskLevel: signal.strength === 'STRONG' ? 'LOW' : 'MEDIUM',
+        liquidity: market.liquidity || 50000,
+      };
+      paperTrader.recordScanResults([ptOpp]);
+    } catch (ptErr) {
+      log.warn('SNIPER', `Paper trader bridge failed: ${ptErr.message}`);
+    }
 
     const emoji = side === 'UP' ? '⬆️' : '⬇️';
     log.info('SNIPER', `${emoji} SNIPED: ${side} "${market.question}" | $${tradeSize.toFixed(2)} @ ${(marketPrice * 100).toFixed(1)}¢ | edge: ${(netEdge * 100).toFixed(1)}% | signal: ${signal.score} | ${position.liveStatus}`);
@@ -1232,4 +1379,5 @@ module.exports = {
   getActiveMarkets: () => [...activeMarkets],
   getConfig: () => ({ ...CFG }),
   getPrice: () => lastPrice,
+  getIctAnalysis: () => lastIctAnalysis,
 };

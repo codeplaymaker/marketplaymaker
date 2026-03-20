@@ -850,6 +850,46 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
     });
   }
 
+  // 9. MiroFish Agent Simulation (multi-agent collective intelligence)
+  // Highest alpha for politics/geopolitics/regulation — categories where
+  // bookmakers don't exist and LLM alone is unreliable.
+  // MiroFish simulates real stakeholders interacting on social media,
+  // producing a probability estimate from collective agent behavior.
+  if (independentData?.sources) {
+    const mfSource = independentData.sources.find(s => s.key === 'mirofish');
+    if (mfSource && mfSource.prob != null) {
+      const mfProb = mfSource.prob;
+      const mfDivergence = mfProb - marketProb;
+      const mfLogLR = probToLogOdds(mfProb) - probToLogOdds(marketProb);
+
+      // Category-dependent weight — MiroFish excels at political/geopolitical markets
+      const mfCategories = { geopolitics: 0.55, politics: 0.50, regulation: 0.40, economics: 0.35 };
+      const mfCatWeight = mfCategories[cat.category] || 0.20;
+
+      const mfConfMultiplier =
+        mfSource.confidence === 'HIGH' ? 1.0 :
+        mfSource.confidence === 'MEDIUM' ? 0.7 : 0.4;
+
+      const mfWeight = getSignalWeight('MiroFish', mfCatWeight) * mfConfMultiplier;
+      const scaledLR = mfLogLR * mfWeight;
+      totalLogLR += scaledLR;
+      signals.push({
+        name: 'MiroFish',
+        adjustment: r4(mfDivergence),
+        logLR: r4(mfLogLR),
+        weight: r4(mfWeight),
+        scaledLR: r4(scaledLR),
+        data: {
+          simulationProb: mfProb,
+          divergence: r4(mfDivergence),
+          confidence: mfSource.confidence,
+          category: cat.category,
+          methodCount: mfSource.methodCount,
+        },
+      });
+    }
+  }
+
   // ─── Market efficiency damping ───
   // In highly efficient markets, scale down ALL signal contributions
   const volEff = volumeEfficiency(market.volume24hr, market.liquidity);
@@ -870,10 +910,12 @@ function estimateProbability(market, orderbook = null, priceHistory = null, book
 
   // ─── HARD CAP: Prevent wild deviations from market price ───
   // The market is RIGHT much more often than our model.
-  // Without EXTERNAL confirmation (bookmaker), cap deviation at ±3%.
-  // With bookmaker consensus, allow up to ±12%.
+  // Without EXTERNAL confirmation (bookmaker, MiroFish), cap deviation at ±3%.
+  // With bookmaker consensus or MiroFish simulation, allow up to ±12%.
+  const hasMiroFish = independentData?.sources?.some(s => s.key === 'mirofish' && s.prob != null);
   const hasExternalSignal = (bookmakerData && bookmakerData.bookmakerCount >= 5)
-    || (independentData && independentData.sourceCount >= 2);
+    || (independentData && independentData.sourceCount >= 2)
+    || hasMiroFish;
   const maxDeviation = hasExternalSignal ? 0.12 : 0.03;
   const deviation = estimatedProb - marketProb;
   if (Math.abs(deviation) > maxDeviation) {

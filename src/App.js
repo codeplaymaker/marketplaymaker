@@ -24,6 +24,7 @@ const TrackRecord = lazy(() => import('./components/TrackRecord'));
 const Playbook = lazy(() => import('./components/Playbook'));
 const ICTAlerts = lazy(() => import('./components/ICTAlerts'));
 const PurchasePage = lazy(() => import('./components/PurchasePage'));
+const MiroFishLab = lazy(() => import('./components/MiroFishLab'));
 
 function App() {
   return (
@@ -89,6 +90,11 @@ function App() {
                   <Route path="/polymarket" element={
                     <ProtectedRoute subscribedOnly>
                       <Polymarket />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/mirofish" element={
+                    <ProtectedRoute adminOnly={true}>
+                      <MiroFishLab />
                     </ProtectedRoute>
                   } />
                   <Route path="/purchase" element={

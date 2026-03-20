@@ -168,6 +168,7 @@ function findOpportunities(allMarkets, bankroll = 1000) {
       whale,
       volume24h,
       liquidity,
+      endDate: market.endDate || null,
     });
   }
 

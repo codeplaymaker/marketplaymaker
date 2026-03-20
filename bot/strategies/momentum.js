@@ -17,8 +17,12 @@
 
 const log = require('../utils/logger');
 const { estimateSlippage, feeAdjustedEV } = require('../engine/fees');
+const config = require('../config');
 
 const STRATEGY_NAME = 'MOMENTUM';
+
+// Mutable config — paramApplicator can override these at startup
+const CONF = () => config.strategies?.momentum || {};
 
 // ─── Price History ───────────────────────────────────────────────────
 const priceHistory = new Map(); // conditionId → [{price, volume, timestamp}]
@@ -73,8 +77,8 @@ function analyzeMomentum(conditionId) {
   const volumes = history.map(h => h.volume);
 
   // EMA crossover (fast vs slow)
-  const emaFast = ema(prices, 5);
-  const emaSlow = ema(prices, 15);
+  const emaFast = ema(prices, CONF().fastEmaPeriod || 5);
+  const emaSlow = ema(prices, CONF().slowEmaPeriod || 15);
   const emaCrossover = emaFast - emaSlow;
 
   // Rate of change (price acceleration)
@@ -129,7 +133,7 @@ function findOpportunities(allMarkets, bankroll = 1000) {
     const liquidity = parseFloat(market.liquidity || 0);
 
     // Skip thin/extreme markets
-    if (volume24h < 3000 || liquidity < 2000) continue;
+    if (volume24h < (CONF().minVolume || 3000) || liquidity < (CONF().minLiquidity || 2000)) continue;
     if (yesPrice < 0.08 || yesPrice > 0.92) continue;
 
     // Record current price
@@ -141,8 +145,8 @@ function findOpportunities(allMarkets, bankroll = 1000) {
 
     // Need strong momentum signal
     const absStrength = Math.abs(momentum.trendStrength);
-    if (absStrength < 25) continue; // Min threshold
-    if (!momentum.volumeConfirmed && absStrength < 40) continue; // Need volume OR very strong
+    if (absStrength < (CONF().minMomentumThreshold || 25)) continue; // Min threshold
+    if (!momentum.volumeConfirmed && absStrength < (CONF().volumeConfirmThreshold || 40)) continue; // Need volume OR very strong
     if (momentum.isBreakout && absStrength < 20) continue; // Breakouts get lower threshold
 
     // Determine trade direction
@@ -156,9 +160,9 @@ function findOpportunities(allMarkets, bankroll = 1000) {
     if (netEdge <= 0.003) continue;
 
     // Position sizing (conservative: 1.5% Kelly fraction for momentum)
-    const kellyFraction = 0.15;
+    const kellyFraction = CONF().kellyFraction || 0.15;
     const kellySize = bankroll * kellyFraction * rawEdge / Math.max(0.1, 1 - price);
-    const positionSize = Math.min(bankroll * 0.025, Math.max(5, kellySize));
+    const positionSize = Math.min(bankroll * (CONF().maxExposurePct || 0.025), Math.max(5, kellySize));
 
     const score = Math.round(
       absStrength * 0.4 +
@@ -185,6 +189,7 @@ function findOpportunities(allMarkets, bankroll = 1000) {
       momentum,
       volume24h,
       liquidity,
+      endDate: market.endDate || null,
     });
   }
 

@@ -337,6 +337,7 @@ async function findGroupArbitrage(markets) {
       },
       riskLevel,
       riskNote,
+      endDate: group.markets[0]?.endDate || null,
     });
   }
 
