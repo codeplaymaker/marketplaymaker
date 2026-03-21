@@ -81,10 +81,10 @@ function parseCryptoQuestion(question, marketEndDate) {
   // ─── Pattern 1: "Up or Down" directional markets ────────────────
   // "Bitcoin Up or Down on February 17?" or "Ethereum Up or Down - Feb 17, 2PM ET"
   if (/up\s+or\s+down/i.test(q)) {
-    // Extract date from the question
+    // Extract date + time from the question
     let deadline = null;
 
-    // "on February 17" or "February 17, 2PM ET"
+    // "on February 17" or "February 17, 2PM ET" or "March 20, 5PM ET"
     const dateMatch = question.match(
       /(?:on|[-–])\s*(\w+\s+\d{1,2}(?:,?\s*\d{4})?)/i
     );
@@ -94,6 +94,20 @@ function parseCryptoQuestion(question, marketEndDate) {
       if (!/\d{4}/.test(dateStr)) dateStr += ` ${new Date().getFullYear()}`;
       deadline = new Date(dateStr);
       if (isNaN(deadline.getTime())) deadline = null;
+    }
+
+    // Parse hour if present: "5PM ET", "2PM ET", "10AM ET"
+    if (deadline) {
+      const hourMatch = question.match(/(\d{1,2})\s*(AM|PM)\s*ET/i);
+      if (hourMatch) {
+        let hour = parseInt(hourMatch[1]);
+        const isPM = hourMatch[2].toUpperCase() === 'PM';
+        if (isPM && hour < 12) hour += 12;
+        if (!isPM && hour === 12) hour = 0;
+        // ET = UTC-4 (EDT) or UTC-5 (EST). Use -4 for safety (earlier expiry).
+        const utcHour = hour + 4;
+        deadline.setUTCHours(utcHour, 0, 0, 0);
+      }
     }
 
     // For up/down: deadline defaults to today/tomorrow if not parsed

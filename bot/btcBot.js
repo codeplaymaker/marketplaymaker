@@ -221,8 +221,12 @@ async function discoverBtcMarkets() {
     if (volume < CONFIG.minVolume24h) continue;
 
     // ★ CRITICAL: Skip expired or near-expiry markets
-    const endTime = m.endDate ? new Date(m.endDate).getTime() : 0;
+    // Use API endDate first; fall back to deadline parsed from question text
+    const apiEndTime = m.endDate ? new Date(m.endDate).getTime() : 0;
+    const parsedEndTime = parsed.deadline ? new Date(parsed.deadline).getTime() : 0;
+    const endTime = apiEndTime > 0 ? apiEndTime : parsedEndTime;
     if (endTime > 0 && endTime <= Date.now()) {
+      log.debug('BTC-BOT', `SKIP expired: "${m.question}" ended ${((Date.now() - endTime) / 60000).toFixed(0)}min ago`);
       continue; // Market already ended — DO NOT TRADE
     }
     const minTTL = parsed.type === 'UP_OR_DOWN'
@@ -230,6 +234,7 @@ async function discoverBtcMarkets() {
       : CONFIG.minMinutesToExpiry;
     const minutesLeft = endTime > 0 ? (endTime - Date.now()) / 60000 : Infinity;
     if (minutesLeft < minTTL) {
+      log.debug('BTC-BOT', `SKIP near-expiry: "${m.question}" ${minutesLeft.toFixed(0)}min left (min: ${minTTL})`);
       continue; // Too close to expiry — illiquid, prices unreliable
     }
 
@@ -239,6 +244,12 @@ async function discoverBtcMarkets() {
 
     const yesPrice = parseFloat(outcomePrices[0] || 0.5);
     const noPrice = parseFloat(outcomePrices[1] || 0.5);
+
+    // ★ SAFETY: Skip markets with extreme prices — already decided
+    if (yesPrice < CONFIG.minPrice || noPrice < CONFIG.minPrice) {
+      log.debug('BTC-BOT', `SKIP extreme price: "${m.question}" YES=${(yesPrice*100).toFixed(1)}% NO=${(noPrice*100).toFixed(1)}%`);
+      continue;
+    }
 
     btcMarkets.push({
       question: m.question,
@@ -316,8 +327,9 @@ async function analyzeMarket(market) {
   const marketNoPrice = market.noPrice;
 
   // ★ SAFETY: Reject extreme prices — market already decided
-  if (marketYesPrice < CONFIG.minPrice && marketNoPrice < CONFIG.minPrice) return null;
-  if (marketYesPrice > CONFIG.maxPrice && marketNoPrice > CONFIG.maxPrice) return null;
+  // Use || not && — if EITHER side is < 5¢ the market is decided
+  if (marketYesPrice < CONFIG.minPrice || marketNoPrice < CONFIG.minPrice) return null;
+  if (marketYesPrice > CONFIG.maxPrice || marketNoPrice > CONFIG.maxPrice) return null;
 
   // Which side has edge?
   // If model says YES is more likely than market prices → buy YES

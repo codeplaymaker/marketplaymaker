@@ -229,7 +229,27 @@ async function analyzeNewMarket(rawMarket) {
     /\bodd or even\b/i,
     /\bhigher or lower\b/i,
     /\bover\/under\b.*total (rounds|kills|points)/i,
+    /\bo\/u\s+\d/i,                   // "O/U 233.5"
+    /\bspread:\s/i,                    // "Spread: Clippers (-7.5)"
+    /\bmap handicap/i,                 // "Map Handicap: UNO (-1.5)"
   ];
+  // Also skip zero-liquidity markets (untradeable)
+  const rawLiquidity = parseFloat(rawMarket.liquidity || 0);
+  if (rawLiquidity <= 0) {
+    log.debug('NEW_MKT', `Skipping $0 liquidity market: "${question.slice(0, 60)}"`);
+    return {
+      conditionId,
+      question: question.slice(0, 200),
+      slug: rawMarket.slug,
+      category: rawMarket.category || 'unknown',
+      skipped: true,
+      skipReason: 'zero liquidity (untradeable)',
+      signals: {},
+      opportunity: null,
+      score: 0,
+    };
+  }
+
   const isCoinFlip = coinFlipPatterns.some(p => p.test(question));
   if (isCoinFlip) {
     log.debug('NEW_MKT', `Skipping coin-flip market: "${question.slice(0, 60)}"`);

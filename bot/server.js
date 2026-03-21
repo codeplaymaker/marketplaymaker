@@ -922,8 +922,8 @@ server = app.listen(PORT, () => {
             if (executionPipeline && analysis.opportunity) {
               executionPipeline.fromNewMarketDetector(market, analysis);
             }
-            // Telegram alert for high-score new markets
-            if (analysis.score >= 40) {
+            // Telegram alert for high-score new markets (50+ to reduce noise)
+            if (analysis.score >= 50 && !analysis.skipped) {
               const msg = `🆕 *New Market Detected*\n"${analysis.question?.slice(0, 100)}"\nScore: ${analysis.score} | Liq: $${analysis.liquidity?.toFixed(0)}\n${analysis.opportunity ? `⚡ Edge: ${(analysis.opportunity.estimatedEdge * 100).toFixed(1)}% ${analysis.opportunity.side}` : ''}`;
               telegramBot.sendToAll?.(msg)?.catch(() => {});
             }
