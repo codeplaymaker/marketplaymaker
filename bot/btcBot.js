@@ -170,6 +170,42 @@ function loadState() {
   }
 }
 
+/**
+ * Reset state — wipes P&L, trade history, and optionally positions.
+ * Used via API to get a clean slate after strategy changes.
+ */
+function resetState({ keepPositions = false } = {}) {
+  const oldPnL = stats.totalPnL;
+  const oldTrades = tradeHistory.length;
+  const oldPositions = positions.length;
+
+  if (!keepPositions) positions = [];
+  tradeHistory = [];
+  marketCooldowns = new Map();
+  dailyPnL = 0;
+  dailyTrades = 0;
+  lastTradeDay = null;
+  consecutiveLosses = 0;
+  lastConsecutiveLossPause = 0;
+  peakPnL = 0;
+  stats = {
+    totalScans: 0,
+    totalEdgesFound: 0,
+    totalTradesPlaced: 0,
+    totalTradesWon: 0,
+    totalTradesLost: 0,
+    totalPnL: 0,
+    winRate: 0,
+    bestTrade: null,
+    worstTrade: null,
+    startedAt: new Date().toISOString(),
+    lastEdgeAt: null,
+  };
+  saveState();
+  log.info('BTC-BOT', `State reset: P&L $${oldPnL.toFixed(2)}→$0 | ${oldTrades} trades cleared | ${keepPositions ? oldPositions + ' positions kept' : oldPositions + ' positions cleared'}`);
+  return { oldPnL, oldTrades, oldPositions, keepPositions };
+}
+
 // ─── Initialization ──────────────────────────────────────────────────
 
 /**
@@ -1265,6 +1301,7 @@ module.exports = {
   start,
   stop,
   runScan,
+  resetState,
   isRunning: () => running,
 
   // Telegram handlers

@@ -585,6 +585,29 @@ app.get('/api/auth/key', (req, res) => res.json({ key: getKey() }));
 app.post('/api/auth/verify', (req, res) => res.json({ valid: true }));
 app.post('/api/auth/regenerate', (req, res) => res.json({ key: regenerateKey() }));
 
+// BTC Bot management endpoints
+app.post('/api/btc/reset', (req, res) => {
+  try {
+    const keepPositions = req.body?.keepPositions === true;
+    const result = btcBot.resetState({ keepPositions });
+    res.json({ ok: true, message: 'BTC bot state reset', ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+app.get('/api/btc/status', (req, res) => {
+  try {
+    res.json({
+      running: btcBot.isRunning(),
+      positions: btcBot.getPositions(),
+      stats: btcBot.getStats(),
+      tradeHistory: btcBot.getTradeHistory().slice(-20),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // MOUNT ALL ROUTE MODULES
 // ═══════════════════════════════════════════════════════════════════════
