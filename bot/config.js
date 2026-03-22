@@ -93,7 +93,7 @@ module.exports = {
       llmProvider: process.env.LLM_PROVIDER || 'openai',
       llmModel: process.env.LLM_MODEL || 'gpt-4o-mini',
       autoApplyEvolved: true,        // Auto-apply evolved params at startup if fitness > threshold
-      minFitnessThreshold: 10,       // Minimum fitness score to accept evolved params
+      minFitnessThreshold: 25,       // Minimum fitness score to accept evolved params (raised from 10)
     },
   },
 };

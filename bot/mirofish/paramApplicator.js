@@ -19,7 +19,8 @@ const EVOLUTION_DIR = path.join(__dirname, '../logs/mirofish-evolution');
 const APPLIED_LOG = path.join(__dirname, '../logs/mirofish-applied-params.json');
 
 // Minimum fitness score to consider applying (prevents applying bad genomes)
-const MIN_FITNESS_THRESHOLD = 10;
+// Raised from 10 → 25: recent good genomes score 33-73, 10 lets noise through
+const MIN_FITNESS_THRESHOLD = 25;
 
 // ─── Mapping: Genome param names → Strategy config keys ─────────────
 // Each strategy has a map from evolved param names to the config key they override
@@ -97,10 +98,27 @@ function applyToConfig(strategyName, configObj) {
   const overrides = {};
   const params = genome.params || {};
 
+  // Safety: clamp maxExposure to portfolio risk limit (5%)
+  const MAX_SINGLE_MARKET = 0.05;
+  const CLAMPS = {
+    maxExposurePct: MAX_SINGLE_MARKET,
+    maxExposure: MAX_SINGLE_MARKET,
+    kellyFraction: 0.35,       // Max 35% Kelly to prevent over-betting
+    minLiquidity: 15000,       // Don't require more liquidity than most markets have
+    minBookmakers: 15,         // Very few markets have 15+ bookmakers
+    liquidityFilter: 15000,    // Same as minLiquidity
+  };
+
   for (const [genomeName, configKey] of Object.entries(map)) {
     if (params[genomeName] !== undefined) {
       const oldVal = configObj[configKey];
-      const newVal = params[genomeName];
+      let newVal = params[genomeName];
+
+      // Apply safety clamps
+      if (CLAMPS[configKey] !== undefined && newVal > CLAMPS[configKey]) {
+        log.warn('PARAM_APPLY', `${strategyName}.${configKey}: clamped ${newVal.toFixed?.(4) || newVal} → ${CLAMPS[configKey]} (safety limit)`);
+        newVal = CLAMPS[configKey];
+      }
 
       // Only override if the value actually differs
       if (oldVal !== newVal) {
@@ -144,6 +162,7 @@ function applyAll(config) {
   };
   const sportsEdgeDefaults = {
     maxExposure: 0.025, minPriceMove: 0.03, meanReversionWindow: 20,
+    kellyFraction: 0.25, spreadFilter: 0.04,
   };
   if (config.strategies?.noBets) {
     // Delete any evolved-only keys that weren't in original config
