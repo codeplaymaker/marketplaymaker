@@ -269,7 +269,7 @@ const Blog = () => {
       <Section>
         <Heading>Blog</Heading>
         {error ? (
-          <p role="alert" style={{ color: '#d32f2f' }}>{error}</p>
+          <p role="alert" style={{ color: '#f87171' }}>{error}</p>
         ) : loading && blogs.length === 0 ? (
           <p>Loading blog posts...</p>
         ) : blogs.length === 0 ? (

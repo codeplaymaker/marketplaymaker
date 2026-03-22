@@ -131,34 +131,38 @@ const ModernTradingDashboard = ({ userDetails }) => {
     if (userDetails) fetchTrades();
   }, [userDetails, fetchTrades]);
 
+  const darkCard = { background: 'rgba(15,15,25,0.8)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: '12px', color: '#e2e8f0' };
+  const darkBtn = { background: 'linear-gradient(135deg,#6366f1,#818cf8)', color: '#fff', fontWeight: 500, textTransform: 'none', borderRadius: '8px', '&:hover': { opacity: 0.9 } };
+  const outBtn = { borderColor: 'rgba(99,102,241,0.3)', color: '#a5b4fc', textTransform: 'none', borderRadius: '8px', '&:hover': { borderColor: '#6366f1', background: 'rgba(99,102,241,0.1)' } };
+
   return (
-    <Box p={{ xs: 1.5, sm: 2, md: 3 }}>
-      <Typography variant="h4" gutterBottom sx={{ fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' } }}>
+    <Box p={{ xs: 1.5, sm: 2, md: 3 }} sx={{ background: '#0a0a0f', minHeight: '80vh', color: '#e2e8f0' }}>
+      <Typography variant="h4" gutterBottom sx={{ fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' }, fontWeight: 800, background: 'linear-gradient(135deg,#fff,#a5b4fc,#818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
         Trading Dashboard
       </Typography>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 3 }}>
-        <Button variant="contained" onClick={() => setFilteredTrades(trades)}>
+        <Button variant="contained" onClick={() => setFilteredTrades(trades)} sx={darkBtn}>
           All Trades
         </Button>
-        <Button variant="outlined" onClick={() => setFilteredTrades(trades.filter((trade) => trade.profit > 0))}>
+        <Button variant="outlined" onClick={() => setFilteredTrades(trades.filter((trade) => trade.profit > 0))} sx={outBtn}>
           Profitable Trades
         </Button>
-        <Button variant="outlined" onClick={() => setFilteredTrades(trades.filter((trade) => trade.profit <= 0))}>
+        <Button variant="outlined" onClick={() => setFilteredTrades(trades.filter((trade) => trade.profit <= 0))} sx={outBtn}>
           Losses
         </Button>
       </Stack>
 
       {/* Trading Stats Below Dashboard */}
-      <Card sx={{ mb: 4 }}>
+      <Card sx={{ ...darkCard, mb: 4 }}>
         <CardContent>
-          <Typography variant="body1">
-            Balance: <span style={{ color: '#e2e8f0' }}>£{balance.toFixed(2)}</span>
+          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+            Balance: <span style={{ color: '#a5b4fc' }}>£{balance.toFixed(2)}</span>
           </Typography>
-          <Typography variant="body1">
-            Net P&L: <span style={{ color: '#4caf50' }}>£{netPnL.toFixed(2)}</span>
+          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+            Net P&L: <span style={{ color: '#22c55e' }}>£{netPnL.toFixed(2)}</span>
           </Typography>
-          <Typography variant="body1">
+          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
             Profit Factor: {profitFactor.toFixed(2)}
           </Typography>
         </CardContent>
@@ -173,17 +177,17 @@ const ModernTradingDashboard = ({ userDetails }) => {
       ) : (
         <>
           {/* Profit Trend Chart */}
-          <Card sx={{ mb: 4 }}>
+          <Card sx={{ ...darkCard, mb: 4 }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ color: '#e2e8f0' }}>
                 Profit Trend
               </Typography>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <RechartsTooltip />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.1)" />
+                  <XAxis dataKey="name" stroke="#64748b" tick={{ fill: '#64748b' }} />
+                  <YAxis stroke="#64748b" tick={{ fill: '#64748b' }} />
+                  <RechartsTooltip contentStyle={{ background: '#0f0f19', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '8px', color: '#e2e8f0' }} />
                   <Line type="monotone" dataKey="profit" stroke="#4caf50" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
@@ -191,9 +195,9 @@ const ModernTradingDashboard = ({ userDetails }) => {
           </Card>
 
           {/* Trading Calendar */}
-          <Card>
+          <Card sx={darkCard}>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ color: '#e2e8f0' }}>
                 Trading Calendar
               </Typography>
               <Box sx={{ height: { xs: 350, sm: 400, md: 500 } }}>

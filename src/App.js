@@ -29,7 +29,7 @@ const MiroFishLab = lazy(() => import('./components/MiroFishLab'));
 function App() {
   return (
     <HelmetProvider>
-      <ThemeProvider defaultTheme="light" storageKey="marketplaymaker-theme">
+      <ThemeProvider defaultTheme="dark" storageKey="marketplaymaker-theme">
         <ErrorBoundary>
           <AuthProvider>
             <Router>

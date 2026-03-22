@@ -11,32 +11,33 @@ const UploadContainer = styled.div`
 
 const UploadButton = styled.button`
   padding: 0.5rem 1rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   cursor: pointer;
   margin-top: 1rem;
-  border-radius: 4px;
-  transition: background-color 0.3s;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: opacity 0.3s;
 
   &:hover:not(:disabled) {
-    background-color: #333;
+    opacity: 0.9;
   }
 
   &:disabled {
-    background-color: #999;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 `;
 
 const ErrorText = styled.p`
-  color: #d32f2f;
+  color: #f87171;
   font-size: 0.85rem;
   margin-top: 0.5rem;
 `;
 
 const ProgressText = styled.p`
-  color: #666;
+  color: #94a3b8;
   font-size: 0.85rem;
   margin-top: 0.5rem;
 `;

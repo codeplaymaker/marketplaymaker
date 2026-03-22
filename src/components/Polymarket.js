@@ -37,7 +37,7 @@ const shimmer = keyframes`
 // ─── Styled Components ───────────────────────────────────────────────
 const PageWrapper = styled.div`
   min-height: 100vh;
-  background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+  background: #0a0a0f;
   color: #e2e8f0;
   padding: 1rem 0.5rem;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -408,6 +408,76 @@ const Tab = styled.button`
   }
 `;
 
+const MoreDropdown = styled.div`
+  position: relative;
+  flex-shrink: 0;
+`;
+
+const MoreButton = styled.button`
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s;
+  background: ${(props) => (props.$active ? 'rgba(99, 102, 241, 0.2)' : 'transparent')};
+  color: ${(props) => (props.$active ? '#a5b4fc' : '#64748b')};
+
+  @media (min-width: 480px) {
+    font-size: 0.78rem;
+    padding: 0.5rem 0.9rem;
+  }
+
+  @media (min-width: 768px) {
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+  }
+
+  &:hover {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.1);
+  }
+`;
+
+const DropdownMenu = styled.div`
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: rgba(15, 15, 26, 0.97);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  padding: 0.35rem;
+  min-width: 160px;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+`;
+
+const DropdownItem = styled.button`
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  transition: all 0.15s;
+  background: ${(props) => (props.$active ? 'rgba(99, 102, 241, 0.2)' : 'transparent')};
+  color: ${(props) => (props.$active ? '#a5b4fc' : '#94a3b8')};
+
+  &:hover {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.12);
+  }
+`;
+
 const Chip = styled.span`
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -490,6 +560,8 @@ const Polymarket = () => {
   const [error, setError] = useState(null);
   const [bankrollInput, setBankrollInput] = useState('1000');
   const [activeTab, setActiveTab] = useState('overview');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
   const [oppsFilter, setOppsFilter] = useState('TOP_5');
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
@@ -693,6 +765,15 @@ const Polymarket = () => {
   const { connected: wsConnected, events: wsEvents, lastTrade } = useSocket();
 
   // Refresh on WS trade events
+  // Close "More" dropdown on click outside
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
   useEffect(() => {
     if (lastTrade) { fetchCritical(); fetchMarkets(); }
   }, [lastTrade, fetchCritical, fetchMarkets]);
@@ -972,24 +1053,47 @@ const Polymarket = () => {
 
         {/* Navigation Tabs */}
         <TabBar>
-          {['overview', 'pnl', 'signals', 'picks', 'markets', 'watchlist', 'alerts', 'sources', 'twitter', 'youtube', 'trades', 'analytics', 'alpha'].map((tab) => (
-            <Tab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
-              {tab === 'overview' && '📊 '}
-              {tab === 'pnl' && '💰 '}
-              {tab === 'signals' && '🎯 '}
-              {tab === 'picks' && '🏆 '}
-              {tab === 'markets' && '🌐 '}
-              {tab === 'watchlist' && '⭐ '}
-              {tab === 'alerts' && '🔔 '}
-              {tab === 'sources' && '🧠 '}
-              {tab === 'twitter' && '🐦 '}
-              {tab === 'youtube' && '▶️ '}
-              {tab === 'trades' && '📜 '}
-              {tab === 'analytics' && '📉 '}
-              {tab === 'alpha' && '⚡ '}
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          {[
+            { id: 'overview', icon: '📊' },
+            { id: 'pnl',      icon: '💰' },
+            { id: 'markets',   icon: '🌐' },
+            { id: 'signals',   icon: '🎯' },
+            { id: 'trades',    icon: '📜' },
+            { id: 'alerts',    icon: '🔔' },
+          ].map(({ id, icon }) => (
+            <Tab key={id} $active={activeTab === id} onClick={() => { setActiveTab(id); setMoreOpen(false); }}>
+              {icon} {id.charAt(0).toUpperCase() + id.slice(1)}
             </Tab>
           ))}
+
+          {/* "More" dropdown for secondary tabs */}
+          <MoreDropdown ref={moreRef}>
+            <MoreButton
+              $active={['picks', 'watchlist', 'sources', 'twitter', 'youtube', 'analytics', 'alpha'].includes(activeTab)}
+              onClick={() => setMoreOpen((o) => !o)}
+            >
+              {['picks', 'watchlist', 'sources', 'twitter', 'youtube', 'analytics', 'alpha'].includes(activeTab)
+                ? `${{ picks: '🏆', watchlist: '⭐', sources: '🧠', twitter: '🐦', youtube: '▶️', analytics: '📉', alpha: '⚡' }[activeTab]} ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}`
+                : 'More ▾'}
+            </MoreButton>
+            {moreOpen && (
+              <DropdownMenu>
+                {[
+                  { id: 'picks',     icon: '🏆' },
+                  { id: 'watchlist',  icon: '⭐' },
+                  { id: 'sources',    icon: '🧠' },
+                  { id: 'twitter',    icon: '🐦' },
+                  { id: 'youtube',    icon: '▶️' },
+                  { id: 'analytics',  icon: '📉' },
+                  { id: 'alpha',      icon: '⚡' },
+                ].map(({ id, icon }) => (
+                  <DropdownItem key={id} $active={activeTab === id} onClick={() => { setActiveTab(id); setMoreOpen(false); }}>
+                    {icon} {id.charAt(0).toUpperCase() + id.slice(1)}
+                  </DropdownItem>
+                ))}
+              </DropdownMenu>
+            )}
+          </MoreDropdown>
         </TabBar>
 
         {/* ── PNL TAB ───────────────────────────────────────────── */}

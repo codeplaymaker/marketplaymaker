@@ -21,20 +21,20 @@ const fadeUp = keyframes`
 
 // ─── TOKENS ───
 const T = {
-  bg: '#09090b',
-  surface: '#111113',
-  surfaceHover: '#18181b',
+  bg: '#0a0a0f',
+  surface: '#111118',
+  surfaceHover: '#18181f',
   border: '#27272a',
   text: '#fafafa',
   textMuted: '#a1a1aa',
   textDim: '#71717a',
-  accent: '#22d3ee',       // cyan-400
-  accentDim: '#0e7490',    // cyan-700
+  accent: '#818cf8',       // indigo-400
+  accentDim: '#4f46e5',    // indigo-600
   green: '#4ade80',
   red: '#f87171',
   amber: '#fbbf24',
-  gradient: 'linear-gradient(135deg, #22d3ee 0%, #818cf8 50%, #c084fc 100%)',
-  gradientText: 'linear-gradient(90deg, #22d3ee, #818cf8, #c084fc)',
+  gradient: 'linear-gradient(135deg, #818cf8 0%, #6366f1 50%, #a78bfa 100%)',
+  gradientText: 'linear-gradient(90deg, #818cf8, #6366f1, #a78bfa)',
 };
 
 // ─── LAYOUT ───

@@ -8,14 +8,14 @@ import { Helmet } from 'react-helmet-async';
    ═══════════════════════════════════════════════════════════ */
 
 const T = {
-  bg: '#09090b',
-  surface: '#111113',
-  surfaceHover: '#18181b',
+  bg: '#0a0a0f',
+  surface: '#111118',
+  surfaceHover: '#18181f',
   border: '#27272a',
   text: '#fafafa',
   textMuted: '#a1a1aa',
   textDim: '#71717a',
-  accent: '#22d3ee',
+  accent: '#818cf8',
   green: '#4ade80',
   red: '#f87171',
   amber: '#fbbf24',
@@ -352,7 +352,7 @@ export default function ICTAlerts() {
                     padding: '0.3rem 0.6rem', borderRadius: '6px', border: 'none', cursor: 'pointer',
                     fontSize: '0.72rem', fontWeight: 600, fontFamily: "'Inter', sans-serif",
                     background: iv === interval ? T.accent : T.surface,
-                    color: iv === interval ? '#000' : T.textMuted,
+                    color: iv === interval ? '#fff' : T.textMuted,
                     transition: 'all 0.15s',
                   }}
                 >

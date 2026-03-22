@@ -55,21 +55,22 @@ const Input = styled.input`
 
 const Button = styled.button`
   padding: 0.75rem 2rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 1rem;
+  font-weight: 500;
   margin-top: 0.5rem;
-  transition: background-color 0.3s;
+  transition: opacity 0.3s;
 
   &:hover:not(:disabled) {
-    background-color: #333;
+    opacity: 0.9;
   }
 
   &:disabled {
-    background-color: #999;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 `;

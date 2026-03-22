@@ -9,7 +9,7 @@ const Nav = styled.nav`
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  background-color: #000;
+  background-color: #0a0a0f;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -142,7 +142,7 @@ const Hamburger = styled.button`
 const MobileMenu = styled.div`
   display: ${props => (props.$open ? 'flex' : 'none')};
   flex-direction: column;
-  background-color: #000;
+  background-color: #0a0a0f;
   position: fixed;
   top: 56px;
   left: 0;

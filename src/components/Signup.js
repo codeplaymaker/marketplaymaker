@@ -165,10 +165,10 @@ const StrengthBar = styled.div`
     height: 100%;
     width: ${props => props.strength}%;
     background-color: ${props => {
-      if (props.strength <= 25) return '#d32f2f';
-      if (props.strength <= 50) return '#f57c00';
-      if (props.strength <= 75) return '#fbc02d';
-      return '#2e7d32';
+      if (props.strength <= 25) return '#f87171';
+      if (props.strength <= 50) return '#fb923c';
+      if (props.strength <= 75) return '#fbbf24';
+      return '#34d399';
     }};
     transition: width 0.3s, background-color 0.3s;
   }
