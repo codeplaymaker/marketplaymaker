@@ -507,6 +507,10 @@ app.use(cors({
   credentials: true,
 }));
 
+// ─── Stripe Webhook (must receive RAW body, before express.json) ────
+const stripeWebhookRoute = require('./routes/stripe');
+app.use('/api', express.raw({ type: 'application/json' }), stripeWebhookRoute);
+
 app.use(express.json({ limit: '1mb' }));
 app.set('etag', false);
 
