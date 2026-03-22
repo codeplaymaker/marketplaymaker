@@ -1130,6 +1130,7 @@ const Polymarket = () => {
           <SignalsTab ctx={{
             filteredOpps, oppsFilter, setOppsFilter, connected, isRunning,
             signalSearch, setSignalSearch, addToWatchlist, setTradeModal, setTradeSide,
+            opportunities,
           }} />
         )}
 
