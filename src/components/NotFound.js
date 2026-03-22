@@ -15,35 +15,38 @@ const Container = styled.div`
 const ErrorCode = styled.h1`
   font-size: 6rem;
   margin: 0;
-  color: #000;
   font-weight: 800;
+  background: linear-gradient(135deg, #fff, #a5b4fc, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 `;
 
 const Title = styled.h2`
   font-size: 1.5rem;
   margin-bottom: 1rem;
-  color: #333;
+  color: #e2e8f0;
 `;
 
 const Message = styled.p`
   font-size: 1.1rem;
-  color: #666;
+  color: #94a3b8;
   margin-bottom: 2rem;
   max-width: 500px;
 `;
 
 const HomeLink = styled(Link)`
   padding: 0.75rem 2rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   border-radius: 8px;
   text-decoration: none;
   font-size: 1rem;
-  transition: background-color 0.3s;
+  font-weight: 500;
+  transition: opacity 0.3s;
 
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 

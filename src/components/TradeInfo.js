@@ -153,7 +153,7 @@ const ModernTradingDashboard = ({ userDetails }) => {
       <Card sx={{ mb: 4 }}>
         <CardContent>
           <Typography variant="body1">
-            Balance: <span style={{ color: 'black' }}>£{balance.toFixed(2)}</span>
+            Balance: <span style={{ color: '#e2e8f0' }}>£{balance.toFixed(2)}</span>
           </Typography>
           <Typography variant="body1">
             Net P&L: <span style={{ color: '#4caf50' }}>£{netPnL.toFixed(2)}</span>

@@ -54,15 +54,17 @@ const NavLinkItem = styled.li`
   a {
     color: #fff;
     text-decoration: none;
-    font-size: 1rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     transition: color 0.3s;
 
     &.active {
-      color: #ff4136;
+      color: #818cf8;
     }
 
     &:hover {
-      color: #ff4136;
+      color: #818cf8;
     }
   }
 
@@ -72,7 +74,7 @@ const NavLinkItem = styled.li`
     position: absolute;
     width: 0;
     height: 2px;
-    background: #ff4136;
+    background: #818cf8;
     transition: width 0.3s;
     bottom: -5px;
     left: 0;
@@ -84,23 +86,23 @@ const NavLinkItem = styled.li`
 `;
 
 const Button = styled.button`
-  padding: 0.5rem 1rem;
-  background-color: #ff4136;
+  padding: 0.5rem 1.25rem;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.3s, transform 0.3s;
-  font-size: 1rem;
+  transition: opacity 0.3s, transform 0.3s;
+  font-size: 0.95rem;
+  font-weight: 500;
 
   &:hover {
-    background-color: #fff;
-    color: #ff4136;
-    transform: translateY(-3px);
+    opacity: 0.9;
+    transform: translateY(-2px);
   }
 
   &:focus-visible {
-    outline: 2px solid #ff4136;
+    outline: 2px solid #818cf8;
     outline-offset: 2px;
   }
 `;
@@ -128,11 +130,11 @@ const Hamburger = styled.button`
 
   &:hover span,
   &:focus-visible span {
-    background-color: #ff4136;
+    background-color: #818cf8;
   }
 
   &:focus-visible {
-    outline: 2px solid #ff4136;
+    outline: 2px solid #818cf8;
     outline-offset: 2px;
   }
 `;
@@ -166,29 +168,30 @@ const MobileMenu = styled.div`
     transition: background-color 0.2s;
 
     &.active {
-      color: #ff4136;
-      background-color: rgba(255, 65, 54, 0.1);
+      color: #818cf8;
+      background-color: rgba(99, 102, 241, 0.1);
     }
 
     &:hover {
-      color: #ff4136;
-      background-color: rgba(255, 65, 54, 0.05);
+      color: #818cf8;
+      background-color: rgba(99, 102, 241, 0.05);
     }
   }
 `;
 
 const NAV_LINKS = [
   { to: '/', label: 'Home', auth: false },
-  { to: '/polymarket', label: 'Polymarket Bot', auth: true, adminOnly: true },
-  { to: '/mirofish', label: 'MiroFish Lab', auth: true, adminOnly: true },
   { to: '/track-record', label: 'Track Record', auth: false },
   { to: '/playbook', label: 'Playbook', auth: false },
-  { to: '/ict-alerts', label: 'ICT Alerts', auth: true },
   { to: '/blog', label: 'Blog', auth: false },
-  { to: '/trade-plan', label: 'Trade Plan', auth: true },
-  { to: '/connect-api', label: 'ConnectAPI', auth: true },
-  { to: '/trading-journal', label: 'Trading Journal', auth: true },
+  { to: '/purchase', label: 'Pricing', auth: false },
+  // Logged-in user tools
   { to: '/dashboard', label: 'Dashboard', auth: true },
+  { to: '/ict-alerts', label: 'ICT Alerts', auth: true },
+  { to: '/trading-journal', label: 'Journal', auth: true },
+  // Admin-only
+  { to: '/polymarket', label: 'Polymarket Bot', auth: true, adminOnly: true },
+  { to: '/mirofish', label: 'MiroFish Lab', auth: true, adminOnly: true },
   { to: '/admin', label: 'Admin', auth: true, adminOnly: true },
 ];
 

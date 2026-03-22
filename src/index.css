@@ -61,7 +61,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
-  background-color: #000;
+  background-color: #0a0a0f;
+  color: #e2e8f0;
 }
 
 code {

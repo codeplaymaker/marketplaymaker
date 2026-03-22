@@ -21,7 +21,7 @@ const LoadingContainer = styled.div`
   justify-content: center;
   height: 100vh;
   width: 100vw;
-  background-color: #000;
+  background-color: #0a0a0f;
   position: fixed;
   top: 0;
   left: 0;

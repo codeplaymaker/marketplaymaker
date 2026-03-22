@@ -71,7 +71,7 @@ const StatValue = styled.div`
 `;
 
 const NoData = styled.div`
-  color: #666;
+  color: #64748b;
   text-align: center;
   padding: 32px;
   font-size: 13px;
@@ -101,7 +101,7 @@ const StressBarFill = styled.div`
   align-items: center;
   padding-left: 6px;
   font-size: 11px;
-  color: #000;
+  color: #e2e8f0;
   font-weight: 600;
 `;
 
@@ -124,7 +124,7 @@ const TradeRow = styled.div`
 `;
 
 const TradeHeader = styled(TradeRow)`
-  color: #666;
+  color: #64748b;
   font-weight: 600;
   text-transform: uppercase;
   font-size: 10px;
@@ -350,7 +350,7 @@ export default function AnalyticsCharts() {
             .slice(0, 50)
             .map((t, i) => (
               <TradeRow key={t.id || i}>
-                <div style={{ color: '#666' }}>{t.id || i + 1}</div>
+                <div style={{ color: '#94a3b8' }}>{t.id || i + 1}</div>
                 <div style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {t.question?.slice(0, 55) || 'Unknown'}
                 </div>
@@ -473,7 +473,7 @@ export default function AnalyticsCharts() {
                 </StatValue>
               </StatBadge>
             </StatRow>
-            <div style={{ fontSize: 11, color: '#666', textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center' }}>
               {varData.simulations.toLocaleString()} simulations · {varData.positionCount} positions
             </div>
           </>

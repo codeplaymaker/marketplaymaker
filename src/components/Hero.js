@@ -7,7 +7,7 @@ const S = {
   section: {
     position: 'relative',
     overflow: 'hidden',
-    backgroundColor: '#000',
+    backgroundColor: '#0a0a0f',
     color: '#fff',
     padding: '8rem 1.25rem',
     fontFamily: "'Inter', sans-serif",

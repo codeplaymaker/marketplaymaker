@@ -16,15 +16,16 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #fff;
+  background: #0f0f19;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   width: 90%;
   max-width: 75vw;
   max-height: 75vh;
   overflow-y: auto;
   position: relative;
-  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0px 4px 30px rgba(0, 0, 0, 0.5);
 
   @media (max-width: 768px) {
     width: 95%;
@@ -48,10 +49,10 @@ const CloseButton = styled.button`
   font-size: 1.5rem;
   cursor: pointer;
   z-index: 1001;
-  color: #333;
+  color: #94a3b8;
 
   &:focus-visible {
-    outline: 2px solid #000;
+    outline: 2px solid #818cf8;
     outline-offset: 2px;
   }
 `;
@@ -73,10 +74,10 @@ const TradingViewModal = ({ stockSymbol, onClose }) => {
           symbol: stockSymbol,
           interval: 'D',
           timezone: 'Etc/UTC',
-          theme: 'light',
+          theme: 'dark',
           style: '1',
           locale: 'en',
-          toolbar_bg: '#f1f3f6',
+          toolbar_bg: '#0f0f19',
           enable_publishing: false,
           withdateranges: true,
           hide_side_toolbar: false,

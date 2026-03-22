@@ -37,17 +37,19 @@ const Label = styled.label`
 
 const Input = styled.input`
   padding: 0.75rem;
-  border: 1px solid #ccc;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 8px;
   font-size: 16px;
   font-family: monospace;
   width: 100%;
   box-sizing: border-box;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
 
   &:focus {
-    border-color: #000;
+    border-color: #6366f1;
     outline: none;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   }
 `;
 
@@ -74,7 +76,7 @@ const Button = styled.button`
 
 const Warning = styled.p`
   font-size: 0.8rem;
-  color: #666;
+  color: #94a3b8;
   margin-top: 0.5rem;
 `;
 

@@ -9,7 +9,9 @@ import useModal from '../hooks/useModal';
 const Section = styled.section`
   padding: 2rem 1rem;
   text-align: center;
-  background-color: #f9f9f9;
+  background: #0a0a0f;
+  color: #e2e8f0;
+  min-height: 80vh;
 
   @media (min-width: 768px) {
     padding: 4rem 2rem;
@@ -19,6 +21,10 @@ const Section = styled.section`
 const Heading = styled.h1`
   font-size: 1.75rem;
   margin-bottom: 1.5rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #fff, #a5b4fc, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 
   @media (min-width: 768px) {
     font-size: 2.5rem;
@@ -40,22 +46,23 @@ const BlogContainer = styled.div`
 `;
 
 const BlogCard = styled.div`
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  background: rgba(15, 15, 25, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
   padding: 1.25rem;
   width: 100%;
   max-width: 400px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   text-align: left;
   display: flex;
   flex-direction: column;
   align-items: center;
   cursor: pointer;
-  transition: transform 0.3s;
+  transition: transform 0.3s, border-color 0.3s;
 
   &:hover {
     transform: translateY(-5px);
+    border-color: rgba(99, 102, 241, 0.4);
   }
 
   @media (min-width: 768px) {
@@ -76,35 +83,37 @@ const BlogImage = styled(LazyLoadImage)`
 const BlogTitle = styled.h2`
   font-size: 1.5rem;
   margin-bottom: 0.5rem;
-  color: #000;
+  color: #e2e8f0;
 `;
 
 const BlogDate = styled.p`
   font-size: 0.9rem;
-  color: #888;
+  color: #64748b;
   margin-bottom: 0.5rem;
 `;
 
 const BlogAuthor = styled.p`
   font-size: 1rem;
-  color: #555;
+  color: #94a3b8;
   margin-bottom: 1rem;
 `;
 
 const BlogDescription = styled.p`
   font-size: 1rem;
-  color: #333;
+  color: #94a3b8;
   text-align: left;
   margin-bottom: 1rem;
 `;
 
 const ReadMoreLink = styled.span`
-  color: #1e90ff;
+  color: #818cf8;
   text-decoration: none;
   cursor: pointer;
+  font-weight: 500;
 
   &:hover {
     text-decoration: underline;
+    color: #a5b4fc;
   }
 `;
 
@@ -126,19 +135,21 @@ const Modal = styled.div`
 `;
 
 const ModalContent = styled.div`
-  background-color: #fff;
+  background: #0f0f19;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   padding: 1.25rem;
-  border-radius: 8px;
+  border-radius: 12px;
   max-width: 90%;
   max-height: 90%;
   margin: auto;
   text-align: left;
   overflow-y: auto;
+  color: #e2e8f0;
 
   @media (max-width: 600px) {
     max-width: 100%;
     margin: 0;
-    border-radius: 8px 8px 0 0;
+    border-radius: 12px 12px 0 0;
     max-height: 100%;
   }
 
@@ -149,15 +160,16 @@ const ModalContent = styled.div`
 
 const CloseButton = styled.button`
   padding: 0.5rem 1rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 8px;
   float: right;
+  font-weight: 500;
 
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 
@@ -282,13 +294,15 @@ const Blog = () => {
                 disabled={loading}
                 style={{
                   padding: '0.75rem 2rem',
-                  backgroundColor: '#000',
+                  background: 'linear-gradient(135deg, #6366f1, #818cf8)',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '8px',
                   cursor: loading ? 'not-allowed' : 'pointer',
                   marginTop: '2rem',
                   fontSize: '1rem',
+                  fontWeight: 500,
+                  opacity: loading ? 0.5 : 1,
                 }}
               >
                 {loading ? 'Loading...' : 'Load More'}

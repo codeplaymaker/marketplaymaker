@@ -5,6 +5,7 @@ const Container = styled.div`
   max-width: 600px;
   margin: 0 auto;
   padding: 1rem 0.75rem;
+  color: #e2e8f0;
 
   @media (min-width: 768px) {
     padding: 20px;
@@ -12,6 +13,7 @@ const Container = styled.div`
 
   h2 {
     font-size: 1.5rem;
+    color: #e2e8f0;
 
     @media (min-width: 768px) {
       font-size: 1.75rem;
@@ -20,11 +22,11 @@ const Container = styled.div`
 `;
 
 const TradePlanWrapper = styled.div`
-  border: 1px solid #ddd;
+  border: 1px solid rgba(99, 102, 241, 0.15);
   padding: 10px;
   margin-bottom: 15px;
-  border-radius: 8px;
-  background-color: #f9f9f9;
+  border-radius: 12px;
+  background: rgba(15, 15, 25, 0.8);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -39,18 +41,24 @@ const TradePlanWrapper = styled.div`
 const TaskInput = styled.input`
   width: 100%;
   padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
   outline: none;
   font-size: 16px;
   box-sizing: border-box;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
 
   @media (min-width: 480px) {
     width: 80%;
   }
 
   &:focus {
-    border-color: #007bff;
+    border-color: #6366f1;
+  }
+
+  &::placeholder {
+    color: #64748b;
   }
 `;
 
@@ -65,12 +73,13 @@ const TaskItem = styled.li`
   justify-content: space-between;
   padding: 8px;
   margin-bottom: 10px;
-  background-color: ${props => (props.completed ? '#d4edda' : '#fff')};
-  border: 1px solid ${props => (props.completed ? '#c3e6cb' : '#ddd')};
-  border-radius: 4px;
-  transition: background-color 0.3s, border-color 0.3s;
+  background: ${props => (props.completed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(15, 15, 25, 0.8)')};
+  border: 1px solid ${props => (props.completed ? 'rgba(34, 197, 94, 0.3)' : 'rgba(99, 102, 241, 0.15)')};
+  border-radius: 8px;
+  transition: background 0.3s, border-color 0.3s;
   gap: 8px;
   flex-wrap: wrap;
+  color: #e2e8f0;
 `;
 
 const TaskText = styled.span`
@@ -97,48 +106,53 @@ const Button = styled.button`
 `;
 
 const AddTaskButton = styled(Button)`
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   margin-top: 10px;
 
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 
 const SavePlanButton = styled(Button)`
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   margin-top: 10px;
 
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 
 const ResetButton = styled(Button)`
-  background-color: #000;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
   margin-top: 10px;
 
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 
 const DeletePlanButton = styled(Button)`
-  background-color: #ff4136;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
   margin-left: 10px;
   margin-top: 5px;
 
   &:hover {
-    background-color: #ff1100;
+    background: rgba(239, 68, 68, 0.3);
   }
 `;
 
 const TaskDeleteButton = styled(Button)`
-  background-color: #ff4136;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
   font-size: 12px;
 
   &:hover {
-    background-color: #ff1100;
+    background: rgba(239, 68, 68, 0.3);
   }
 `;
 

@@ -6,13 +6,18 @@ import ImageUpload from './ImageUpload';
 
 const Section = styled.section`
   padding: 4rem 2rem;
-  background-color: #f4f4f9;
+  background: #0a0a0f;
+  color: #e2e8f0;
+  min-height: 80vh;
 `;
 
 const Heading = styled.h1`
   font-size: 2.5rem;
   margin-bottom: 2rem;
-  color: #333;
+  font-weight: 800;
+  background: linear-gradient(135deg, #fff, #a5b4fc, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 `;
 
 const Form = styled.form`
@@ -21,10 +26,11 @@ const Form = styled.form`
   align-items: center;
   gap: 1.5rem;
   margin-bottom: 3rem;
-  background: #fff;
+  background: rgba(15, 15, 25, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 `;
 
 const FormGroup = styled.div`
@@ -38,63 +44,70 @@ const Label = styled.label`
   font-weight: 600;
   font-size: 0.85rem;
   margin-bottom: 0.25rem;
-  color: #555;
+  color: #94a3b8;
 `;
 
 const Input = styled.input`
   padding: 0.75rem;
   width: 100%;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 8px;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
 
   &:focus {
-    border-color: #000;
+    border-color: #6366f1;
     outline: none;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
   }
 `;
 
 const TextArea = styled.textarea`
   padding: 0.75rem;
   width: 100%;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 8px;
   resize: vertical;
   min-height: 100px;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
 
   &:focus {
-    border-color: #000;
+    border-color: #6366f1;
     outline: none;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
   }
 `;
 
 const Button = styled.button`
   padding: 0.75rem 2rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   margin-top: 1rem;
   font-size: 1rem;
-  transition: background-color 0.3s;
+  font-weight: 500;
+  transition: opacity 0.3s;
 
   &:hover:not(:disabled) {
-    background-color: #333;
+    opacity: 0.9;
   }
 
   &:disabled {
-    background-color: #999;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 `;
 
 const DeleteButton = styled(Button)`
-  background-color: #c00;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 
   &:hover:not(:disabled) {
-    background-color: #900;
+    background: rgba(239, 68, 68, 0.3);
   }
 `;
 
@@ -114,12 +127,12 @@ const ElementsContainer = styled.div`
 `;
 
 const ElementCard = styled.div`
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  background: rgba(15, 15, 25, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
   padding: 1.5rem;
   width: 300px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   text-align: left;
   display: flex;
   flex-direction: column;
@@ -137,36 +150,36 @@ const CardImage = styled.img`
 const ElementTitle = styled.h3`
   font-size: 1.5rem;
   margin-bottom: 0.5rem;
-  color: #333;
+  color: #e2e8f0;
 `;
 
 const ElementDate = styled.p`
   font-size: 0.9rem;
-  color: #555;
+  color: #64748b;
   margin-bottom: 0.5rem;
 `;
 
 const ElementContent = styled.p`
   font-size: 1rem;
-  color: #333;
+  color: #94a3b8;
   text-align: center;
   margin-bottom: 1rem;
 `;
 
 const ElementStockSymbol = styled.p`
   font-size: 0.9rem;
-  color: #888;
+  color: #64748b;
   margin-bottom: 1rem;
 `;
 
 const ErrorMessage = styled.p`
-  color: #c00;
+  color: #f87171;
   font-size: 0.9rem;
   margin-bottom: 1rem;
 `;
 
 const SuccessMessage = styled.p`
-  color: #090;
+  color: #22c55e;
   font-size: 0.9rem;
   margin-bottom: 1rem;
 `;

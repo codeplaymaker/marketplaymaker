@@ -110,7 +110,7 @@ const HomePage = () => {
         <meta name="twitter:description" content="Playbooks, real-time edge detection, and a prediction market scanner that surfaces mispriced bets." />
       </Helmet>
 
-      <div style={{ minHeight: '100vh', backgroundColor: '#000', color: '#fff', fontFamily: T.font }}>
+        <div style={{ minHeight: '100vh', backgroundColor: '#0a0a0f', color: '#fff', fontFamily: T.font }}>
         <Hero />
 
         {/* ── Features ── */}

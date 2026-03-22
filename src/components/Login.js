@@ -12,9 +12,19 @@ const Section = styled.section`
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  background: #0a0a0f;
+  color: #e2e8f0;
 
   @media (min-width: 768px) {
     padding: 2rem;
+  }
+
+  h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #fff, #a5b4fc, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 `;
 
@@ -45,55 +55,63 @@ const Label = styled.label`
   font-size: 0.9rem;
   font-weight: 600;
   margin-bottom: 0.25rem;
-  color: #333;
+  color: #94a3b8;
 `;
 
 const Input = styled.input`
   padding: 0.75rem;
   width: 100%;
-  border: 1px solid #ccc;
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 8px;
   font-size: 16px;
   transition: border-color 0.2s;
   box-sizing: border-box;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
 
   &:focus {
-    border-color: #000;
+    border-color: #6366f1;
     outline: none;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  }
+
+  &::placeholder {
+    color: #64748b;
   }
 `;
 
 const Button = styled.button`
   padding: 0.75rem 2rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   margin-top: 1rem;
   font-size: 1rem;
-  transition: background-color 0.3s, transform 0.2s;
+  font-weight: 600;
+  transition: opacity 0.3s, transform 0.2s;
   min-width: 120px;
 
   &:hover:not(:disabled) {
-    background-color: #333;
+    opacity: 0.9;
     transform: translateY(-2px);
   }
 
   &:disabled {
-    background-color: #999;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 `;
 
 const ErrorMessage = styled.p`
-  color: #d32f2f;
+  color: #f87171;
   margin-top: 0.5rem;
   font-size: 0.85rem;
-  background-color: #ffeef0;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: 8px;
   width: 100%;
   max-width: 340px;
   text-align: center;
@@ -105,32 +123,34 @@ const ErrorMessage = styled.p`
 `;
 
 const SuccessMessage = styled.p`
-  color: #2e7d32;
+  color: #22c55e;
   margin-top: 0.5rem;
   font-size: 0.9rem;
-  background-color: #e8f5e9;
+  background-color: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: 8px;
   width: 100%;
   max-width: 300px;
   text-align: center;
 `;
 
 const StyledLink = styled(Link)`
-  color: #1e90ff;
+  color: #818cf8;
   text-decoration: none;
   font-size: 0.9rem;
   margin-top: 0.5rem;
 
   &:hover {
     text-decoration: underline;
+    color: #a5b4fc;
   }
 `;
 
 const ForgotPasswordButton = styled.button`
   background: none;
   border: none;
-  color: #1e90ff;
+  color: #818cf8;
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
@@ -138,6 +158,7 @@ const ForgotPasswordButton = styled.button`
 
   &:hover {
     text-decoration: underline;
+    color: #a5b4fc;
   }
 `;
 

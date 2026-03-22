@@ -14,9 +14,25 @@ import {
 const Section = styled.section`
   padding: 1rem 0.75rem;
   text-align: center;
+  background: #0a0a0f;
+  color: #e2e8f0;
+  min-height: 80vh;
 
   @media (min-width: 768px) {
     padding: 2rem;
+  }
+
+  h2 {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fff, #a5b4fc, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1rem;
+  }
+
+  h3 {
+    color: #94a3b8;
   }
 `;
 
@@ -24,21 +40,34 @@ const StyledCalendar = styled(Calendar)`
   width: 100%;
   max-width: 400px;
   margin: 1.5rem auto;
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  border: none;
+  background-color: rgba(15, 15, 25, 0.8);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   font-size: 0.85rem;
+  color: #e2e8f0;
 
   @media (min-width: 768px) {
     margin: 2rem auto;
     font-size: 1rem;
   }
 
+  .react-calendar__navigation button {
+    color: #e2e8f0;
+    &:hover, &:focus {
+      background-color: rgba(99, 102, 241, 0.1);
+    }
+  }
+
+  .react-calendar__month-view__weekdays {
+    color: #64748b;
+  }
+
   .react-calendar__tile {
     padding: 0.4rem 0.15rem;
     border-radius: 8px;
     font-size: 0.7rem;
+    color: #e2e8f0;
 
     @media (min-width: 768px) {
       padding: 0.5rem 0.25rem;
@@ -46,12 +75,16 @@ const StyledCalendar = styled(Calendar)`
     }
 
     &:hover {
-      background-color:rgb(255, 255, 255);
+      background-color: rgba(99, 102, 241, 0.1);
     }
   }
 
+  .react-calendar__tile--now {
+    background: rgba(99, 102, 241, 0.15);
+  }
+
   .react-calendar__tile--active {
-    background-color: #000;
+    background: linear-gradient(135deg, #6366f1, #818cf8);
     color: #fff;
     border-radius: 8px;
   }
@@ -70,12 +103,12 @@ const EntriesContainer = styled.div`
 `;
 
 const EntryCard = styled.div`
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  background: rgba(15, 15, 25, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
   padding: 0.75rem;
   margin-bottom: 0.5rem;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 
   @media (min-width: 768px) {
     padding: 1rem;
@@ -85,7 +118,7 @@ const EntryCard = styled.div`
 const EntryField = styled.p`
   font-size: 0.8rem;
   margin: 0.25rem 0;
-  color: #333;
+  color: #94a3b8;
 `;
 
 const DashboardSection = styled.div`
@@ -96,17 +129,17 @@ const DashboardSection = styled.div`
 `;
 
 const StatCard = styled.div`
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  background: rgba(15, 15, 25, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
   padding: 0.75rem 0.5rem;
   margin: 0.25rem;
   width: calc(50% - 0.5rem);
   max-width: 150px;
   text-align: center;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   font-size: 0.7rem;
-  transition: transform 0.3s, background-color 0.3s;
+  transition: transform 0.3s, border-color 0.3s;
   cursor: pointer;
 
   @media (min-width: 480px) {
@@ -118,13 +151,14 @@ const StatCard = styled.div`
   }
 
   &:hover {
-    transform: translateY(-10px);
-    background-color: #f0f0f0;
+    transform: translateY(-5px);
+    border-color: rgba(99, 102, 241, 0.4);
   }
 
   h3 {
     font-size: 0.7rem;
     margin: 0 0 0.25rem;
+    color: #64748b;
 
     @media (min-width: 480px) {
       font-size: 0.85rem;
@@ -135,6 +169,7 @@ const StatCard = styled.div`
     margin: 0;
     font-size: 0.85rem;
     font-weight: 700;
+    color: #e2e8f0;
 
     @media (min-width: 480px) {
       font-size: 1rem;
@@ -167,14 +202,26 @@ const Input = styled.input`
   padding: 0.6rem;
   width: 100%;
   font-size: 16px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
   box-sizing: border-box;
+  background: rgba(15, 15, 25, 0.8);
+  color: #e2e8f0;
+
+  &:focus {
+    border-color: #6366f1;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  }
+
+  &::placeholder {
+    color: #64748b;
+  }
 `;
 
 const Button = styled.button`
   padding: 0.5rem 1rem;
-  background-color: #000;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
   border: none;
   cursor: pointer;
@@ -182,33 +229,37 @@ const Button = styled.button`
   margin-right: 15px;
   margin-left: 15px;
   font-size: 0.8rem;
-  border-radius: 4px;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: opacity 0.3s;
   &:hover {
-    background-color: #333;
+    opacity: 0.9;
   }
 `;
 
 const DeleteButton = styled.button`
   padding: 0.5rem 1rem;
-  background-color: red;
-  color: #fff;
-  border: none;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
   cursor: pointer;
   margin-top: 0.5rem;
   margin-left: 15px;
   font-size: 0.8rem;
-  border-radius: 4px;
+  border-radius: 8px;
+  transition: background 0.3s;
   &:hover {
-    background-color: darkred;
+    background: rgba(239, 68, 68, 0.3);
   }
 `;
 
 const EditButton = styled(Button)`
 margin-left: 15px;
 margin-right: 15px;
-  background-color: #000; // Set the background color to black
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
   &:hover {
-    background-color: #333; // Darker black for hover effect
+    background: rgba(99, 102, 241, 0.25);
   }
 `;
 
@@ -228,15 +279,17 @@ const ModalOverlay = styled.div`
 `;
 
 const ModalContent = styled.div`
-  background: #fff;
-  border-radius: 8px;
+  background: #0f0f19;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 12px;
   padding: 1.25rem;
   max-width: 600px;
   width: calc(100% - 2rem);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
   position: relative;
   max-height: 90vh;
   overflow-y: auto;
+  color: #e2e8f0;
 
   @media (min-width: 768px) {
     padding: 2rem;
@@ -512,10 +565,11 @@ const TradingJournal = () => {
         <h3>Daily Net Cumulative P&L</h3>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={stats.dailyPnl}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
-            <YAxis />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.1)" />
+            <XAxis dataKey="date" stroke="#64748b" tick={{ fill: '#64748b' }} />
+            <YAxis stroke="#64748b" tick={{ fill: '#64748b' }} />
             <Tooltip
+              contentStyle={{ background: '#0f0f19', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '8px', color: '#e2e8f0' }}
               content={({ payload }) => {
                 if (payload && payload.length) {
                   return (
@@ -554,7 +608,7 @@ const TradingJournal = () => {
               <DeleteButton onClick={() => confirmDelete(entry.id)}>Delete Entry</DeleteButton>
               {deleteConfirm === entry.id && (
                 <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.8rem', color: '#c00' }}>Are you sure?</span>
+                  <span style={{ fontSize: '0.8rem', color: '#f87171' }}>Are you sure?</span>
                   <Button onClick={() => handleDeleteEntry(entry.id)} style={{ backgroundColor: 'red', marginLeft: 0 }}>Yes</Button>
                   <Button onClick={cancelDelete} style={{ marginLeft: 0 }}>No</Button>
                 </div>
@@ -563,11 +617,11 @@ const TradingJournal = () => {
           ))}
       </EntriesContainer>
       <Form onSubmit={handleSubmit}>
-        {error && <p style={{ color: '#c00', fontSize: '0.85rem' }} role="alert">{error}</p>}
+        {error && <p style={{ color: '#f87171', fontSize: '0.85rem' }} role="alert">{error}</p>}
         {FIELD_ORDER.map((field) => (
           field !== 'id' && field !== 'userId' && (
             <div key={field} style={{ display: 'flex', flexDirection: 'column' }}>
-              <label htmlFor={`journal-${field}`} style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.2rem', textTransform: 'capitalize' }}>
+              <label htmlFor={`journal-${field}`} style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.2rem', textTransform: 'capitalize', color: '#94a3b8' }}>
                 {field.replace(/([A-Z])/g, ' $1')}
               </label>
               <Input
