@@ -65,7 +65,7 @@ const timeSince = (iso) => {
 // ═══════════════════════════════════════════════════════════════════════
 const OverviewTab = React.memo(({ ctx }) => {
   const {
-    indEdges, status, trackRecord, picksRecord, performance, connected,
+    indEdges, status, trackRecord, performance, connected,
     isRunning, mode, bankrollInput, setBankrollInput, opportunities,
     scanning, scanResult, scanStatus, indSourcesStatus, llmConfigured,
     learningData, positions, paperPerf, startBot, stopBot, triggerScan, autoExecute,
