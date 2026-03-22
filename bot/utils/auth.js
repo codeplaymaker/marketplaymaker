@@ -22,7 +22,6 @@ const KEY_FILE = path.join(__dirname, '..', 'logs', '.api-key');
 const PUBLIC_ROUTES = [
   '/api/health',
   '/api/auth/verify',
-  '/api/auth/key',
   '/api/public/',
 ];
 

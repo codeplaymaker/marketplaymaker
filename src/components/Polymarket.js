@@ -358,17 +358,25 @@ const LoadingFill = styled.div`
   border-radius: 2px;
 `;
 
-const TabBar = styled.div`
+const TabBarWrapper = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 1rem;
+  position: relative;
+`;
+
+const TabBarScroll = styled.div`
   display: flex;
   gap: 0.15rem;
   background: rgba(15, 15, 26, 0.5);
-  border-radius: 12px;
+  border-radius: 12px 0 0 12px;
   padding: 0.25rem;
-  margin-bottom: 1rem;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  flex: 1;
 
   &::-webkit-scrollbar {
     display: none;
@@ -411,6 +419,9 @@ const Tab = styled.button`
 const MoreDropdown = styled.div`
   position: relative;
   flex-shrink: 0;
+  background: rgba(15, 15, 26, 0.5);
+  border-radius: 0 12px 12px 0;
+  padding: 0.25rem;
 `;
 
 const MoreButton = styled.button`
@@ -1052,21 +1063,23 @@ const Polymarket = () => {
         )}
 
         {/* Navigation Tabs */}
-        <TabBar>
-          {[
-            { id: 'overview', icon: '📊' },
-            { id: 'pnl',      icon: '💰' },
-            { id: 'markets',   icon: '🌐' },
-            { id: 'signals',   icon: '🎯' },
-            { id: 'trades',    icon: '📜' },
-            { id: 'alerts',    icon: '🔔' },
-          ].map(({ id, icon }) => (
-            <Tab key={id} $active={activeTab === id} onClick={() => { setActiveTab(id); setMoreOpen(false); }}>
-              {icon} {id.charAt(0).toUpperCase() + id.slice(1)}
-            </Tab>
-          ))}
+        <TabBarWrapper>
+          <TabBarScroll>
+            {[
+              { id: 'overview', icon: '📊' },
+              { id: 'pnl',      icon: '💰' },
+              { id: 'markets',   icon: '🌐' },
+              { id: 'signals',   icon: '🎯' },
+              { id: 'trades',    icon: '📜' },
+              { id: 'alerts',    icon: '🔔' },
+            ].map(({ id, icon }) => (
+              <Tab key={id} $active={activeTab === id} onClick={() => { setActiveTab(id); setMoreOpen(false); }}>
+                {icon} {id.charAt(0).toUpperCase() + id.slice(1)}
+              </Tab>
+            ))}
+          </TabBarScroll>
 
-          {/* "More" dropdown for secondary tabs */}
+          {/* "More" dropdown for secondary tabs — outside scroll container */}
           <MoreDropdown ref={moreRef}>
             <MoreButton
               $active={['picks', 'watchlist', 'sources', 'twitter', 'youtube', 'analytics', 'alpha'].includes(activeTab)}
@@ -1094,7 +1107,7 @@ const Polymarket = () => {
               </DropdownMenu>
             )}
           </MoreDropdown>
-        </TabBar>
+        </TabBarWrapper>
 
         {/* ── PNL TAB ───────────────────────────────────────────── */}
         {activeTab === 'pnl' && (

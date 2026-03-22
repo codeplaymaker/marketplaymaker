@@ -408,6 +408,53 @@ module.exports = function createIntelRoutes(deps) {
         summary: record?.summary || { totalEdges: allEdges.length, resolvedEdges: resolved.length, wins: 0, losses: 0, totalPnLpp: 0, pending: pending.length },
         hypothetical: record?.hypothetical || { totalBets: 0, totalReturn: 0, roi: 0 },
         byGrade: record?.byGrade || {}, gradeDistribution, sourceCountDist, activeEdges, resolvedEdges, timeline, lastUpdated: new Date().toISOString(),
+        // Strategy performance from paper trader pattern memory
+        strategyPerformance: (() => {
+          try {
+            const insights = paperTrader.getLearningInsights ? paperTrader.getLearningInsights() : null;
+            if (!insights?.patternPerformance) return null;
+            const patterns = Object.entries(insights.patternPerformance)
+              .filter(([, p]) => p.trades >= 3)
+              .map(([name, p]) => ({ pattern: name, wins: p.wins, losses: p.losses, winRate: p.winRate, totalPnL: p.totalPnL, streak: p.streak, blocked: p.blocked }))
+              .sort((a, b) => b.totalPnL - a.totalPnL);
+            const totalTrades = patterns.reduce((s, p) => s + p.wins + p.losses, 0);
+            const totalPnL = patterns.reduce((s, p) => s + p.totalPnL, 0);
+            const totalWins = patterns.reduce((s, p) => s + p.wins, 0);
+            return { patterns, totalTrades, totalPnL: Math.round(totalPnL * 100) / 100, overallWinRate: totalTrades > 0 ? Math.round((totalWins / totalTrades) * 1000) / 10 : 0, phase: insights.phase };
+          } catch { return null; }
+        })(),
+        // Paper trader full performance (equity curve, bankroll, ROI, etc.)
+        paperPerformance: (() => {
+          try {
+            const perf = paperTrader.getPerformance ? paperTrader.getPerformance() : null;
+            if (!perf || perf.status === 'NO_DATA') return null;
+            return {
+              totalPnL: perf.totalPnL,
+              roi: perf.roi,
+              winRate: perf.winRate,
+              wins: perf.wins,
+              losses: perf.losses,
+              resolvedCount: perf.resolvedCount,
+              totalInvested: perf.totalInvested,
+              sharpeRatio: perf.sharpeRatio,
+              maxDrawdown: perf.maxDrawdown,
+              profitFactor: perf.profitFactor === Infinity ? 999 : perf.profitFactor,
+              simBankroll: perf.simBankroll,
+              startingBankroll: perf.startingBankroll,
+              bankrollReturn: perf.bankrollReturn,
+              pnlCurve: (perf.pnlCurve || []).map(p => ({
+                date: p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null,
+                pnl: p.pnl,
+                cumPnL: p.cumPnL,
+                strategy: p.strategy,
+                won: p.won,
+              })),
+              byConfidence: perf.byConfidence || {},
+              learningPhase: perf.learningPhase,
+              capitalUtilization: perf.capitalUtilization,
+            };
+          } catch { return null; }
+        })(),
       });
     } catch (err) { res.status(500).json({ error: 'Track record unavailable' }); }
   });
