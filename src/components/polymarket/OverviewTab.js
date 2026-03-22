@@ -78,6 +78,7 @@ const OverviewTab = React.memo(({ ctx }) => {
   // Derived metrics
   const activeEdges = useMemo(() => indEdges.filter(e => (e.edgeQuality || 0) >= 35), [indEdges]);
   const bPlusEdges = useMemo(() => indEdges.filter(e => (e.edgeQuality || 0) >= 55), [indEdges]);
+  const validPositions = useMemo(() => (positions || []).filter(p => p.size > 0), [positions]);
   const totalMarkets = (status?.scanner?.platforms?.polymarket?.markets || 0) + (status?.scanner?.platforms?.kalshi?.markets || 0);
   const winRate = trackRecord?.summary?.winRate ?? picksRecord?.summary?.winRate ?? null;
   const pnl = trackRecord?.hypothetical?.totalReturn ?? performance?.totalPnL ?? null;
@@ -335,13 +336,13 @@ const OverviewTab = React.memo(({ ctx }) => {
               💼 Live AI Positions
             </CardTitle>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {positions.length > 0 && (
+              {validPositions.length > 0 && (
                 <span style={{
                   fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '9999px', fontWeight: 600,
                   background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc',
                   border: '1px solid rgba(99, 102, 241, 0.2)',
                 }}>
-                  ${positions.reduce((s, p) => s + (p.size || 0), 0).toFixed(2)} deployed
+                  ${validPositions.reduce((s, p) => s + (p.size || 0), 0).toFixed(2)} deployed
                 </span>
               )}
               <span style={{ fontSize: '0.68rem', color: '#64748b', cursor: 'pointer' }}
@@ -351,7 +352,7 @@ const OverviewTab = React.memo(({ ctx }) => {
             </div>
           </div>
 
-          {positions.length === 0 ? (
+          {validPositions.length === 0 ? (
             <div style={{
               textAlign: 'center', padding: '1.25rem 1rem',
               background: 'rgba(99, 102, 241, 0.04)', borderRadius: '10px',
@@ -378,7 +379,7 @@ const OverviewTab = React.memo(({ ctx }) => {
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '0.4rem' }}>
-              {positions.map((pos, i) => {
+              {validPositions.map((pos, i) => {
                 const entryPct = ((pos.avgPrice || 0) * 100).toFixed(0);
                 const stratColor = pos.strategy === 'NO_BETS' ? '#34d399'
                   : pos.strategy === 'ARBITRAGE' ? '#a5b4fc'
@@ -469,11 +470,11 @@ const OverviewTab = React.memo(({ ctx }) => {
                 fontSize: '0.72rem', color: '#64748b',
               }}>
                 <span>
-                  {positions.length} position{positions.length !== 1 ? 's' : ''} across{' '}
-                  {[...new Set(positions.map(p => p.strategy))].length} strateg{[...new Set(positions.map(p => p.strategy))].length !== 1 ? 'ies' : 'y'}
+                  {validPositions.length} position{validPositions.length !== 1 ? 's' : ''} across{' '}
+                  {[...new Set(validPositions.map(p => p.strategy))].length} strateg{[...new Set(validPositions.map(p => p.strategy))].length !== 1 ? 'ies' : 'y'}
                 </span>
                 <span style={{ color: '#a5b4fc', fontWeight: 600 }}>
-                  {positions.filter(p => p.side === 'YES').length} YES · {positions.filter(p => p.side === 'NO').length} NO
+                  {validPositions.filter(p => p.side === 'YES').length} YES · {validPositions.filter(p => p.side === 'NO').length} NO
                 </span>
               </div>
             </div>
@@ -816,7 +817,7 @@ const OverviewTab = React.memo(({ ctx }) => {
               border: '1px solid rgba(99,102,241,0.06)', textAlign: 'center',
             }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#a5b4fc', fontVariantNumeric: 'tabular-nums' }}>
-                {positions.length}
+                {validPositions.length}
               </div>
               <div style={{ fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase' }}>Open Positions</div>
             </div>
@@ -959,10 +960,10 @@ const OverviewTab = React.memo(({ ctx }) => {
                 text: `${opportunities.length} opportunit${opportunities.length !== 1 ? 'ies' : 'y'} queued`,
                 detail: opportunities.slice(0, 2).map(o => o.strategy.replace('_', ' ')).join(', '),
               },
-              positions.length > 0 && {
+              validPositions.length > 0 && {
                 icon: '💼', color: '#818cf8',
-                text: `${positions.length} open position${positions.length !== 1 ? 's' : ''}`,
-                detail: `$${positions.reduce((s, p) => s + (p.size || 0), 0).toFixed(0)} deployed`,
+                text: `${validPositions.length} open position${validPositions.length !== 1 ? 's' : ''}`,
+                detail: `$${validPositions.reduce((s, p) => s + (p.size || 0), 0).toFixed(0)} deployed`,
               },
               learningData?.totalResolved > 0 && {
                 icon: '🧠', color: '#c084fc',

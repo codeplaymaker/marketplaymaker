@@ -583,6 +583,12 @@ function checkTrade(trade, bankroll) {
  * Record a new position
  */
 function addPosition(trade) {
+  // Guard: reject positions with no valid size or price
+  if (!trade.positionSize || trade.positionSize <= 0 || !trade.price || trade.price <= 0) {
+    log.warn('RISK', `Rejected position with invalid size/price: size=${trade.positionSize}, price=${trade.price}, market="${(trade.market || '').slice(0, 50)}"`);
+    return;
+  }
+
   const existing = positions.find((p) => p.conditionId === trade.conditionId && p.side === trade.side);
 
   if (existing) {
