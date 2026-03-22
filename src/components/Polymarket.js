@@ -603,6 +603,7 @@ const Polymarket = () => {
   const [webhookConfig, setWebhookConfig] = useState(null);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [trackRecord, setTrackRecord] = useState(null);
+  const [paperPerf, setPaperPerf] = useState(null);
   const [scanStatus, setScanStatus] = useState(null);
   const [accaData, setAccaData] = useState(null);
   const [accaBuilding, setAccaBuilding] = useState(false);
@@ -704,6 +705,7 @@ const Polymarket = () => {
       api('/polybot/intel/calibration').then(c => { if (c) setCalibrationData(c); }).catch(() => {});
       api('/polybot/intel/webhooks').then(w => { if (w) setWebhookConfig(w); }).catch(() => {});
       api('/polybot/intel/track-record').then(t => { if (t) setTrackRecord(t); }).catch(() => {});
+      api('/polybot/paper-trades/performance').then(p => { if (p) setPaperPerf(p); }).catch(() => {});
     }, 200);
     setTimeout(() => {
       api('/polybot/accas').then(a => { if (a) setAccaData(a); }).catch(() => {});
@@ -1119,7 +1121,7 @@ const Polymarket = () => {
           <OverviewTab ctx={{
             indEdges, status, trackRecord, picksRecord, performance, connected, isRunning, mode,
             bankrollInput, setBankrollInput, opportunities, scanning, scanResult, scanStatus,
-            indSourcesStatus, llmConfigured, learningData, positions,
+            indSourcesStatus, llmConfigured, learningData, positions, paperPerf,
             startBot, stopBot, triggerScan, autoExecute, resetBot, setActiveTab,
             sseConnected, lastEvent,
           }} />

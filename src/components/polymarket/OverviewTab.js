@@ -68,29 +68,35 @@ const OverviewTab = React.memo(({ ctx }) => {
     indEdges, status, trackRecord, picksRecord, performance, connected,
     isRunning, mode, bankrollInput, setBankrollInput, opportunities,
     scanning, scanResult, scanStatus, indSourcesStatus, llmConfigured,
-    learningData, positions, startBot, stopBot, triggerScan, autoExecute,
+    learningData, positions, paperPerf, startBot, stopBot, triggerScan, autoExecute,
     /* resetBot — available via ctx if needed */
     setActiveTab, sseConnected, lastEvent,
   } = ctx;
 
   const nextScanCountdown = useCountdown(scanStatus?.nextScan);
 
-  // Derived metrics
+  // Derived metrics — paper trade data is the source of truth
   const activeEdges = useMemo(() => indEdges.filter(e => (e.edgeQuality || 0) >= 35), [indEdges]);
   const bPlusEdges = useMemo(() => indEdges.filter(e => (e.edgeQuality || 0) >= 55), [indEdges]);
   const validPositions = useMemo(() => (positions || []).filter(p => p.size > 0), [positions]);
   const totalMarkets = (status?.scanner?.platforms?.polymarket?.markets || 0) + (status?.scanner?.platforms?.kalshi?.markets || 0);
-  const winRate = trackRecord?.summary?.winRate ?? picksRecord?.summary?.winRate ?? null;
-  const pnl = trackRecord?.hypothetical?.totalReturn ?? performance?.totalPnL ?? null;
-  const totalTrades = performance?.totalTrades || 0;
 
-  // P&L sparkline data from track record
+  // Use paper trade data for win rate & P&L (actual trades), fallback to track record (theoretical)
+  const ppWins = paperPerf?.wins ?? 0;
+  const ppLosses = paperPerf?.losses ?? 0;
+  const winRate = (ppWins + ppLosses) > 0 ? paperPerf.winRate : (trackRecord?.summary?.winRate ?? null);
+  const pnl = paperPerf?.totalPnL ?? performance?.totalPnL ?? null;
+  const totalTrades = (ppWins + ppLosses) || performance?.totalTrades || 0;
+
+  // P&L sparkline from paper trade bankroll history (actual dollars over time)
   const pnlSpark = useMemo(() => {
-    const recent = trackRecord?.recent || [];
-    if (recent.length < 2) return null;
-    let cum = 0;
-    return recent.slice().reverse().map(r => { cum += (r.pnlPp || 0); return cum; });
-  }, [trackRecord]);
+    const history = paperPerf?.simBankrollHistory || [];
+    if (history.length >= 2) return history.map(h => h.bankroll);
+    // Fallback to pnlCurve from paper perf
+    const curve = paperPerf?.pnlCurve || [];
+    if (curve.length >= 2) return curve.map(c => c.cumPnL);
+    return null;
+  }, [paperPerf]);
 
   // Source health
   const sources = useMemo(() => [
@@ -691,81 +697,99 @@ const OverviewTab = React.memo(({ ctx }) => {
           5. TRACK RECORD + RISK — Side by side on desktop
           ════════════════════════════════════════════════════════════════ */}
 
-      {/* Track Record */}
+      {/* Track Record — Paper Trade Performance (the real numbers) */}
       <Card $delay="0.12s">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <CardTitle style={{ marginBottom: 0 }}>📊 Track Record</CardTitle>
-          {trackRecord?.summary?.resolvedEdges > 0 && (
-            <Badge $type={trackRecord.summary.winRate >= 50 ? 'running' : 'stopped'}>
-              {trackRecord.summary.winRate}% WR
+          <CardTitle style={{ marginBottom: 0 }}>📊 Paper Trade Record</CardTitle>
+          {(ppWins + ppLosses) > 0 && (
+            <Badge $type={winRate >= 50 ? 'running' : 'stopped'}>
+              {winRate}% WR
             </Badge>
           )}
         </div>
 
-        {(!trackRecord || trackRecord.summary?.resolvedEdges === 0) ? (
+        {(!paperPerf || paperPerf.status === 'NO_DATA' || (ppWins + ppLosses) === 0) ? (
           <div style={{
             textAlign: 'center', padding: '1rem 0.5rem',
             background: 'rgba(99, 102, 241, 0.04)', borderRadius: '10px',
           }}>
             <div style={{ fontSize: '1rem', marginBottom: '0.4rem' }}>📈</div>
             <div style={{ color: '#94a3b8', fontSize: '0.82rem', fontWeight: 600 }}>
-              Tracking {trackRecord?.pending || 0} edge{trackRecord?.pending !== 1 ? 's' : ''}
+              {paperPerf?.totalPaperTrades
+                ? `Tracking ${paperPerf.pendingResolution} trade${paperPerf.pendingResolution !== 1 ? 's' : ''}`
+                : 'No paper trades yet'}
             </div>
             <div style={{ color: '#64748b', fontSize: '0.72rem', marginTop: '0.2rem' }}>
-              Record builds automatically as markets resolve. Every prediction is tracked.
+              Paper trades auto-resolve when markets close. Real P&L is tracked.
             </div>
           </div>
         ) : (
           <div style={{ display: 'grid', gap: '0.6rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem' }}>
               <StatCard>
-                <StatValue $color={trackRecord.summary.totalPnLpp >= 0 ? '#22c55e' : '#ef4444'} style={{ fontSize: '1.1rem' }}>
-                  {trackRecord.summary.totalPnLpp >= 0 ? '+' : ''}{trackRecord.summary.totalPnLpp}pp
+                <StatValue $color={paperPerf.totalPnL >= 0 ? '#22c55e' : '#ef4444'} style={{ fontSize: '1.1rem' }}>
+                  {paperPerf.totalPnL >= 0 ? '+' : ''}${Math.abs(paperPerf.totalPnL).toFixed(2)}
                 </StatValue>
                 <StatLabel>Total P&L</StatLabel>
               </StatCard>
               <StatCard>
                 <StatValue $color="#a5b4fc" style={{ fontSize: '1.1rem' }}>
-                  {trackRecord.summary.wins}W-{trackRecord.summary.losses}L
+                  {ppWins}W-{ppLosses}L
                 </StatValue>
-                <StatLabel>{trackRecord.summary.resolvedEdges} resolved</StatLabel>
+                <StatLabel>{ppWins + ppLosses} resolved</StatLabel>
               </StatCard>
               <StatCard>
-                <StatValue $color={trackRecord.summary.betterRate >= 50 ? '#22c55e' : '#fbbf24'} style={{ fontSize: '1.1rem' }}>
-                  {trackRecord.summary.betterRate || 0}%
+                <StatValue $color={paperPerf.bankrollReturn >= 0 ? '#22c55e' : '#ef4444'} style={{ fontSize: '1.1rem' }}>
+                  {paperPerf.bankrollReturn >= 0 ? '+' : ''}{paperPerf.bankrollReturn}%
                 </StatValue>
-                <StatLabel>Beat Market</StatLabel>
+                <StatLabel>ROI</StatLabel>
               </StatCard>
             </div>
 
-            {/* Sparkline */}
+            {/* Bankroll line */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: 'rgba(99,102,241,0.06)', borderRadius: '8px',
+              padding: '0.5rem 0.75rem', fontSize: '0.78rem',
+              border: '1px solid rgba(99,102,241,0.12)',
+            }}>
+              <span style={{ color: '#94a3b8' }}>💰 Bankroll</span>
+              <span style={{ fontWeight: 700, color: paperPerf.simBankroll >= (paperPerf.startingBankroll || 50) ? '#22c55e' : '#ef4444', fontVariantNumeric: 'tabular-nums' }}>
+                ${paperPerf.simBankroll?.toFixed(2)} <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.7rem' }}>from ${paperPerf.startingBankroll || 50}</span>
+              </span>
+            </div>
+
+            {/* Sparkline — bankroll history */}
             {pnlSpark && pnlSpark.length >= 3 && (
               <div style={{
                 background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '0.5rem 0.6rem',
                 border: '1px solid rgba(99,102,241,0.08)',
               }}>
-                <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cumulative P&L</div>
-                <Sparkline data={pnlSpark} color={pnl >= 0 ? '#22c55e' : '#ef4444'} width={240} height={40} />
+                <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bankroll History</div>
+                <Sparkline data={pnlSpark} color={(paperPerf.totalPnL || 0) >= 0 ? '#22c55e' : '#ef4444'} width={240} height={40} />
               </div>
             )}
 
-            {trackRecord.hypothetical?.totalBets > 0 && (
-              <div style={{
-                background: 'rgba(99,102,241,0.06)', borderRadius: '8px',
-                padding: '0.5rem 0.75rem', fontSize: '0.78rem', color: '#94a3b8',
-                border: '1px solid rgba(99,102,241,0.12)',
-              }}>
-                💰 $10/edge × {trackRecord.hypothetical.totalBets} bets = <strong style={{ color: trackRecord.hypothetical.totalReturn >= 0 ? '#22c55e' : '#ef4444' }}>${trackRecord.hypothetical.totalReturn.toFixed(2)}</strong> ({trackRecord.hypothetical.roi}% ROI)
+            {/* Extra stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.3rem', fontSize: '0.72rem' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: '#a5b4fc', fontWeight: 700 }}>{paperPerf.sharpeRatio || '—'}</div>
+                <div style={{ color: '#475569', fontSize: '0.6rem' }}>Sharpe</div>
               </div>
-            )}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: '#fbbf24', fontWeight: 700 }}>{paperPerf.profitFactor === Infinity ? '∞' : (paperPerf.profitFactor || '—')}</div>
+                <div style={{ color: '#475569', fontSize: '0.6rem' }}>Profit Factor</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: '#ef4444', fontWeight: 700 }}>${(paperPerf.maxDrawdown || 0).toFixed(2)}</div>
+                <div style={{ color: '#475569', fontSize: '0.6rem' }}>Max DD</div>
+              </div>
+            </div>
 
-            {trackRecord.recent?.length > 0 && (
-              <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                Recent: {trackRecord.recent.slice(0, 4).map((r, i) => (
-                  <span key={i} style={{ color: r.pnlPp > 0 ? '#22c55e' : '#ef4444', marginRight: '0.4rem', fontWeight: 600 }}>
-                    {r.pnlPp > 0 ? '+' : ''}{r.pnlPp}pp
-                  </span>
-                ))}
+            {/* Edge detection accuracy (secondary, smaller) */}
+            {trackRecord?.summary?.resolvedEdges > 0 && (
+              <div style={{ fontSize: '0.68rem', color: '#475569', borderTop: '1px solid rgba(99,102,241,0.08)', paddingTop: '0.4rem' }}>
+                Edge Detection: {trackRecord.summary.wins}W-{trackRecord.summary.losses}L ({trackRecord.summary.winRate}% WR) across {trackRecord.summary.resolvedEdges} theoretical edges
               </div>
             )}
           </div>
