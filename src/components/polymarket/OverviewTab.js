@@ -326,6 +326,162 @@ const OverviewTab = React.memo(({ ctx }) => {
       </FullWidthSection>
 
       {/* ════════════════════════════════════════════════════════════════
+          3. LIVE POSITIONS — AI-proven paper trades (the money shot)
+          ════════════════════════════════════════════════════════════════ */}
+      <FullWidthSection>
+        <Card $delay="0.04s">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+            <CardTitle style={{ marginBottom: 0 }}>
+              💼 Live AI Positions
+            </CardTitle>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {positions.length > 0 && (
+                <span style={{
+                  fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '9999px', fontWeight: 600,
+                  background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc',
+                  border: '1px solid rgba(99, 102, 241, 0.2)',
+                }}>
+                  ${positions.reduce((s, p) => s + (p.size || 0), 0).toFixed(2)} deployed
+                </span>
+              )}
+              <span style={{ fontSize: '0.68rem', color: '#64748b', cursor: 'pointer' }}
+                onClick={() => setActiveTab('pnl')}>
+                Full history →
+              </span>
+            </div>
+          </div>
+
+          {positions.length === 0 ? (
+            <div style={{
+              textAlign: 'center', padding: '1.25rem 1rem',
+              background: 'rgba(99, 102, 241, 0.04)', borderRadius: '10px',
+              border: '1px solid rgba(99, 102, 241, 0.08)',
+            }}>
+              {isRunning ? (
+                <div>
+                  <div style={{ fontSize: '1.1rem', marginBottom: '0.4rem' }}>🎯</div>
+                  <div style={{ color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>Waiting for trade signals</div>
+                  <div style={{ color: '#64748b', fontSize: '0.72rem', marginTop: '0.2rem' }}>
+                    The AI will auto-execute the top edges when conditions are met.
+                    Hit <strong style={{ color: '#34d399' }}>Paper-Trade Top 3</strong> to trade immediately.
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: '1.1rem', marginBottom: '0.4rem' }}>⚡</div>
+                  <div style={{ color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>No open positions</div>
+                  <div style={{ color: '#64748b', fontSize: '0.72rem', marginTop: '0.2rem' }}>
+                    Start the scanner and the AI will identify, validate, and paper-trade the best edges automatically.
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.4rem' }}>
+              {positions.map((pos, i) => {
+                const entryPct = ((pos.avgPrice || 0) * 100).toFixed(0);
+                const stratColor = pos.strategy === 'NO_BETS' ? '#34d399'
+                  : pos.strategy === 'ARBITRAGE' ? '#a5b4fc'
+                  : pos.strategy === 'MOMENTUM' ? '#c084fc'
+                  : pos.strategy === 'SPORTS_EDGE' ? '#fbbf24'
+                  : '#818cf8';
+                const sideColor = pos.side === 'YES' ? '#22c55e' : '#ef4444';
+                const elapsed = pos.enteredAt
+                  ? (() => {
+                      const mins = Math.floor((Date.now() - new Date(pos.enteredAt).getTime()) / 60000);
+                      if (mins < 60) return `${mins}m`;
+                      if (mins < 1440) return `${Math.floor(mins / 60)}h`;
+                      return `${Math.floor(mins / 1440)}d`;
+                    })()
+                  : '—';
+
+                return (
+                  <div key={pos.conditionId || i} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto auto auto',
+                    gap: '0.5rem',
+                    alignItems: 'center',
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: '10px',
+                    background: 'rgba(0, 0, 0, 0.15)',
+                    border: '1px solid rgba(99, 102, 241, 0.08)',
+                    transition: 'background 0.2s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(99, 102, 241, 0.06)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.15)'}>
+                    {/* Market name + strategy */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{
+                        fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {(pos.market || 'Unknown Market').length > 55
+                          ? pos.market.slice(0, 52) + '...'
+                          : pos.market || 'Unknown Market'}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
+                        <span style={{
+                          fontSize: '0.6rem', fontWeight: 700,
+                          background: `${stratColor}15`, color: stratColor,
+                          padding: '0.08rem 0.35rem', borderRadius: '4px',
+                          border: `1px solid ${stratColor}25`,
+                        }}>
+                          {(pos.strategy || '').replace(/_/g, ' ')}
+                        </span>
+                        <span style={{ fontSize: '0.62rem', color: '#475569' }}>{elapsed} ago</span>
+                      </div>
+                    </div>
+
+                    {/* Side badge */}
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.45rem',
+                      borderRadius: '6px',
+                      background: `${sideColor}15`, color: sideColor,
+                      border: `1px solid ${sideColor}25`,
+                    }}>
+                      {pos.side || 'YES'}
+                    </span>
+
+                    {/* Entry + Edge */}
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>
+                        {entryPct}¢
+                      </div>
+                      <div style={{ fontSize: '0.6rem', color: '#64748b' }}>entry</div>
+                    </div>
+
+                    {/* Size */}
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#a5b4fc', fontVariantNumeric: 'tabular-nums' }}>
+                        ${(pos.size || 0).toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: '0.6rem', color: '#64748b' }}>size</div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Summary bar */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '0.4rem 0.75rem', borderRadius: '8px',
+                background: 'rgba(99, 102, 241, 0.04)', border: '1px solid rgba(99, 102, 241, 0.08)',
+                fontSize: '0.72rem', color: '#64748b',
+              }}>
+                <span>
+                  {positions.length} position{positions.length !== 1 ? 's' : ''} across{' '}
+                  {[...new Set(positions.map(p => p.strategy))].length} strateg{[...new Set(positions.map(p => p.strategy))].length !== 1 ? 'ies' : 'y'}
+                </span>
+                <span style={{ color: '#a5b4fc', fontWeight: 600 }}>
+                  {positions.filter(p => p.side === 'YES').length} YES · {positions.filter(p => p.side === 'NO').length} NO
+                </span>
+              </div>
+            </div>
+          )}
+        </Card>
+      </FullWidthSection>
+
+      {/* ════════════════════════════════════════════════════════════════
           3. DATA PIPELINE — Compact source health
           ════════════════════════════════════════════════════════════════ */}
       <FullWidthSection>
@@ -389,6 +545,16 @@ const OverviewTab = React.memo(({ ctx }) => {
             </span>
           </div>
         </div>
+        {/* Filter context — proves the system is working hard */}
+        {activeEdges.length > 0 && indEdges.length > activeEdges.length && (
+          <div style={{
+            fontSize: '0.7rem', color: '#64748b', marginBottom: '0.6rem',
+            padding: '0.3rem 0.6rem', background: 'rgba(99,102,241,0.04)', borderRadius: '6px',
+            display: 'inline-block',
+          }}>
+            Showing <strong style={{ color: '#a5b4fc' }}>{Math.min(activeEdges.length, 6)}</strong> of <strong style={{ color: '#94a3b8' }}>{indEdges.length}</strong> signals <span style={{ color: '#475569' }}>(C+ grade, validated)</span>
+          </div>
+        )}
 
         {activeEdges.length === 0 ? (
           <div style={{
@@ -689,7 +855,82 @@ const OverviewTab = React.memo(({ ctx }) => {
       </Card>
 
       {/* ════════════════════════════════════════════════════════════════
-          6. LIVE ACTIVITY FEED — Real-time heartbeat
+          6. AI BRAIN — Pattern memory & learning indicator
+          ════════════════════════════════════════════════════════════════ */}
+      <FullWidthSection>
+        <Card $delay="0.15s">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: '10px',
+                background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(99,102,241,0.1))',
+                border: '1px solid rgba(139,92,246,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
+              }}>🧠</div>
+              <div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0' }}>AI Brain</div>
+                <div style={{ fontSize: '0.68rem', color: '#64748b' }}>Pattern memory &amp; self-calibration</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {/* Patterns learned */}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#c084fc', fontVariantNumeric: 'tabular-nums' }}>
+                  {learningData?.totalResolved || 0}
+                </div>
+                <div style={{ fontSize: '0.58rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Patterns</div>
+              </div>
+              {/* Active adjustments */}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#a5b4fc', fontVariantNumeric: 'tabular-nums' }}>
+                  {learningData?.adjustments ? Object.keys(learningData.adjustments).length : 0}
+                </div>
+                <div style={{ fontSize: '0.58rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Adjustments</div>
+              </div>
+              {/* Confidence / status */}
+              <div style={{
+                padding: '0.3rem 0.65rem', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 600,
+                background: (learningData?.totalResolved || 0) >= 20
+                  ? 'rgba(34,197,94,0.1)' : (learningData?.totalResolved || 0) >= 5
+                  ? 'rgba(251,191,36,0.1)' : 'rgba(100,116,139,0.1)',
+                color: (learningData?.totalResolved || 0) >= 20
+                  ? '#34d399' : (learningData?.totalResolved || 0) >= 5
+                  ? '#fbbf24' : '#64748b',
+                border: `1px solid ${(learningData?.totalResolved || 0) >= 20
+                  ? 'rgba(34,197,94,0.2)' : (learningData?.totalResolved || 0) >= 5
+                  ? 'rgba(251,191,36,0.2)' : 'rgba(100,116,139,0.15)'}`,
+              }}>
+                {(learningData?.totalResolved || 0) >= 50 ? '🟢 High Confidence'
+                  : (learningData?.totalResolved || 0) >= 20 ? '🟡 Calibrating'
+                  : (learningData?.totalResolved || 0) >= 5 ? '🔵 Learning'
+                  : '⚪ Warming Up'}
+              </div>
+            </div>
+          </div>
+          {/* Detail line */}
+          {(learningData?.adjustments && Object.keys(learningData.adjustments).length > 0) && (
+            <div style={{
+              marginTop: '0.6rem', padding: '0.4rem 0.65rem', borderRadius: '8px',
+              background: 'rgba(139,92,246,0.04)', border: '1px solid rgba(139,92,246,0.1)',
+              fontSize: '0.72rem', color: '#a78bfa', lineHeight: 1.5,
+            }}>
+              Self-calibrated <strong>{Object.keys(learningData.adjustments).length}</strong> strategy threshold{Object.keys(learningData.adjustments).length !== 1 ? 's' : ''} from {learningData.totalResolved || 0} resolved outcomes. The model adjusts edge detection sensitivity based on what actually wins.
+            </div>
+          )}
+          {(!learningData || (learningData.totalResolved || 0) === 0) && (
+            <div style={{
+              marginTop: '0.6rem', padding: '0.4rem 0.65rem', borderRadius: '8px',
+              background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.08)',
+              fontSize: '0.72rem', color: '#64748b', lineHeight: 1.5,
+            }}>
+              The AI learns from every market resolution — improving edge detection, adjusting thresholds, and calibrating confidence over time. More data = sharper predictions.
+            </div>
+          )}
+        </Card>
+      </FullWidthSection>
+
+      {/* ════════════════════════════════════════════════════════════════
+          7. LIVE ACTIVITY FEED — Real-time heartbeat
           ════════════════════════════════════════════════════════════════ */}
       <FullWidthSection>
         <Card $delay="0.16s">
@@ -745,17 +986,6 @@ const OverviewTab = React.memo(({ ctx }) => {
               </div>
             ))}
           </div>
-
-          {/* AI Learning note */}
-          {learningData?.adjustments && Object.keys(learningData.adjustments).length > 0 && (
-            <div style={{
-              marginTop: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '8px',
-              background: 'rgba(139, 92, 246, 0.06)', border: '1px solid rgba(139, 92, 246, 0.12)',
-              fontSize: '0.72rem', color: '#a78bfa',
-            }}>
-              🧠 AI has adjusted {Object.keys(learningData.adjustments).length} strategy threshold{Object.keys(learningData.adjustments).length !== 1 ? 's' : ''} based on resolved outcomes
-            </div>
-          )}
         </Card>
       </FullWidthSection>
     </Grid>
