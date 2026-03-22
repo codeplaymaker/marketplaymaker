@@ -699,13 +699,14 @@ function resolveMarket(conditionId, outcome) {
       }
     } else {
       // ── Standard single-leg resolution (NO_BETS, SPORTS_EDGE, etc.) ──
-      hypotheticalShares = hypotheticalSize / trade.entryPrice;
+      const safeEntryPrice = trade.entryPrice || 0.5; // Guard against 0 entry price (BTC_BOT edge case)
+      hypotheticalShares = hypotheticalSize / safeEntryPrice;
       if (trade.side === 'YES') {
         payout = outcome === 'YES' ? 1.0 : 0.0;
       } else {
         payout = outcome === 'NO' ? 1.0 : 0.0;
       }
-      grossPnL = (payout - trade.entryPrice) * hypotheticalShares;
+      grossPnL = (payout - safeEntryPrice) * hypotheticalShares;
       won = grossPnL > 0;
     }
 
@@ -726,10 +727,13 @@ function resolveMarket(conditionId, outcome) {
     trade.resolvedAt = new Date().toISOString();
 
     // ─── Update simulated bankroll ───
-    // For trades with costDeducted, the entry cost was already subtracted from bankroll
-    // So on resolution we return the payout (if won) minus fees, or nothing (if lost)
+    // For trades with costDeducted, the entry cost was already subtracted from bankroll.
+    // On resolution, return the TOTAL dollar payout (shares × per-share payout) minus fees.
+    // BUG FIX: Previously used raw `payout` (per-share: 0 or 1) instead of total dollar payout.
+    // That caused winning trades to return ~$1 instead of shares × $1, draining the bankroll.
     if (trade.costDeducted) {
-      const returnAmount = payout - fee; // Won: shares*1.0 - fee; Lost: 0
+      const totalPayout = hypotheticalShares * payout; // Dollar payout: shares × $1 (win) or shares × $0 (loss)
+      const returnAmount = totalPayout > 0 ? r2(totalPayout - fee) : 0;
       simBankroll = r2(simBankroll + returnAmount);
     } else {
       // Legacy trade — cost was never deducted, use net P&L as before
@@ -1791,6 +1795,88 @@ function reset() {
   log.info('PAPER_TRADER', `Reset complete. Bankroll restored to $${DEFAULT_PAPER_BANKROLL}`);
 }
 
+/**
+ * Recalculate bankroll from scratch by replaying all trades with correct math.
+ * Fixes the payout bug where `returnAmount = payout - fee` used per-share payout (0/1)
+ * instead of total dollar payout (shares × per-share payout).
+ *
+ * Call this once to correct a corrupted bankroll without losing trade history.
+ */
+function recalculateBankroll() {
+  const startAmount = startingBankrollOverride ?? DEFAULT_PAPER_BANKROLL;
+  let bankroll = startAmount;
+  const newHistory = [{ timestamp: new Date().toISOString(), bankroll: startAmount, event: 'Bankroll recalculated (bug fix)' }];
+
+  // Collect ALL trades (open + resolved) sorted by recordedAt
+  const allTrades = [
+    ...paperTrades.map(t => ({ ...t, _source: 'active' })),
+    ...resolvedTrades.map(t => ({ ...t, _source: 'resolved' })),
+  ].sort((a, b) => new Date(a.recordedAt || 0) - new Date(b.recordedAt || 0));
+
+  // Deduplicate by trade id (a trade appears in both arrays when resolved)
+  const seen = new Set();
+  const uniqueTrades = [];
+  for (const t of allTrades) {
+    if (!seen.has(t.id)) {
+      seen.add(t.id);
+      uniqueTrades.push(t);
+    }
+  }
+
+  for (const trade of uniqueTrades) {
+    if (trade.outcome === 'EXPIRED') continue; // Expired trades don't affect bankroll
+
+    // Entry cost deduction
+    if (trade.costDeducted) {
+      const cost = trade.kellySize || 0;
+      bankroll = r2(bankroll - cost);
+      newHistory.push({
+        timestamp: trade.recordedAt,
+        bankroll,
+        event: `ENTRY -$${r2(cost)} on ${(trade.market || '').slice(0, 40)}`,
+        tradeId: trade.id,
+      });
+    }
+
+    // Resolution payout (only for resolved trades)
+    if (trade.resolved && trade.outcome && trade.outcome !== 'EXPIRED') {
+      const pnl = trade.pnl || {};
+      const entryPrice = trade.entryPrice || 0.5;
+      const hypotheticalSize = trade.kellySize || 0;
+      const hypotheticalShares = hypotheticalSize / entryPrice;
+      const perSharePayout = pnl.payout ?? 0;
+      const fee = pnl.fee || 0;
+
+      if (trade.costDeducted) {
+        // Return total dollar payout minus fees
+        const totalPayout = hypotheticalShares * perSharePayout;
+        const returnAmount = totalPayout > 0 ? r2(totalPayout - fee) : 0;
+        bankroll = r2(bankroll + returnAmount);
+      } else {
+        // Legacy: use netPnL
+        bankroll = r2(bankroll + (pnl.netPnL || 0));
+      }
+
+      newHistory.push({
+        timestamp: trade.resolvedAt || trade.recordedAt,
+        bankroll,
+        event: `${pnl.won ? 'WIN' : 'LOSS'} $${r2(pnl.netPnL || 0)} on ${(trade.market || '').slice(0, 40)}`,
+        tradeId: trade.id,
+      });
+    }
+  }
+
+  const oldBankroll = simBankroll;
+  simBankroll = r2(bankroll);
+  simBankrollHistory = newHistory;
+  simBusted = simBankroll <= 0;
+
+  log.info('PAPER_TRADER', `💰 Bankroll recalculated: $${oldBankroll} → $${simBankroll} (${uniqueTrades.length} trades replayed)`);
+  save();
+
+  return { oldBankroll, newBankroll: simBankroll, tradeCount: uniqueTrades.length };
+}
+
 function r2(n) { return Math.round(n * 100) / 100; }
 
 // Load on module init
@@ -1813,6 +1899,7 @@ module.exports = {
   isPatternBlocked,
   getStats,
   reset,
+  recalculateBankroll,
   load,
   save,
   getSimBankroll: () => simBankroll,

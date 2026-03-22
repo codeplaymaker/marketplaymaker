@@ -114,5 +114,14 @@ module.exports = function createTradingRoutes(deps) {
     res.json({ bankroll: paperTrader.getSimBankroll() });
   });
 
+  router.post('/paper-trades/recalculate', (req, res) => {
+    try {
+      const result = paperTrader.recalculateBankroll();
+      res.json({ status: 'ok', ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
