@@ -6,6 +6,13 @@ const client = require('../polymarket/client');
 const oddsApi = require('../bookmakers/oddsApi');
 const marketData = require('./marketData');
 
+// Lazy-load newsReactor to avoid circular deps
+let _newsReactor = null;
+function getNewsReactor() {
+  if (!_newsReactor) { try { _newsReactor = require('../engine/newsReactor'); } catch { _newsReactor = null; } }
+  return _newsReactor;
+}
+
 const CONF = config.strategies.sportsEdge;
 
 // Lazy-load paperTrader to avoid circular deps
@@ -341,6 +348,48 @@ function detectMeanReversion(market, priceHistory) {
   };
 }
 
+// ─── News Volatility Filter ─────────────────────────────────────────
+/**
+ * Check if we're in a high-volatility news environment.
+ * During breaking news events, mean-reversion and overreaction fades
+ * are unreliable — the "overreaction" may actually be correct pricing
+ * of new information. Better to sit out or only trade WITH the news.
+ *
+ * Returns { isHighVolatility, breakingCount, avgImpact, marketMentioned }
+ */
+function getNewsVolatility(marketQuestion) {
+  const reactor = getNewsReactor();
+  if (!reactor) return { isHighVolatility: false, breakingCount: 0, avgImpact: 0, marketMentioned: false };
+
+  const headlines = reactor.getRecentHeadlines(30);
+  if (!headlines || headlines.length === 0) return { isHighVolatility: false, breakingCount: 0, avgImpact: 0, marketMentioned: false };
+
+  // Only look at headlines from last 30 minutes
+  const recentNews = headlines.filter(h => h.ageMin <= 30);
+  if (recentNews.length === 0) return { isHighVolatility: false, breakingCount: 0, avgImpact: 0, marketMentioned: false };
+
+  const breakingCount = recentNews.filter(h => h.impact?.isBreaking).length;
+  const avgImpact = recentNews.reduce((sum, h) => sum + (h.impact?.score || 0), 0) / recentNews.length;
+
+  // Check if any recent headline directly mentions this market's topic
+  const questionWords = (marketQuestion || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  let marketMentioned = false;
+  for (const h of recentNews) {
+    if (!h.title) continue;
+    const titleLower = h.title.toLowerCase();
+    const matchCount = questionWords.filter(w => titleLower.includes(w)).length;
+    if (matchCount >= 3) {
+      marketMentioned = true;
+      break;
+    }
+  }
+
+  // High volatility: 2+ breaking stories OR avg impact > 0.6 in last 30 min
+  const isHighVolatility = breakingCount >= 2 || avgImpact > 0.6;
+
+  return { isHighVolatility, breakingCount, avgImpact: Math.round(avgImpact * 100) / 100, marketMentioned };
+}
+
 // ─── Composite Scoring ──────────────────────────────────────────────
 
 // ─── 5. Sports Domain Knowledge ─────────────────────────────────────
@@ -478,6 +527,12 @@ async function findOpportunities(markets, bankroll) {
     .sort((a, b) => b.volume24hr - a.volume24hr)
     .slice(0, 40); // Top 40 by volume
 
+  // Check global news volatility once per scan (expensive to re-check per market)
+  const newsVol = getNewsVolatility('');
+  if (newsVol.isHighVolatility) {
+    log.info('SPORTS_EDGE', `⚡ High news volatility detected (${newsVol.breakingCount} breaking, avg impact ${newsVol.avgImpact}) — filtering mean-reversion/overreaction signals`);
+  }
+
   for (const market of candidates) {
     try {
       // Fetch enrichment data
@@ -490,19 +545,28 @@ async function findOpportunities(markets, bankroll) {
         ]);
       } catch { /* continue without */ }
 
+      // Check if this specific market is in the news
+      const marketNewsVol = newsVol.isHighVolatility ? getNewsVolatility(market.question) : newsVol;
+
       // Run all signal detectors
       const signals = [];
-      const overreaction = detectOverreaction(market, priceHistory);
-      if (overreaction) signals.push(overreaction);
 
+      // During high news volatility, skip mean-reversion and overreaction signals
+      // — price moves during news breaks are information, not noise
+      if (!newsVol.isHighVolatility || !marketNewsVol.marketMentioned) {
+        const overreaction = detectOverreaction(market, priceHistory);
+        if (overreaction) signals.push(overreaction);
+
+        const meanRev = detectMeanReversion(market, priceHistory);
+        if (meanRev) signals.push(meanRev);
+      }
+
+      // Volume divergence and CLV are still valid during news (they trade WITH information)
       const volumeDiv = detectVolumeDivergence(market, orderbook);
       if (volumeDiv) signals.push(volumeDiv);
 
       const clv = detectCLV(market, priceHistory);
       if (clv) signals.push(clv);
-
-      const meanRev = detectMeanReversion(market, priceHistory);
-      if (meanRev) signals.push(meanRev);
 
       // 5. Bookmaker consensus divergence (highest alpha signal)
       let bookmakerMatch = null;
@@ -565,6 +629,17 @@ async function findOpportunities(markets, bankroll) {
         else if (divAbs >= 0.03) finalScore += 10;
         finalScore = Math.min(finalScore, 100);
       }
+
+      // News volatility penalty: reduce score during high news vol
+      // Markets directly in the news get a bigger penalty
+      if (newsVol.isHighVolatility) {
+        const penalty = marketNewsVol.marketMentioned ? 20 : 10;
+        finalScore = Math.max(0, finalScore - penalty);
+        if (marketNewsVol.marketMentioned) {
+          log.debug('SPORTS_EDGE', `  "${market.question.slice(0, 50)}..." score -${penalty} (market in breaking news)`);
+        }
+      }
+
       // Self-learning: use learned threshold if enough data, else default 35
       const pt = getPaperTrader();
       const learned = pt?.getLearnedThreshold?.('SPORTS_EDGE');
@@ -609,6 +684,12 @@ async function findOpportunities(markets, bankroll) {
           bookmakerCount: bookmakerMatch.bookmakerCount,
           bookmakers: bookmakerMatch.bookmakers,
         } : null,
+        // News volatility context
+        newsVolatility: newsVol.isHighVolatility ? {
+          breaking: newsVol.breakingCount,
+          avgImpact: newsVol.avgImpact,
+          marketMentioned: marketNewsVol.marketMentioned,
+        } : null,
       });
     } catch (err) {
       log.warn('SPORTS_EDGE', `Analysis failed for "${market.question}": ${err.message}`);
@@ -628,4 +709,5 @@ module.exports = {
   detectCLV,
   detectMeanReversion,
   detectRegime,
+  getNewsVolatility,
 };
