@@ -7,6 +7,12 @@ module.exports = {
   // Bot server (Railway injects PORT automatically)
   PORT: process.env.PORT || process.env.BOT_PORT || 4000,
 
+  // Market Selection Constraints
+  // Critical: strategies that don't enforce minimum time-to-close are vulnerable
+  // to "expired without resolving" outcomes. Set minHoursToClose per strategy or
+  // rely on paperTrader to filter out <12 hour markets at recording time.
+  minHoursToClose: 12,     // Minimum hours until market closes before betting
+
   // Fee model
   fees: {
     profitFeeRate: 0.02,       // 2% on profits (Polymarket standard)

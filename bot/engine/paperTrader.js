@@ -56,6 +56,7 @@ const ARB_DEDUP_WINDOW_MS = Infinity;    // Per-market lifetime for arbs too
 const RESOLUTION_CHECK_MS = 60000;      // Check resolutions every 60 seconds
 const MAX_RESOLUTION_BATCH = 15;        // Max API calls per resolution check cycle (rate limit friendly)
 const DEFAULT_PAPER_BANKROLL = 50;      // $50 starting simulated bankroll
+const MIN_HOURS_TO_CLOSE = 12;          // Minimum time until market closes (prevents "expired without resolving")
 const MAX_DAYS_HORIZON = 30;            // Block trades resolving > 30 days out
 const MEDIUM_HORIZON_DAYS = 7;          // 8-30 days requires higher score
 const MEDIUM_HORIZON_MIN_SCORE = 60;    // Score threshold for 8-30 day markets
@@ -385,6 +386,7 @@ function recordScanResults(opportunities, maxRecord = 20) {
     // Primary (≤7 days): normal thresholds — fast feedback for learning
     // Secondary (8-30 days): require score ≥60 — bigger edges justify wait
     // Block (>30 days): skip entirely — no value in locking up capital
+    // Minimum (< 12 hours): skip entirely — will expire before resolution checks
     const { endDate: oppEndDate, daysLeft } = extractEndDate(opp);
     if (daysLeft !== null) {
       if (daysLeft > MAX_DAYS_HORIZON) {
@@ -394,6 +396,11 @@ function recordScanResults(opportunities, maxRecord = 20) {
       if (daysLeft > MEDIUM_HORIZON_DAYS && (opp.score || 0) < MEDIUM_HORIZON_MIN_SCORE) {
         blocked++;
         continue; // Medium-term market needs higher conviction
+      }
+      const hoursLeft = daysLeft * 24;
+      if (hoursLeft < MIN_HOURS_TO_CLOSE) {
+        blocked++;
+        continue; // Market closes too soon — will expire before resolution checks can track it
       }
     }
 
