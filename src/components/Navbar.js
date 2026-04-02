@@ -181,10 +181,10 @@ const MobileMenu = styled.div`
 
 const NAV_LINKS = [
   { to: '/', label: 'Home', auth: false },
-  { to: '/track-record', label: 'Track Record', auth: false },
-  { to: '/playbook', label: 'Playbook', auth: false },
-  { to: '/blog', label: 'Blog', auth: false },
   { to: '/purchase', label: 'Pricing', auth: false },
+  // Admin-only public-looking pages
+  { to: '/track-record', label: 'Track Record', auth: true, adminOnly: true },
+  { to: '/playbook', label: 'Playbook', auth: true, adminOnly: true },
   // Logged-in user tools
   { to: '/dashboard', label: 'Dashboard', auth: true },
   { to: '/ict-alerts', label: 'ICT Alerts', auth: true },

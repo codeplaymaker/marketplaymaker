@@ -16,7 +16,6 @@ const Signup = lazy(() => import('./components/Signup'));
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Admin = lazy(() => import('./components/Admin'));
 const TradingJournal = lazy(() => import('./components/TradingJournal'));
-const Blog = lazy(() => import('./components/Blog'));
 const TradePlanComponent = lazy(() => import('./components/TradePlanComponent'));
 const UserApiForm = lazy(() => import('./components/UserApiForm'));
 const Polymarket = lazy(() => import('./components/Polymarket'));
@@ -37,9 +36,8 @@ function App() {
               <Suspense fallback={<LoadingScreen />}>
                 <Routes>
                   <Route path="/" element={<HomePage />} />
-                  <Route path="/blog" element={<Blog />} />
-                  <Route path="/track-record" element={<TrackRecord />} />
-                  <Route path="/playbook" element={<Playbook />} />
+                  <Route path="/track-record" element={<ProtectedRoute adminOnly={true}><TrackRecord /></ProtectedRoute>} />
+                  <Route path="/playbook" element={<ProtectedRoute adminOnly={true}><Playbook /></ProtectedRoute>} />
                   <Route path="/ict-alerts" element={
                     <ProtectedRoute>
                       <ICTAlerts />
