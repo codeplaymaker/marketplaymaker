@@ -71,7 +71,7 @@ module.exports = {
     maxDailyLoss: 5,                                   // Hard stop at $5 daily loss
     minScore: 70,                                      // Only mirror high-conviction paper trades
     minLiquidity: 5000,                                // Only trade markets with $5k+ liquidity
-    strategies: ['autoScan', 'ARBITRAGE', 'MOMENTUM', 'NO_BETS', 'SPORTS_EDGE'], // All winning strategies
+    strategies: ['autoScan', 'ARBITRAGE', 'MOMENTUM', 'NO_BETS', 'SPORTS_EDGE', 'PROVEN_EDGE'], // All winning strategies
   },
 
   // Kalshi API

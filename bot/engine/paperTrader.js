@@ -459,6 +459,8 @@ function recordScanResults(opportunities, maxRecord = 20) {
       modelData: extractModelData(opp),
       endDate: oppEndDate ? oppEndDate.toISOString() : null,
       daysLeft: daysLeft !== null ? Math.round(daysLeft) : null,
+      yesTokenId: opp.yesTokenId || null,
+      noTokenId: opp.noTokenId || null,
       costDeducted: true,
       source: 'BOT',
       recordedAt: new Date().toISOString(),

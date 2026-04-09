@@ -225,25 +225,34 @@ async function runAutoScan() {
     // Now both systems track the same signals for unified performance measurement.
     try {
       const strategies = require('./strategies');
+      // Build conditionId → market lookup for token IDs
+      const mktMap = new Map();
+      for (const m of allMarkets) { if (m.conditionId) mktMap.set(m.conditionId, m); }
+
       const edgeOpps = saneEntries
         .filter(e => e.edgeSignal === 'STRONG' || e.edgeSignal === 'MODERATE')
-        .map(e => ({
-          conditionId: e.conditionId,
-          market: e.question,
-          question: e.question,
-          strategy: e.strategy || e.edgeSource || 'autoScan',
-          side: e.edgeDirection === 'BUY_YES' ? 'YES' : (e.edgeDirection === 'BUY_NO' ? 'NO' : 'YES'),
-          price: e.marketPrice,
-          yesPrice: e.marketPrice,
-          noPrice: 1 - (e.marketPrice || 0.5),
-          score: e.edgeQuality || 50,
-          confidence: e.edgeSignal,
-          edge: e.divergence,
-          netEdge: e.divergence,
-          positionSize: 10,
-          liquidity: e.liquidity || 50000,
-          riskLevel: e.edgeGrade === 'A' ? 'LOW' : 'MEDIUM',
-        }));
+        .map(e => {
+          const mkt = mktMap.get(e.conditionId);
+          return {
+            conditionId: e.conditionId,
+            market: e.question,
+            question: e.question,
+            strategy: e.strategy || e.edgeSource || 'autoScan',
+            side: e.edgeDirection === 'BUY_YES' ? 'YES' : (e.edgeDirection === 'BUY_NO' ? 'NO' : 'YES'),
+            price: e.marketPrice,
+            yesPrice: e.marketPrice,
+            noPrice: 1 - (e.marketPrice || 0.5),
+            score: e.edgeQuality || 50,
+            confidence: e.edgeSignal,
+            edge: e.divergence,
+            netEdge: e.divergence,
+            positionSize: 10,
+            liquidity: e.liquidity || 50000,
+            riskLevel: e.edgeGrade === 'A' ? 'LOW' : 'MEDIUM',
+            yesTokenId: mkt?.yesTokenId || null,
+            noTokenId: mkt?.noTokenId || null,
+          };
+        });
       if (edgeOpps.length > 0) {
         const recorded = paperTrader.recordScanResults(edgeOpps, 25);
         if (recorded > 0) log.info('SCANNER', `Paper trader: recorded ${recorded} new positions from autoScan`);
@@ -278,6 +287,31 @@ async function runAutoScan() {
           riskNote: o.riskNote,
         }));
         if (provenAlerts.length > 0) telegramBot.pushEdgeAlert(provenAlerts).catch(() => {});
+      }
+      // Feed proven edges to paper trader for shadow live mirroring
+      if (provenEdgeOpps.length > 0) {
+        const ptOpps = provenEdgeOpps.map(o => ({
+          conditionId: o.conditionId,
+          market: o.market,
+          question: o.market,
+          strategy: o.strategy || 'PROVEN_EDGE',
+          side: o.side,
+          price: o.entryPrice,
+          yesPrice: o.side === 'YES' ? o.entryPrice : 1 - o.entryPrice,
+          noPrice: o.side === 'NO' ? o.entryPrice : 1 - o.entryPrice,
+          score: o.score || 70,
+          confidence: o.grade === 'A+' || o.grade === 'A' ? 'STRONG' : 'MODERATE',
+          edge: o.edge?.net || 0,
+          netEdge: o.edge?.net || 0,
+          positionSize: o.positionSize || 10,
+          liquidity: o.liquidity || 50000,
+          riskLevel: o.grade === 'A+' || o.grade === 'A' ? 'LOW' : 'MEDIUM',
+          yesTokenId: o.yesTokenId,
+          noTokenId: o.noTokenId,
+        }));
+        const recorded = paperTrader.recordScanResults(ptOpps, 25);
+        if (recorded > 0) log.info('SCANNER', `Paper trader: recorded ${recorded} proven edge positions`);
+      }
       }
     } catch (err) {
       log.debug('SCANNER', `Proven edge scan failed: ${err.message}`);
