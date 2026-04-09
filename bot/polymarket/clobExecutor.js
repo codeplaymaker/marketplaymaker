@@ -25,6 +25,7 @@
 
 const log = require('../utils/logger');
 const config = require('../config');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -586,6 +587,41 @@ function saveOrders() {
   } catch { /* non-critical */ }
 }
 
+// ─── L2 HMAC Auth ────────────────────────────────────────────────────
+function buildL2Headers(method, requestPath, body = '') {
+  if (!apiKey || !apiSecret || !apiPassphrase) return null;
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const message = timestamp + method + requestPath + body;
+  const key = Buffer.from(apiSecret, 'base64');
+  const signature = crypto.createHmac('sha256', key).update(message).digest('base64');
+  return {
+    'POLY-ADDRESS': wallet?.address || '',
+    'POLY-SIGNATURE': signature,
+    'POLY-TIMESTAMP': timestamp,
+    'POLY-NONCE': '0',
+    'POLY-API-KEY': apiKey,
+    'POLY-PASSPHRASE': apiPassphrase,
+  };
+}
+
+// ─── Exchange Balance (Polymarket portfolio) ─────────────────────────
+async function getExchangeBalance() {
+  const reqPath = '/balance-allowance?asset_type=COLLATERAL';
+  const headers = buildL2Headers('GET', reqPath);
+  if (!headers) return null;
+  try {
+    const res = await fetch(`${CLOB_API}${reqPath}`, { headers });
+    if (!res.ok) return null;
+    const data = await res.json();
+    // balance is in USDC smallest units (6 decimals)
+    const raw = parseFloat(data.balance || '0');
+    return raw / 1e6;
+  } catch (err) {
+    log.warn('CLOB_EXEC', `Exchange balance fetch failed: ${err.message}`);
+    return null;
+  }
+}
+
 // ─── Status ──────────────────────────────────────────────────────────
 function getStatus() {
   return {
@@ -601,6 +637,7 @@ function getStatus() {
 module.exports = {
   initialize,
   getUSDCBalance,
+  getExchangeBalance,
   approveUSDC,
   createOrder,
   submitOrder,

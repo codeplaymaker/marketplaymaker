@@ -577,16 +577,21 @@ async function handleLive(chatId) {
   const open = s.openPositions || 0;
   const ready = s.readyForFullLive ? '✅ YES' : `❌ No (${st.totalTrades}/20 trades)`;
 
-  // Fetch wallet balance
+  // Fetch portfolio + wallet balance
+  let exchangeBalance = null;
   let walletBalance = null;
   try {
     const clob = require('./polymarket/clobExecutor');
-    walletBalance = await clob.getUSDCBalance();
+    [exchangeBalance, walletBalance] = await Promise.all([
+      clob.getExchangeBalance(),
+      clob.getUSDCBalance(),
+    ]);
   } catch (e) { /* wallet not ready */ }
 
   let text = `🔴 *Shadow Live Trading*\n\n`;
   text += `Status: ${s.enabled ? '🟢 Enabled' : '🔴 Disabled'}\n`;
-  if (walletBalance !== null) text += `💰 Wallet: $${(walletBalance || 0).toFixed(2)} USDC\n`;
+  if (exchangeBalance !== null) text += `💰 Portfolio: $${exchangeBalance.toFixed(2)} USDC\n`;
+  if (walletBalance !== null && walletBalance > 0) text += `💳 Wallet: $${walletBalance.toFixed(2)} USDC\n`;
   text += `Open: ${open} positions\n`;
   text += `Deployed: $${s.totalDeployed.toFixed(2)} | Net: $${s.netDeployed.toFixed(2)}\n`;
   text += `Daily loss: $${s.dailyLoss.toFixed(2)}\n\n`;
