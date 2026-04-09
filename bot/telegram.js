@@ -577,18 +577,28 @@ async function handleLive(chatId) {
   const open = s.openPositions || 0;
   const ready = s.readyForFullLive ? '✅ YES' : `❌ No (${st.totalTrades}/20 trades)`;
 
-  // Fetch portfolio + wallet balance
+  // Fetch portfolio + wallet balance (independent calls so one failure doesn't block others)
   let proxyBalance = null;
   let exchangeBalance = null;
   let walletBalance = null;
   let portfolio = null;
+  let balanceError = null;
   try {
     const clob = require('./polymarket/clobExecutor');
-    proxyBalance = await clob.getProxyBalance().catch(() => null);
-    exchangeBalance = await clob.getExchangeBalance().catch(() => null);
-    walletBalance = await clob.getUSDCBalance().catch(() => null);
-    portfolio = await clob.getPortfolioData().catch(() => null);
-  } catch (e) { /* module not available */ }
+    const results = await Promise.allSettled([
+      clob.getProxyBalance(),
+      clob.getExchangeBalance(),
+      clob.getUSDCBalance(),
+      clob.getPortfolioData(),
+    ]);
+    proxyBalance = results[0].status === 'fulfilled' ? results[0].value : null;
+    exchangeBalance = results[1].status === 'fulfilled' ? results[1].value : null;
+    walletBalance = results[2].status === 'fulfilled' ? results[2].value : null;
+    portfolio = results[3].status === 'fulfilled' ? results[3].value : null;
+    // Log any rejections for debugging
+    const rejected = results.filter(r => r.status === 'rejected').map(r => r.reason?.message || r.reason);
+    if (rejected.length > 0) balanceError = rejected.join('; ');
+  } catch (e) { balanceError = e.message; }
 
   let text = `🔴 *Shadow Live Trading*\n\n`;
   text += `Status: ${s.enabled ? '🟢 Enabled' : '🔴 Disabled'}\n`;
@@ -603,6 +613,7 @@ async function handleLive(chatId) {
   }
   if (exchangeBalance !== null && exchangeBalance > 0) text += `📊 Exchange: $${exchangeBalance.toFixed(2)} USDC\n`;
   if (walletBalance !== null && walletBalance > 0) text += `💳 Wallet: $${walletBalance.toFixed(2)} USDC\n`;
+  if (balanceError) text += `⚠️ _${balanceError.slice(0, 100)}_\n`;
 
   if (portfolio?.recentTrades > 0) {
     text += `\n📈 *Recent Activity (last 50)*\n`;
