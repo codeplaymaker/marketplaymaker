@@ -48,12 +48,8 @@ RUN cd bot && npm install --omit=dev
 # Copy bot source
 COPY bot/ ./bot/
 
-# Ensure logs directory exists (Railway volume will be mounted here)
+# Ensure logs directory exists (persistent storage mounted at /app/bot/logs via Railway dashboard)
 RUN mkdir -p /app/bot/logs
-
-# Declare the persistent volume mount point
-# In Railway dashboard: add a Volume mounted at /app/bot/logs
-VOLUME ["/app/bot/logs"]
 
 # Railway injects PORT
 EXPOSE ${PORT:-4000}
