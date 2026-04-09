@@ -591,27 +591,41 @@ function saveOrders() {
 function buildL2Headers(method, requestPath, body = '') {
   if (!apiKey || !apiSecret || !apiPassphrase) return null;
   const timestamp = Math.floor(Date.now() / 1000).toString();
-  const message = timestamp + method + requestPath + body;
-  const key = Buffer.from(apiSecret, 'base64');
-  const signature = crypto.createHmac('sha256', key).update(message).digest('base64');
+  let message = timestamp + method + requestPath;
+  if (body) message += body;
+
+  // base64url → base64 for decoding
+  const secretStd = apiSecret.replace(/-/g, '+').replace(/_/g, '/');
+  const key = Buffer.from(secretStd, 'base64');
+  const sig = crypto.createHmac('sha256', key).update(message).digest('base64');
+  // base64 → base64url for the header
+  const sigUrlSafe = sig.replace(/\+/g, '-').replace(/\//g, '_');
+
   return {
-    'POLY-ADDRESS': wallet?.address || '',
-    'POLY-SIGNATURE': signature,
-    'POLY-TIMESTAMP': timestamp,
-    'POLY-NONCE': '0',
-    'POLY-API-KEY': apiKey,
-    'POLY-PASSPHRASE': apiPassphrase,
+    'POLY_ADDRESS': wallet?.address || '',
+    'POLY_SIGNATURE': sigUrlSafe,
+    'POLY_TIMESTAMP': timestamp,
+    'POLY_API_KEY': apiKey,
+    'POLY_PASSPHRASE': apiPassphrase,
   };
 }
 
 // ─── Exchange Balance (Polymarket portfolio) ─────────────────────────
 async function getExchangeBalance() {
-  const reqPath = '/balance-allowance?asset_type=COLLATERAL';
-  const headers = buildL2Headers('GET', reqPath);
+  const endpoint = '/balance-allowance';
+  const headers = buildL2Headers('GET', endpoint);
   if (!headers) return null;
   try {
-    const res = await fetch(`${CLOB_API}${reqPath}`, { headers });
-    if (!res.ok) return null;
+    const params = new URLSearchParams({
+      asset_type: 'COLLATERAL',
+      signature_type: '0',
+    });
+    const res = await fetch(`${CLOB_API}${endpoint}?${params}`, { headers });
+    if (!res.ok) {
+      const text = await res.text();
+      log.warn('CLOB_EXEC', `Exchange balance ${res.status}: ${text.slice(0, 200)}`);
+      return null;
+    }
     const data = await res.json();
     // balance is in USDC smallest units (6 decimals)
     const raw = parseFloat(data.balance || '0');
