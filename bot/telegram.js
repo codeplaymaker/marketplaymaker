@@ -176,6 +176,7 @@ async function handleCommand(userId, chatId, command, args, isGroup, username) {
     case '/trades':    return handleTrades(chatId);
     case '/paper':     return handlePaper(chatId);
     case '/pnl':       return handlePnl(chatId);
+    case '/live':      return handleLive(chatId);
     case '/opportunities': return handleOpportunities(chatId);
 
     // Key management (userId for identity, chatId for reply)
@@ -262,6 +263,7 @@ async function handleStart(userId, chatId) {
     `/clv — CLV (Closing Line Value) report\n` +
     `/paper — Paper trading P&L\n` +
     `/pnl — Performance summary\n` +
+    `/live — Shadow live trading P&L\n` +
     `/opportunities — Top opportunities\n\n` +
     `📐 *ICT Playbook*\n` +
     `/ict — ICT analysis (all markets)\n` +
@@ -563,6 +565,34 @@ async function handlePaper(chatId) {
     if (t.resolved) text += ` → P&L: ${t.pnl >= 0 ? '+' : ''}$${(t.pnl || 0).toFixed(2)}`;
     text += `\n   ${t.strategy || ''} | ${t.timestamp ? timeAgo(new Date(t.timestamp)) : ''}\n\n`;
   }
+  await sendTo(chatId, text);
+}
+
+async function handleLive(chatId) {
+  let shadowLive;
+  try { shadowLive = require('./engine/shadowLive'); } catch { return sendTo(chatId, '❌ Shadow live module not available.'); }
+
+  const s = shadowLive.getStatus();
+  const st = s.stats || {};
+  const open = s.openPositions || 0;
+  const ready = s.readyForFullLive ? '✅ YES' : `❌ No (${st.totalTrades}/20 trades)`;
+
+  let text = `🔴 *Shadow Live Trading*\n\n`;
+  text += `Status: ${s.enabled ? '🟢 Enabled' : '🔴 Disabled'}\n`;
+  text += `Open: ${open} positions\n`;
+  text += `Deployed: $${s.totalDeployed.toFixed(2)} | Net: $${s.netDeployed.toFixed(2)}\n`;
+  text += `Daily loss: $${s.dailyLoss.toFixed(2)}\n\n`;
+
+  text += `📊 *Performance*\n`;
+  text += `Trades: ${st.totalTrades}\n`;
+  text += `Real P&L: ${st.realPnL >= 0 ? '+' : ''}$${(st.realPnL || 0).toFixed(2)}\n`;
+  text += `Paper mirror P&L: ${st.paperMirrorPnL >= 0 ? '+' : ''}$${(st.paperMirrorPnL || 0).toFixed(2)}\n`;
+  text += `Avg slippage delta: ${((st.avgSlippageDelta || 0) * 100).toFixed(2)}%\n`;
+  text += `Fill match rate: ${((st.fillMatchRate || 0) * 100).toFixed(0)}%\n\n`;
+
+  text += `🚀 Ready for full live: ${ready}\n`;
+  text += `Resolved: ${s.closedCount} | Comparisons: ${s.fillComparisons}`;
+
   await sendTo(chatId, text);
 }
 
