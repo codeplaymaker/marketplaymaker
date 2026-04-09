@@ -98,7 +98,7 @@ async function initialize(privateKey, options = {}) {
 
     // Create wallet connected to Polygon RPC
     const provider = new ethers.JsonRpcProvider(
-      options.rpcUrl || 'https://polygon-rpc.com'
+      options.rpcUrl || 'https://polygon-bor-rpc.publicnode.com'
     );
     wallet = new ethers.Wallet(privateKey, provider);
 
@@ -130,7 +130,8 @@ async function getUSDCBalance() {
       'function balanceOf(address) view returns (uint256)',
       'function decimals() view returns (uint8)',
     ], wallet);
-    const balance = await usdc.balanceOf(wallet.address);
+    // Check proxy wallet balance (where Polymarket holds user funds)
+    const balance = await usdc.balanceOf(PROXY_ADDRESS);
     const decimals = await usdc.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
   } catch (err) {
