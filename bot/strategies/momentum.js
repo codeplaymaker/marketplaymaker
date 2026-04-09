@@ -136,6 +136,15 @@ function findOpportunities(allMarkets, bankroll = 1000) {
     if (volume24h < (CONF().minVolume || 3000) || liquidity < (CONF().minLiquidity || 2000)) continue;
     if (yesPrice < 0.08 || yesPrice > 0.92) continue;
 
+    // ─── CRITICAL: Skip markets closing very soon (< 12 hours) ────────
+    // Short-expiry markets expire before resolution checks can update stats,
+    // leading to high EXPIRED-without-resolving rates. Minimum 12 hours.
+    if (market.endDate) {
+      const msUntilClose = new Date(market.endDate).getTime() - Date.now();
+      const hoursLeft = msUntilClose / 3600000;
+      if (hoursLeft < 12) continue; // Skip — will expire before learning cycle
+    }
+
     // Record current price
     recordPrice(market.conditionId, yesPrice, volume24h);
 

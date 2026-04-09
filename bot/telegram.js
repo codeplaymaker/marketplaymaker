@@ -581,18 +581,36 @@ async function handleLive(chatId) {
   let proxyBalance = null;
   let exchangeBalance = null;
   let walletBalance = null;
+  let portfolio = null;
   try {
     const clob = require('./polymarket/clobExecutor');
     proxyBalance = await clob.getProxyBalance().catch(() => null);
     exchangeBalance = await clob.getExchangeBalance().catch(() => null);
     walletBalance = await clob.getUSDCBalance().catch(() => null);
+    portfolio = await clob.getPortfolioData().catch(() => null);
   } catch (e) { /* module not available */ }
 
   let text = `🔴 *Shadow Live Trading*\n\n`;
   text += `Status: ${s.enabled ? '🟢 Enabled' : '🔴 Disabled'}\n`;
-  if (proxyBalance !== null) text += `💰 Polymarket: $${proxyBalance.toFixed(2)} USDC\n`;
+
+  // Polymarket account balance section
+  const totalPoly = (proxyBalance || 0) + (portfolio?.positionsValue || 0);
+  if (proxyBalance !== null || portfolio) {
+    text += `\n💰 *Polymarket Account*\n`;
+    if (proxyBalance !== null) text += `   Cash: $${proxyBalance.toFixed(2)} USDC\n`;
+    if (portfolio?.positionsValue > 0) text += `   Positions: $${portfolio.positionsValue.toFixed(2)}\n`;
+    if (proxyBalance !== null) text += `   Total: $${totalPoly.toFixed(2)}\n`;
+  }
   if (exchangeBalance !== null && exchangeBalance > 0) text += `📊 Exchange: $${exchangeBalance.toFixed(2)} USDC\n`;
   if (walletBalance !== null && walletBalance > 0) text += `💳 Wallet: $${walletBalance.toFixed(2)} USDC\n`;
+
+  if (portfolio?.recentTrades > 0) {
+    text += `\n📈 *Recent Activity (last 50)*\n`;
+    text += `   Trades: ${portfolio.recentTrades}\n`;
+    text += `   P&L: ${portfolio.tradingPnL >= 0 ? '+' : ''}$${portfolio.tradingPnL.toFixed(2)}\n`;
+  }
+
+  text += `\n`;
   text += `Open: ${open} positions\n`;
   text += `Deployed: $${s.totalDeployed.toFixed(2)} | Net: $${s.netDeployed.toFixed(2)}\n`;
   text += `Daily loss: $${s.dailyLoss.toFixed(2)}\n\n`;

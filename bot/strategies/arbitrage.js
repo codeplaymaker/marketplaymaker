@@ -362,6 +362,15 @@ function findComplementArbitrage(markets) {
     if (market.liquidity < CONF.minLiquidity) continue;
     if (market.volume24hr < CONF.minVolume24h) continue;
 
+    // ─── CRITICAL: Skip markets closing very soon (< 12 hours) ────────
+    // Short-expiry markets expire before resolution checks can update stats,
+    // leading to high EXPIRED-without-resolving rates. Minimum 12 hours.
+    if (market.endDate) {
+      const msUntilClose = new Date(market.endDate).getTime() - Date.now();
+      const hoursLeft = msUntilClose / 3600000;
+      if (hoursLeft < 12) continue; // Skip — will expire before learning cycle
+    }
+
     const slippage = fees.estimateSlippage(100, market.liquidity) * 2; // Both sides
     const feeOnProfit = deviation * fees.DEFAULT_FEE_RATE;
     const netDeviation = deviation - feeOnProfit - slippage;

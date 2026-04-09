@@ -4,7 +4,7 @@
 		{
 			"label": "React Dev Server",
 			"type": "shell",
-			"command": "cd /Users/obi/Desktop/marketplaymaker && BROWSER=none npx craco start",
+			"command": "cd /Users/obi/Documents/marketplaymaker && BROWSER=none npx craco start",
 			"isBackground": true,
 			"problemMatcher": [
 				"$tsc"

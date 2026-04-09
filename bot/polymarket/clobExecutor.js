@@ -640,15 +640,63 @@ async function getExchangeBalance() {
 const PROXY_ADDRESS = '0x4bee8CbE37f36DC5f8C9d7acB109Ab573baf5653';
 async function getProxyBalance() {
   try {
-    const eth = ethers || require('ethers');
-    const provider = new eth.JsonRpcProvider('https://polygon-bor-rpc.publicnode.com');
-    const usdc = new eth.Contract(USDC_ADDRESS, [
-      'function balanceOf(address) view returns (uint256)',
-    ], provider);
-    const balance = await usdc.balanceOf(PROXY_ADDRESS);
-    return parseFloat(eth.formatUnits(balance, 6));
+    // Raw eth_call — no ethers dependency needed
+    const addr = PROXY_ADDRESS.toLowerCase().replace('0x', '').padStart(64, '0');
+    const data = '0x70a08231' + addr; // balanceOf(address)
+    const rpcs = ['https://polygon-bor-rpc.publicnode.com', 'https://1rpc.io/matic'];
+    let json;
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1, method: 'eth_call',
+            params: [{ to: USDC_ADDRESS, data }, 'latest'],
+          }),
+        });
+        json = await res.json();
+        if (json.result) break;
+      } catch { continue; }
+    }
+    if (!json?.result) throw new Error('All RPCs failed');
+    const raw = parseInt(json.result, 16);
+    return raw / 1e6; // USDC has 6 decimals
   } catch (err) {
     log.warn('CLOB_EXEC', `Proxy balance failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─── Data API (public, no auth) ──────────────────────────────────────
+async function getPortfolioData() {
+  try {
+    const [valueRes, tradesRes, positionsRes] = await Promise.all([
+      fetch(`https://data-api.polymarket.com/value?user=${PROXY_ADDRESS}`).catch(() => null),
+      fetch(`https://data-api.polymarket.com/trades?user=${PROXY_ADDRESS}&limit=50`).catch(() => null),
+      fetch(`https://data-api.polymarket.com/positions?user=${PROXY_ADDRESS}`).catch(() => null),
+    ]);
+    const value = valueRes?.ok ? await valueRes.json() : null;
+    const trades = tradesRes?.ok ? await tradesRes.json() : [];
+    const positions = positionsRes?.ok ? await positionsRes.json() : [];
+    // Compute P&L from trades (size * price = USDC amount)
+    let totalBought = 0, totalSold = 0, tradeCount = 0;
+    for (const t of trades) {
+      const usdcAmount = (t.size || 0) * (t.price || 0);
+      if (t.side === 'BUY') totalBought += usdcAmount;
+      else if (t.side === 'SELL') totalSold += usdcAmount;
+      tradeCount++;
+    }
+    return {
+      positionsValue: value?.[0]?.value || 0,
+      openPositions: positions.length,
+      recentTrades: tradeCount,
+      totalBought,
+      totalSold,
+      tradingPnL: totalSold - totalBought,
+    };
+  } catch (err) {
+    log.warn('CLOB_EXEC', `Data API failed: ${err.message}`);
     return null;
   }
 }
@@ -670,6 +718,7 @@ module.exports = {
   getUSDCBalance,
   getExchangeBalance,
   getProxyBalance,
+  getPortfolioData,
   approveUSDC,
   createOrder,
   submitOrder,

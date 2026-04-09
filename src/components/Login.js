@@ -182,9 +182,14 @@ const Login = () => {
 
     setIsLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const loginPromise = signInWithEmailAndPassword(auth, email, password);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Login timed out — check your internet connection or try disabling browser extensions')), 15000)
+      );
+      await Promise.race([loginPromise, timeoutPromise]);
       navigate('/dashboard');
     } catch (err) {
+      console.error('Login error:', err);
       switch (err.code) {
         case 'auth/user-not-found':
           setError('Email not recognized. Please sign up.');
@@ -205,7 +210,7 @@ const Login = () => {
           setError('Too many failed attempts. Please try again later.');
           break;
         default:
-          setError('An error occurred. Please try again later.');
+          setError(err.message || 'An error occurred. Please try again later.');
           break;
       }
     } finally {
