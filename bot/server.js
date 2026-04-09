@@ -312,7 +312,6 @@ async function runAutoScan() {
         const recorded = paperTrader.recordScanResults(ptOpps, 25);
         if (recorded > 0) log.info('SCANNER', `Paper trader: recorded ${recorded} proven edge positions`);
       }
-      }
     } catch (err) {
       log.debug('SCANNER', `Proven edge scan failed: ${err.message}`);
     }
