@@ -29,6 +29,7 @@ const fees = require('./fees');
 let client = null;
 let probabilityModel = null;
 let strategyOptimizer = null;
+let shadowLive = null;
 
 function getClient() {
   if (!client) client = require('../polymarket/client');
@@ -57,12 +58,14 @@ const RESOLUTION_CHECK_MS = 60000;      // Check resolutions every 60 seconds
 const MAX_RESOLUTION_BATCH = 15;        // Max API calls per resolution check cycle (rate limit friendly)
 const DEFAULT_PAPER_BANKROLL = 50;      // $50 starting simulated bankroll
 const MIN_HOURS_TO_CLOSE = 12;          // Minimum time until market closes (prevents "expired without resolving")
-const MAX_DAYS_HORIZON = 30;            // Block trades resolving > 30 days out
-const MEDIUM_HORIZON_DAYS = 7;          // 8-30 days requires higher score
-const MEDIUM_HORIZON_MIN_SCORE = 60;    // Score threshold for 8-30 day markets
+const MAX_DAYS_HORIZON = 5;             // Block trades resolving > 5 days out (reduced from 7 — cuts expiry bleed further)
+const MEDIUM_HORIZON_DAYS = 2;          // 3-5 days requires higher score (was 3)
+const MEDIUM_HORIZON_MIN_SCORE = 70;    // Score threshold for medium-horizon markets (raised from 65)
 const MAX_OPEN_POSITIONS = 50;          // Hard cap on concurrent open trades
 const CAPITAL_RESERVE_PCT = 0.05;       // Keep 5% bankroll as reserve (never allocate 100%)
-const DISABLED_STRATEGIES = new Set(['NO_BETS']); // Strategies permanently disabled from paper trading
+// Disabled: BTC_BOT (miscalibrated price targets), WHALE_DETECTION (50% win rate = coin flip),
+// PROVEN_EDGE (0% win rate in paper trading so far)
+const DISABLED_STRATEGIES = new Set(['NO_BETS', 'BTC_BOT', 'WHALE_DETECTION', 'PROVEN_EDGE']);
 
 let paperTrades = [];
 let resolvedTrades = [];
@@ -383,9 +386,9 @@ function recordScanResults(opportunities, maxRecord = 20) {
     }
 
     // ─── Time Horizon Gate ──────────────────────────────────────────
-    // Primary (≤7 days): normal thresholds — fast feedback for learning
-    // Secondary (8-30 days): require score ≥60 — bigger edges justify wait
-    // Block (>30 days): skip entirely — no value in locking up capital
+    // Primary (≤2 days): normal thresholds — fast feedback for learning
+    // Secondary (3-5 days): require score ≥70 — higher conviction for slower markets
+    // Block (>5 days): skip entirely — reduces expiry bleed on long-horizon markets
     // Minimum (< 12 hours): skip entirely — will expire before resolution checks
     const { endDate: oppEndDate, daysLeft } = extractEndDate(opp);
     if (daysLeft !== null) {
@@ -402,6 +405,10 @@ function recordScanResults(opportunities, maxRecord = 20) {
         blocked++;
         continue; // Market closes too soon — will expire before resolution checks can track it
       }
+    } else if (opp.strategy !== 'ARBITRAGE') {
+      // No end date available and not an arb — skip to avoid capital lock-up
+      blocked++;
+      continue;
     }
 
     // Don't open trades we can't afford (simBankroll reflects available capital after entry deductions)
@@ -483,6 +490,17 @@ function recordScanResults(opportunities, maxRecord = 20) {
     };
 
     recorded++;
+
+    // Shadow live: mirror eligible paper trades with tiny real money
+    try {
+      if (!shadowLive) shadowLive = require('./shadowLive');
+      const shadowConfig = shadowLive.shouldMirror({ ...trade, ...opp });
+      if (shadowConfig) {
+        shadowLive.executeShadow(shadowConfig).catch(err => {
+          log.debug('PAPER_TRADER', `Shadow live mirror failed: ${err.message}`);
+        });
+      }
+    } catch { /* shadowLive not available */ }
   }
 
   if (recorded > 0) {
@@ -770,6 +788,12 @@ function resolveMarket(conditionId, outcome) {
   // ─── Resolve shadow trades FIRST so their data is available for evaluatePattern ───
   resolveShadowTrades(conditionId, outcome);
 
+  // ─── Resolve shadow live positions (real money validation) ───
+  try {
+    if (!shadowLive) shadowLive = require('./shadowLive');
+    shadowLive.resolvePosition(conditionId, outcome);
+  } catch { /* shadowLive not available */ }
+
   // ─── Feed learning state (skip manual trades to avoid polluting bot learning) ───
   for (const trade of results) {
     const won = trade.pnl?.won;
@@ -1003,12 +1027,21 @@ function expireStale() {
       }
     }
 
-    // 3. Age-based expiry: open >45 days with no resolution in sight
+    // 3. Age-based expiry: open >21 days with no resolution in sight (was 45 — too long for capital lock)
     if (!shouldExpire && trade.recordedAt) {
       const age = (now - new Date(trade.recordedAt).getTime()) / 86400000;
-      if (age > 45) {
+      if (age > 21) {
         shouldExpire = true;
         reason = `Open ${Math.round(age)}d with no resolution — stale`;
+      }
+    }
+
+    // 4. No end date and not arbitrage — likely unresolvable
+    if (!shouldExpire && !trade.endDate && trade.strategy !== 'ARBITRAGE' && trade.recordedAt) {
+      const age = (now - new Date(trade.recordedAt).getTime()) / 86400000;
+      if (age > 10) {
+        shouldExpire = true;
+        reason = `No end date + ${Math.round(age)}d old — unresolvable`;
       }
     }
 

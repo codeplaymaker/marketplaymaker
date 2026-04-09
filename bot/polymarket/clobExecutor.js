@@ -401,17 +401,172 @@ async function placeTrade({ tokenId, side, price, size, maxSlippage = 0.02 }) {
 }
 
 // ─── Order Monitoring ────────────────────────────────────────────────
+const POLL_INTERVAL_MS = 5000;       // Poll every 5 seconds
+const MAX_POLL_DURATION_MS = 300000; // Stop polling after 5 minutes
+const FILL_CHECK_MAX_RETRIES = 60;   // 60 × 5s = 5 minutes
+
+let pollTimer = null;
+
 async function getOpenOrders() {
   if (!isInitialized || dryRun) return liveOrders.filter(o => o.status === 'OPEN' || o.status === 'DRY_RUN');
 
   try {
-    const response = await fetch(`${CLOB_API}/orders?market=${wallet.address}`, {
-      headers: apiKey ? { 'POLY_API_KEY': apiKey } : {},
-    });
+    const headers = apiKey ? {
+      'POLY_API_KEY': apiKey,
+      'POLY_API_SECRET': apiSecret,
+      'POLY_PASSPHRASE': apiPassphrase,
+    } : {};
+    const response = await fetch(`${CLOB_API}/orders?market=${wallet.address}`, { headers });
     if (response.ok) return response.json();
     return [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Check the fill status of a specific order via the CLOB API.
+ * Returns { status, filledSize, remainingSize, avgFillPrice, fills }
+ */
+async function checkOrderStatus(orderId) {
+  if (dryRun) {
+    const local = liveOrders.find(o => o.orderId === orderId);
+    return { status: local?.status || 'UNKNOWN', filledSize: local?.size || 0, remainingSize: 0, fills: [] };
+  }
+
+  try {
+    const headers = apiKey ? {
+      'POLY_API_KEY': apiKey,
+      'POLY_API_SECRET': apiSecret,
+      'POLY_PASSPHRASE': apiPassphrase,
+    } : {};
+    const response = await fetch(`${CLOB_API}/order/${orderId}`, { headers });
+    if (!response.ok) {
+      log.warn('CLOB_EXEC', `Order status check failed: ${response.status}`);
+      return { status: 'UNKNOWN', filledSize: 0, remainingSize: 0, fills: [] };
+    }
+
+    const data = await response.json();
+    const filledSize = parseFloat(data.size_matched || data.filledSize || 0);
+    const totalSize = parseFloat(data.original_size || data.size || 0);
+    const remainingSize = totalSize - filledSize;
+
+    let status = 'OPEN';
+    if (data.status === 'MATCHED' || data.status === 'FILLED' || remainingSize <= 0) {
+      status = 'FILLED';
+    } else if (data.status === 'CANCELLED' || data.status === 'EXPIRED') {
+      status = data.status;
+    } else if (filledSize > 0) {
+      status = 'PARTIAL';
+    }
+
+    return {
+      status,
+      filledSize,
+      remainingSize,
+      totalSize,
+      avgFillPrice: parseFloat(data.associate_trades?.[0]?.price || data.price || 0),
+      fills: data.associate_trades || [],
+      raw: data,
+    };
+  } catch (err) {
+    log.warn('CLOB_EXEC', `Order status error: ${err.message}`);
+    return { status: 'UNKNOWN', filledSize: 0, remainingSize: 0, fills: [] };
+  }
+}
+
+/**
+ * Poll an order until it fills, expires, or times out.
+ * Returns the final order status with fill details.
+ * Handles partial fills by updating the local order record.
+ */
+async function waitForFill(orderId, { timeoutMs = MAX_POLL_DURATION_MS, onPartialFill } = {}) {
+  const startTime = Date.now();
+  let lastFilledSize = 0;
+
+  while (Date.now() - startTime < timeoutMs) {
+    const status = await checkOrderStatus(orderId);
+
+    // Update local order record
+    const local = liveOrders.find(o => o.orderId === orderId);
+    if (local) {
+      local.status = status.status;
+      local.filledSize = status.filledSize;
+      local.remainingSize = status.remainingSize;
+      local.lastChecked = new Date().toISOString();
+      saveOrders();
+    }
+
+    if (status.status === 'FILLED') {
+      log.info('CLOB_EXEC', `Order ${orderId} fully filled: ${status.filledSize} @ ${status.avgFillPrice}`);
+      return { ...status, outcome: 'FILLED' };
+    }
+
+    if (status.status === 'CANCELLED' || status.status === 'EXPIRED') {
+      log.info('CLOB_EXEC', `Order ${orderId} ${status.status} (filled ${status.filledSize}/${status.totalSize})`);
+      return { ...status, outcome: status.filledSize > 0 ? 'PARTIAL' : status.status };
+    }
+
+    // Notify on new partial fills
+    if (status.filledSize > lastFilledSize) {
+      const newFill = status.filledSize - lastFilledSize;
+      log.info('CLOB_EXEC', `Order ${orderId} partial fill: +${newFill} (total ${status.filledSize}/${status.totalSize})`);
+      if (onPartialFill) onPartialFill(status);
+      lastFilledSize = status.filledSize;
+    }
+
+    // Wait before next poll
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+  }
+
+  // Timeout — check one last time
+  const finalStatus = await checkOrderStatus(orderId);
+  log.warn('CLOB_EXEC', `Order ${orderId} timed out after ${timeoutMs / 1000}s (status: ${finalStatus.status}, filled: ${finalStatus.filledSize})`);
+
+  // If partially filled, cancel remainder
+  if (finalStatus.status === 'PARTIAL' || (finalStatus.status === 'OPEN' && finalStatus.filledSize > 0)) {
+    try {
+      await cancelOrder(orderId);
+      log.info('CLOB_EXEC', `Cancelled remaining size on timed-out order ${orderId}`);
+    } catch { /* best effort */ }
+  }
+
+  return { ...finalStatus, outcome: finalStatus.filledSize > 0 ? 'PARTIAL' : 'TIMEOUT' };
+}
+
+/**
+ * Start background polling for all open orders.
+ * Updates statuses and logs fill events.
+ */
+function startOrderPolling() {
+  if (pollTimer) return; // Already running
+
+  pollTimer = setInterval(async () => {
+    const openOrders = liveOrders.filter(o => o.status === 'OPEN' || o.status === 'PARTIAL');
+    if (openOrders.length === 0) return;
+
+    for (const order of openOrders) {
+      try {
+        const status = await checkOrderStatus(order.orderId);
+        order.status = status.status;
+        order.filledSize = status.filledSize;
+        order.remainingSize = status.remainingSize;
+        order.lastChecked = new Date().toISOString();
+
+        if (status.status === 'FILLED' || status.status === 'CANCELLED' || status.status === 'EXPIRED') {
+          log.info('CLOB_EXEC', `[POLL] Order ${order.orderId} → ${status.status} (filled: ${status.filledSize})`);
+        }
+      } catch { /* skip this order */ }
+    }
+
+    saveOrders();
+  }, POLL_INTERVAL_MS * 6); // Poll all orders every 30s
+}
+
+function stopOrderPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 }
 
@@ -452,5 +607,9 @@ module.exports = {
   cancelOrder,
   placeTrade,
   getOpenOrders,
+  checkOrderStatus,
+  waitForFill,
+  startOrderPolling,
+  stopOrderPolling,
   getStatus,
 };

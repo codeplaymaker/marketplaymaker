@@ -37,18 +37,30 @@ let riskManager = null;
 let edgeResolver = null;
 let scanner = null;
 let paperTrader = null;
+let strategyOptimizer = null;
 
 try { executor = require('./executor'); } catch { /* required */ }
 try { riskManager = require('./riskManager'); } catch { /* required */ }
 try { edgeResolver = require('./edgeResolver'); } catch { /* optional */ }
 try { scanner = require('./scanner'); } catch { /* optional */ }
 try { paperTrader = require('./paperTrader'); } catch { /* optional */ }
+try { strategyOptimizer = require('./strategyOptimizer'); } catch { /* optional */ }
 
 // ─── State ───────────────────────────────────────────────────────────
 let signalQueue = [];                 // Pending signals to process
 let executionLog = [];                // History of all execution decisions
 let activeSignals = new Map();        // conditionId → active signal (dedup)
+let lifetimeDedup = new Set();        // conditionId:side → lifetime dedup (matches paper trader)
 let isProcessing = false;
+
+// Disabled strategies — mirrors paper trader's DISABLED_STRATEGIES
+const DISABLED_STRATEGIES = new Set(['BTC_BOT', 'WHALE_DETECTION', 'PROVEN_EDGE']);
+
+// Time horizon constants — mirrors paper trader
+const MAX_DAYS_HORIZON = 5;
+const MEDIUM_HORIZON_DAYS = 2;
+const MEDIUM_HORIZON_MIN_SCORE = 70;
+const MIN_HOURS_TO_CLOSE = 12;
 
 let stats = {
   signalsReceived: 0,
@@ -234,22 +246,88 @@ async function processQueue() {
  */
 async function processSignal(signal) {
   const startTime = Date.now();
+  const side = signal.side || 'YES';
+  const SOURCE_TO_STRATEGY = {
+    newMarketDetector: 'NEW_MARKET',
+    newsReactor: 'NEWS_BREAK',
+    panicDipDetector: 'PANIC_DIP',
+    scanner: 'PROVEN_EDGE',
+  };
+  const strategy = SOURCE_TO_STRATEGY[signal.source] || signal.type || signal.source || 'DEFAULT';
+
+  // ─── Disabled Strategy Gate (mirrors paper trader) ─────────────────
+  if (DISABLED_STRATEGIES.has(strategy) || DISABLED_STRATEGIES.has(signal.type)) {
+    signal.status = 'REJECTED_DISABLED';
+    signal.riskReason = `Strategy ${strategy} is disabled`;
+    executionLog.push(signal);
+    stats.signalsRejectedRisk++;
+    log.info('PIPELINE', `Disabled strategy: ${signal.market?.slice(0, 50)} — ${strategy}`);
+    return { signal, result: null, reason: signal.riskReason };
+  }
+
+  // ─── Lifetime Dedup Gate (mirrors paper trader) ────────────────────
+  // Paper trader only enters once per (conditionId, strategy, side) — ever.
+  // Prevents repeated entries into the same losing market.
+  const dedupKey = `${signal.conditionId}:${strategy}:${side}`;
+  if (lifetimeDedup.has(dedupKey)) {
+    signal.status = 'REJECTED_DEDUP';
+    signal.riskReason = `Lifetime dedup: already traded ${dedupKey}`;
+    stats.signalsDeduplicated++;
+    return { signal, result: null, reason: signal.riskReason };
+  }
+
+  // ─── Time Horizon Gate (mirrors paper trader) ──────────────────────
+  // Block trades resolving > 5 days out, require higher score for 2-5 day markets,
+  // skip markets closing in < 12 hours.
+  if (signal.endDate) {
+    const end = new Date(signal.endDate);
+    if (!isNaN(end.getTime())) {
+      const daysLeft = Math.max(0, (end.getTime() - Date.now()) / 86400000);
+      const hoursLeft = daysLeft * 24;
+      if (daysLeft > MAX_DAYS_HORIZON) {
+        signal.status = 'REJECTED_HORIZON';
+        signal.riskReason = `Market resolves in ${daysLeft.toFixed(0)} days (max ${MAX_DAYS_HORIZON})`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        return { signal, result: null, reason: signal.riskReason };
+      }
+      if (daysLeft > MEDIUM_HORIZON_DAYS && (signal.score || 0) < MEDIUM_HORIZON_MIN_SCORE) {
+        signal.status = 'REJECTED_HORIZON';
+        signal.riskReason = `Medium-horizon (${daysLeft.toFixed(0)}d) needs score ≥${MEDIUM_HORIZON_MIN_SCORE}, got ${signal.score || 0}`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        return { signal, result: null, reason: signal.riskReason };
+      }
+      if (hoursLeft < MIN_HOURS_TO_CLOSE) {
+        signal.status = 'REJECTED_HORIZON';
+        signal.riskReason = `Market closes in ${hoursLeft.toFixed(0)}h (min ${MIN_HOURS_TO_CLOSE}h)`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        return { signal, result: null, reason: signal.riskReason };
+      }
+    }
+  }
+
+  // ─── Strategy Optimizer Gate (mirrors paper trader) ────────────────
+  // Thompson Sampling optimizer disables strategies with <30% win rate after 30+ trades
+  if (strategyOptimizer) {
+    try {
+      if (!strategyOptimizer.isEnabled(strategy)) {
+        signal.status = 'REJECTED_OPTIMIZER';
+        signal.riskReason = `Strategy ${strategy} disabled by optimizer`;
+        executionLog.push(signal);
+        stats.signalsRejectedRisk++;
+        log.info('PIPELINE', `Optimizer disabled: ${signal.market?.slice(0, 50)} — ${strategy}`);
+        return { signal, result: null, reason: signal.riskReason };
+      }
+    } catch { /* proceed if optimizer unavailable */ }
+  }
 
   // ─── Learning Gate ─────────────────────────────────────────────────
   // Consult paper trader's learning system before executing real trades.
   // If a pattern has been blocked by the learning system, don't risk real money on it.
   if (paperTrader) {
     try {
-      const side = signal.side || 'YES';
-      // Map pipeline source names → scanner strategy names used in learningState
-      const SOURCE_TO_STRATEGY = {
-        newMarketDetector: 'NEW_MARKET',
-        newsReactor: 'NEWS_BREAK',
-        panicDipDetector: 'PANIC_DIP',
-        scanner: 'PROVEN_EDGE',
-      };
-      const strategy = SOURCE_TO_STRATEGY[signal.source] || signal.type || signal.source || 'DEFAULT';
-
       // Check pattern block (e.g., WHALE_DETECTION:YES blocked after 0W/8L)
       if (paperTrader.isPatternBlocked(strategy, side)) {
         signal.status = 'REJECTED_LEARNING';
@@ -286,6 +364,9 @@ async function processSignal(signal) {
       // Proceed if learning check fails — don't block real trades on learning errors
     }
   }
+
+  // Mark lifetime dedup AFTER all gates pass (before execution)
+  lifetimeDedup.add(dedupKey);
 
   // Risk check
   if (riskManager) {
@@ -326,6 +407,14 @@ async function processSignal(signal) {
     limitPrice: signal.limitPrice,
     suggestedSize: signal.suggestedSize,
   };
+
+  // Scale position by strategy optimizer allocation (mirrors paper trader)
+  if (strategyOptimizer && opportunity.suggestedSize) {
+    try {
+      const alloc = strategyOptimizer.getAllocation(strategy);
+      opportunity.suggestedSize = Math.round(opportunity.suggestedSize * Math.min(alloc, 2.0) * 100) / 100;
+    } catch { /* proceed with original size */ }
+  }
 
   // Execute — use scanner's bankroll (the canonical source) with fallback
   const bankroll = scanner?.getBankroll?.() || 3000;
@@ -387,6 +476,7 @@ function fromNewMarketDetector(market, analysis) {
     score: analysis.score,
     liquidity: analysis.liquidity,
     volume: analysis.volume,
+    endDate: analysis.endDate || market.endDate || market.end_date_iso,
     source: 'newMarketDetector',
   });
 }
@@ -409,6 +499,7 @@ function fromNewsReactor(newsSignal) {
     impactScore: newsSignal.impactScore,
     liquidity: newsSignal.liquidity,
     volume: newsSignal.volume,
+    endDate: newsSignal.endDate,
     source: 'newsReactor',
     headline: newsSignal.headline,
   });
@@ -431,6 +522,7 @@ function fromPanicDip(dip) {
     score: dip.score,
     liquidity: dip.liquidity,
     volume: dip.volume,
+    endDate: dip.endDate,
     source: 'panicDipDetector',
     dropPct: dip.dropPct,
     reversionTarget: dip.reversionTarget,

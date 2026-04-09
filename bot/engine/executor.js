@@ -223,6 +223,19 @@ async function execute(opportunity, bankroll) {
     };
   }
 
+  // Liquidity gate: in LIVE mode, reject trades on illiquid markets
+  const liquidity = opportunity.liquidity || 0;
+  if (mode === 'LIVE' && liquidity < 2000) {
+    log.warn('EXECUTOR', `Trade rejected: insufficient liquidity $${liquidity} (min $2000 for live)`);
+    return { ...trade, status: 'REJECTED', reason: `Insufficient market liquidity: $${liquidity} < $2000` };
+  }
+  // Never trade more than 5% of available liquidity (prevents walking the book)
+  if (liquidity > 0 && trade.positionSize > liquidity * 0.05) {
+    const maxSize = Math.round(liquidity * 0.05 * 100) / 100;
+    log.info('EXECUTOR', `Position capped by liquidity: $${trade.positionSize} → $${maxSize} (5% of $${liquidity})`);
+    trade.positionSize = maxSize;
+  }
+
   // Apply dynamic risk multiplier to position size
   if (riskCheck.riskMultiplier && riskCheck.riskMultiplier < 1) {
     const original = trade.positionSize;
@@ -498,6 +511,28 @@ async function executeLiveTrade(trade) {
     };
   }
 
+  // Pre-flight: check USDC balance before placing any real order
+  const status = clobExecutor.getStatus();
+  if (!status.dryRun) {
+    const usdcBalance = await clobExecutor.getUSDCBalance();
+    if (usdcBalance < trade.positionSize) {
+      log.warn('EXECUTOR', `Insufficient USDC: have $${usdcBalance.toFixed(2)}, need $${trade.positionSize.toFixed(2)}`);
+      return {
+        ...trade,
+        status: 'REJECTED',
+        reason: `Insufficient USDC balance: $${usdcBalance.toFixed(2)} < $${trade.positionSize.toFixed(2)}`,
+        usdcBalance,
+      };
+    }
+    // Pre-flight: ensure USDC is approved for CTF Exchange
+    try {
+      await clobExecutor.approveUSDC();
+    } catch (err) {
+      log.error('EXECUTOR', `USDC approval failed: ${err.message}`);
+      return { ...trade, status: 'REJECTED', reason: `USDC approval failed: ${err.message}` };
+    }
+  }
+
   try {
     // Map trade to CLOB parameters
     const tokenId = trade.side === 'YES' ? trade.yesTokenId : trade.noTokenId;
@@ -546,7 +581,38 @@ async function executeLiveTrade(trade) {
     saveTrades();
     persistTrade(executedTrade);
 
-    if (result.status !== 'DRY_RUN') {
+    // For live orders, poll for fill status
+    if (result.status !== 'DRY_RUN' && result.orderId) {
+      // Non-blocking: start polling in background, update trade record when filled
+      clobExecutor.waitForFill(result.orderId, {
+        timeoutMs: 120000, // 2 minute timeout for market orders
+        onPartialFill: (fillStatus) => {
+          executedTrade.filledSize = fillStatus.filledSize;
+          executedTrade.remainingSize = fillStatus.remainingSize;
+          executedTrade.status = 'PARTIAL';
+          saveTrades();
+        },
+      }).then((fillResult) => {
+        executedTrade.fillOutcome = fillResult.outcome;
+        executedTrade.filledSize = fillResult.filledSize;
+        if (fillResult.avgFillPrice) executedTrade.fillPrice = fillResult.avgFillPrice;
+        if (fillResult.outcome === 'FILLED') {
+          executedTrade.status = 'FILLED';
+          executedTrade.shares = fillResult.filledSize;
+          riskManager.addPosition(executedTrade);
+        } else if (fillResult.outcome === 'PARTIAL') {
+          executedTrade.status = 'PARTIAL';
+          // Only add the filled portion to risk tracking
+          const partialTrade = { ...executedTrade, positionSize: fillResult.filledSize * (fillResult.avgFillPrice || trade.price) };
+          riskManager.addPosition(partialTrade);
+        }
+        // TIMEOUT/CANCELLED with no fills: don't track position
+        saveTrades();
+        persistTrade(executedTrade);
+      }).catch((err) => {
+        log.warn('EXECUTOR', `Fill polling failed for ${result.orderId}: ${err.message}`);
+      });
+    } else if (result.status !== 'DRY_RUN') {
       riskManager.addPosition(executedTrade);
     }
 

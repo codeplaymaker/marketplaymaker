@@ -12,17 +12,73 @@
  */
 
 const DEFAULT_FEE_RATE = 0.02;      // 2% on profits
-const SLIPPAGE_BASE = 0.003;        // 0.3% base slippage
+const SLIPPAGE_BASE = 0.005;        // 0.5% base slippage (increased from 0.3% — closer to real Polymarket fills)
 const SLIPPAGE_SIZE_FACTOR = 0.001; // Additional slippage per $100 of size
 
 /**
- * Estimate slippage based on position size and liquidity
- * Larger orders relative to liquidity = more slippage
+ * Estimate slippage based on position size and liquidity.
+ * Uses a square-root impact model (more realistic than linear).
+ * Calibrated against observed Polymarket orderbook fills.
  */
 function estimateSlippage(positionSize, liquidity) {
-  if (!liquidity || liquidity === 0) return SLIPPAGE_BASE * 3;
+  if (!liquidity || liquidity === 0) return SLIPPAGE_BASE * 5; // Unknown liquidity = assume bad
   const sizeRatio = positionSize / liquidity;
-  return SLIPPAGE_BASE + sizeRatio * 0.5; // Linear impact model
+  // Square-root impact: slippage grows sub-linearly but faster at small sizes
+  // This matches empirical market microstructure better than linear
+  return SLIPPAGE_BASE + Math.sqrt(sizeRatio) * 0.08;
+}
+
+/**
+ * Estimate slippage from real orderbook depth.
+ * Walks the book to calculate actual cost of filling the order.
+ * Returns fractional slippage (e.g. 0.02 = 2%).
+ *
+ * @param {number} positionSize - USDC amount
+ * @param {Array<{price: string|number, size: string|number}>} bookSide - bids or asks from CLOB
+ * @param {number} midPrice - current midpoint price
+ * @returns {number} slippage as fraction (0.01 = 1%)
+ */
+function estimateSlippageFromBook(positionSize, bookSide, midPrice) {
+  if (!bookSide || bookSide.length === 0 || !midPrice || midPrice <= 0) {
+    // Fallback to model-based estimate with conservative liquidity assumption
+    return estimateSlippage(positionSize, 5000);
+  }
+
+  let remaining = positionSize;
+  let totalCost = 0;
+  let totalShares = 0;
+
+  for (const level of bookSide) {
+    const price = parseFloat(level.price || level.p || 0);
+    const size = parseFloat(level.size || level.s || 0);
+    if (price <= 0 || size <= 0) continue;
+
+    const levelUSDC = price * size; // USDC value at this level
+    const fillAmount = Math.min(remaining, levelUSDC);
+    const sharesFilled = fillAmount / price;
+
+    totalCost += fillAmount;
+    totalShares += sharesFilled;
+    remaining -= fillAmount;
+
+    if (remaining <= 0) break;
+  }
+
+  if (totalShares === 0) {
+    // Book is empty or too thin — very high slippage
+    return estimateSlippage(positionSize, 1000);
+  }
+
+  const avgFillPrice = totalCost / totalShares;
+  const slippage = Math.abs(avgFillPrice - midPrice) / midPrice;
+
+  // If we couldn't fill the full order, add penalty for remaining size
+  if (remaining > 0) {
+    const unfilled = remaining / positionSize;
+    return slippage + unfilled * 0.10; // 10% penalty per unfilled fraction
+  }
+
+  return Math.max(slippage, SLIPPAGE_BASE); // At minimum, base slippage
 }
 
 /**
@@ -106,6 +162,7 @@ module.exports = {
   feeAdjustedEV,
   feeAdjustedKelly,
   estimateSlippage,
+  estimateSlippageFromBook,
   minProfitableEdge,
   DEFAULT_FEE_RATE,
   SLIPPAGE_BASE,

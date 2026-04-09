@@ -62,6 +62,18 @@ module.exports = {
     maxCorrelatedExposure: 0.10, // Max 10% in correlated markets
   },
 
+  // Shadow Live Trading — mirrors paper trades with tiny real money to validate fills
+  shadowLive: {
+    enabled: !!process.env.SHADOW_LIVE_ENABLED,       // Opt-in: set SHADOW_LIVE_ENABLED=true in .env
+    maxBankroll: 50,                                   // Max real USDC to deploy total
+    maxPerTrade: 2,                                    // Max $2 per shadow trade
+    maxOpenPositions: 5,                               // Max 5 concurrent real positions
+    maxDailyLoss: 5,                                   // Hard stop at $5 daily loss
+    minScore: 70,                                      // Only mirror high-conviction paper trades
+    minLiquidity: 5000,                                // Only trade markets with $5k+ liquidity
+    strategies: ['autoScan', 'ARBITRAGE', 'MOMENTUM', 'NO_BETS', 'SPORTS_EDGE'], // All winning strategies
+  },
+
   // Kalshi API
   KALSHI_API: 'https://api.elections.kalshi.com/trade-api/v2',
   kalshi: {
