@@ -577,27 +577,52 @@ async function handleLive(chatId) {
   const open = s.openPositions || 0;
   const ready = s.readyForFullLive ? '✅ YES' : `❌ No (${st.totalTrades}/20 trades)`;
 
-  // Fetch portfolio + wallet balance (independent calls so one failure doesn't block others)
+  // Fetch portfolio + wallet balance — inline with raw fetch, no clobExecutor dependency
   let proxyBalance = null;
-  let exchangeBalance = null;
-  let walletBalance = null;
   let portfolio = null;
   let balanceError = null;
+  const PROXY_ADDR = '0x4bee8CbE37f36DC5f8C9d7acB109Ab573baf5653';
+  const USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
   try {
-    const clob = require('./polymarket/clobExecutor');
     const results = await Promise.allSettled([
-      clob.getProxyBalance(),
-      clob.getExchangeBalance(),
-      clob.getUSDCBalance(),
-      clob.getPortfolioData(),
+      // On-chain USDC balance via raw JSON-RPC
+      (async () => {
+        const addr = PROXY_ADDR.toLowerCase().replace('0x', '').padStart(64, '0');
+        const calldata = '0x70a08231' + addr;
+        const rpcs = ['https://polygon-bor-rpc.publicnode.com', 'https://1rpc.io/matic'];
+        for (const rpc of rpcs) {
+          try {
+            const r = await fetch(rpc, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: USDC, data: calldata }, 'latest'] }),
+            });
+            const j = await r.json();
+            if (j.result) return parseInt(j.result, 16) / 1e6;
+          } catch { continue; }
+        }
+        return null;
+      })(),
+      // Polymarket Data API — positions value + recent trades
+      (async () => {
+        const [vr, tr] = await Promise.all([
+          fetch(`https://data-api.polymarket.com/value?user=${PROXY_ADDR}`).catch(() => null),
+          fetch(`https://data-api.polymarket.com/trades?user=${PROXY_ADDR}&limit=50`).catch(() => null),
+        ]);
+        const val = vr?.ok ? await vr.json() : null;
+        const trades = tr?.ok ? await tr.json() : [];
+        let totalBought = 0, totalSold = 0;
+        for (const t of trades) {
+          const amt = (t.size || 0) * (t.price || 0);
+          if (t.side === 'BUY') totalBought += amt;
+          else if (t.side === 'SELL') totalSold += amt;
+        }
+        return { positionsValue: val?.[0]?.value || 0, recentTrades: trades.length, tradingPnL: totalSold - totalBought };
+      })(),
     ]);
     proxyBalance = results[0].status === 'fulfilled' ? results[0].value : null;
-    exchangeBalance = results[1].status === 'fulfilled' ? results[1].value : null;
-    walletBalance = results[2].status === 'fulfilled' ? results[2].value : null;
-    portfolio = results[3].status === 'fulfilled' ? results[3].value : null;
-    // Log any rejections for debugging
-    const rejected = results.filter(r => r.status === 'rejected').map(r => r.reason?.message || r.reason);
-    if (rejected.length > 0) balanceError = rejected.join('; ');
+    portfolio = results[1].status === 'fulfilled' ? results[1].value : null;
+    const errs = results.filter(r => r.status === 'rejected').map(r => r.reason?.message || String(r.reason));
+    if (errs.length) balanceError = errs.join('; ');
   } catch (e) { balanceError = e.message; }
 
   let text = `🔴 *Shadow Live Trading*\n\n`;
@@ -611,13 +636,10 @@ async function handleLive(chatId) {
     if (portfolio?.positionsValue > 0) text += `   Positions: $${portfolio.positionsValue.toFixed(2)}\n`;
     if (proxyBalance !== null) text += `   Total: $${totalPoly.toFixed(2)}\n`;
   }
-  if (exchangeBalance !== null && exchangeBalance > 0) text += `📊 Exchange: $${exchangeBalance.toFixed(2)} USDC\n`;
-  if (walletBalance !== null && walletBalance > 0) text += `💳 Wallet: $${walletBalance.toFixed(2)} USDC\n`;
-  if (balanceError) text += `⚠️ _${balanceError.slice(0, 100)}_\n`;
+  if (balanceError) text += `⚠️ _${balanceError.slice(0, 120)}_\n`;
 
   if (portfolio?.recentTrades > 0) {
-    text += `\n📈 *Recent Activity (last 50)*\n`;
-    text += `   Trades: ${portfolio.recentTrades}\n`;
+    text += `\n📈 *Recent Trades (${portfolio.recentTrades})*\n`;
     text += `   P&L: ${portfolio.tradingPnL >= 0 ? '+' : ''}$${portfolio.tradingPnL.toFixed(2)}\n`;
   }
 
@@ -634,7 +656,8 @@ async function handleLive(chatId) {
   text += `Fill match rate: ${((st.fillMatchRate || 0) * 100).toFixed(0)}%\n\n`;
 
   text += `🚀 Ready for full live: ${ready}\n`;
-  text += `Resolved: ${s.closedCount} | Comparisons: ${s.fillComparisons}`;
+  text += `Resolved: ${s.closedCount} | Comparisons: ${s.fillComparisons}\n`;
+  text += `_v2.1_`;
 
   await sendTo(chatId, text);
 }
