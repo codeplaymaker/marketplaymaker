@@ -636,6 +636,22 @@ async function getExchangeBalance() {
   }
 }
 
+// ─── Proxy Wallet Balance (main Polymarket account) ──────────────────
+const PROXY_ADDRESS = '0x4bee8CbE37f36DC5f8C9d7acB109Ab573baf5653';
+async function getProxyBalance() {
+  if (!ethers) return null;
+  try {
+    const provider = new ethers.JsonRpcProvider('https://polygon-bor-rpc.publicnode.com');
+    const usdc = new ethers.Contract(USDC_ADDRESS, [
+      'function balanceOf(address) view returns (uint256)',
+    ], provider);
+    const balance = await usdc.balanceOf(PROXY_ADDRESS);
+    return parseFloat(ethers.formatUnits(balance, 6));
+  } catch {
+    return null;
+  }
+}
+
 // ─── Status ──────────────────────────────────────────────────────────
 function getStatus() {
   return {
@@ -652,6 +668,7 @@ module.exports = {
   initialize,
   getUSDCBalance,
   getExchangeBalance,
+  getProxyBalance,
   approveUSDC,
   createOrder,
   submitOrder,
