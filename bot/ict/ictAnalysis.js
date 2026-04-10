@@ -7,31 +7,30 @@
 const config = require('./config');
 const log = require('../utils/logger');
 
-// ── State ──
-const state = {
-  // Structure
-  lastSwingHigh: 0, lastSwingLow: 0,
-  prevSwingHigh: 0, prevSwingLow: 0,
-  lastSwingHighBar: 0, lastSwingLowBar: 0,
-  structureBias: 0,  // 1=bull, -1=bear
-  mssLevel: 0,
+// ── State (per-symbol) ──
+const states = {};
 
-  // HTF
-  htfBias: 0,
+function getSymbolState(symbol) {
+  if (!states[symbol]) {
+    states[symbol] = {
+      lastSwingHigh: 0, lastSwingLow: 0,
+      prevSwingHigh: 0, prevSwingLow: 0,
+      lastSwingHighBar: 0, lastSwingLowBar: 0,
+      structureBias: 0,
+      mssLevel: 0,
+      htfBias: 0,
+      fvgs: [],
+      obs: [],
+      oteSwingHigh: 0, oteSwingLow: 0,
+      oteActive: false, oteDirection: 0,
+      pdh: 0, pdl: 0,
+    };
+  }
+  return states[symbol];
+}
 
-  // FVG arrays
-  fvgs: [],  // { top, bot, bar, dir, active }
-
-  // Order Blocks
-  obs: [],   // { top, bot, bar, dir, touches, active }
-
-  // OTE
-  oteSwingHigh: 0, oteSwingLow: 0,
-  oteActive: false, oteDirection: 0,
-
-  // Previous day high/low
-  pdh: 0, pdl: 0,
-};
+// Active state pointer — set per scan call
+let state = null;
 
 /**
  * Run full ICT analysis on candles
@@ -40,8 +39,11 @@ const state = {
  * @param {Array} dailyCandles - Daily candles for PDH/PDL/ADR
  * @returns {Object} analysis result with signals
  */
-function analyze(candles, htfCandles, dailyCandles) {
+function analyze(candles, htfCandles, dailyCandles, symbol = 'XAUUSD') {
   if (!candles || candles.length < 50) return null;
+
+  // Set active state for this symbol
+  state = getSymbolState(symbol);
 
   const atr14 = calcATR(candles, 14);
   if (atr14 <= 0) return null;
@@ -508,16 +510,20 @@ function calcStopLoss(dir, cur, atr14, buffer, triggers) {
   return dir === 1 ? Math.min(cur.open, cur.close) - buffer : Math.max(cur.open, cur.close) + buffer;
 }
 
-function getState() { return { ...state }; }
+function getState(symbol) {
+  if (symbol) return { ...getSymbolState(symbol) };
+  // Return merged summary of all symbols
+  const allStates = {};
+  for (const [sym, s] of Object.entries(states)) allStates[sym] = { ...s };
+  return Object.keys(allStates).length === 1 ? allStates[Object.keys(allStates)[0]] : allStates;
+}
 
-function reset() {
-  state.structureBias = 0;
-  state.htfBias = 0;
-  state.fvgs = [];
-  state.obs = [];
-  state.oteActive = false;
-  state.lastSwingHigh = 0;
-  state.lastSwingLow = 0;
+function reset(symbol) {
+  if (symbol) {
+    delete states[symbol];
+    return;
+  }
+  for (const key of Object.keys(states)) delete states[key];
 }
 
 module.exports = { analyze, getState, reset, isADROK, calcATR };

@@ -88,24 +88,28 @@ async function getAccountInfo() {
 /**
  * Get current spread in pips
  */
-async function getSpread() {
+async function getSpread(symbol) {
   if (!connected) return 999;
   try {
-    const price = await connection.getSymbolPrice(config.symbol);
-    return price ? (price.ask - price.bid) * 10 : 999;  // Gold: 1 pip = 0.1
+    const price = await connection.getSymbolPrice(symbol);
+    if (!price) return 999;
+    // Gold: 1 pip = 0.1 ($0.10), Forex: 1 pip = 0.0001
+    const pipSize = symbol.includes('XAU') ? 0.1 : 0.0001;
+    return (price.ask - price.bid) / pipSize;
   } catch (e) {
     return 999;
   }
 }
 
 /**
- * Get open positions for our symbol
+ * Get open positions for a symbol (or all ICT symbols)
  */
-async function getPositions() {
+async function getPositions(symbol) {
   if (!connected) return [];
   try {
     const positions = await connection.getPositions();
-    return positions.filter(p => p.symbol === config.symbol);
+    if (symbol) return positions.filter(p => p.symbol === symbol);
+    return positions.filter(p => config.symbols.includes(p.symbol));
   } catch (e) {
     log.error('[ICT Executor] Failed to get positions:', e.message);
     return [];
@@ -115,7 +119,7 @@ async function getPositions() {
 /**
  * Calculate lot size based on risk
  */
-async function calcLotSize(entryPrice, sl) {
+async function calcLotSize(entryPrice, sl, symbol) {
   const acctInfo = await getAccountInfo();
   if (!acctInfo) return 0;
 
@@ -123,11 +127,9 @@ async function calcLotSize(entryPrice, sl) {
   const slDistance = Math.abs(entryPrice - sl);
   if (slDistance <= 0) return 0;
 
-  // XAUUSD: 1 lot = 100 oz, pip value depends on contract size
-  // Approximate: on most brokers, 0.01 lot, 1 pip (0.1 on gold) = ~$0.10
-  // We'll use the contract spec from MetaAPI
+  // Use MetaAPI symbol spec for accurate tick values
   try {
-    const spec = await connection.getSymbolSpecification(config.symbol);
+    const spec = await connection.getSymbolSpecification(symbol);
     const tickValue = spec.tickValue || 1;
     const tickSize = spec.tickSize || 0.01;
     const slTicks = slDistance / tickSize;
@@ -172,14 +174,14 @@ async function executeTrade(signal) {
   }
 
   // Check spread
-  const spread = await getSpread();
+  const spread = await getSpread(signal.symbol);
   if (spread > config.maxSpreadPips) {
-    log.info(`[ICT Executor] Spread too wide: ${spread.toFixed(1)} pips`);
+    log.info(`[ICT Executor] Spread too wide on ${signal.symbol}: ${spread.toFixed(1)} pips`);
     return null;
   }
 
-  // Check if already in a position
-  const positions = await getPositions();
+  // Check if already in a position on this symbol
+  const positions = await getPositions(signal.symbol);
   if (positions.length > 0) {
     log.info('[ICT Executor] Already have open position');
     return null;
@@ -192,7 +194,7 @@ async function executeTrade(signal) {
   }
 
   // Calculate lot size
-  const lots = await calcLotSize(signal.entryPrice, signal.sl);
+  const lots = await calcLotSize(signal.entryPrice, signal.sl, signal.symbol);
   if (lots <= 0) return null;
 
   try {
@@ -201,12 +203,12 @@ async function executeTrade(signal) {
 
     if (signal.direction === 'buy') {
       result = await connection.createMarketBuyOrder(
-        config.symbol, lots, signal.sl, signal.tp1,
+        signal.symbol, lots, signal.sl, signal.tp1,
         { comment, clientId: `ict_${Date.now()}` }
       );
     } else {
       result = await connection.createMarketSellOrder(
-        config.symbol, lots, signal.sl, signal.tp1,
+        signal.symbol, lots, signal.sl, signal.tp1,
         { comment, clientId: `ict_${Date.now()}` }
       );
     }
@@ -215,6 +217,7 @@ async function executeTrade(signal) {
       openTrade = {
         orderId: result.orderId,
         positionId: result.positionId,
+        symbol: signal.symbol,
         direction: signal.direction,
         entryType: signal.entryType,
         confluence: signal.confluence,
@@ -248,7 +251,7 @@ async function managePosition() {
   if (!connected || !openTrade) return;
 
   try {
-    const positions = await getPositions();
+    const positions = await getPositions(openTrade.symbol);
     if (positions.length === 0) {
       // Position was closed (SL or TP hit)
       await recordClosedTrade();
@@ -257,7 +260,7 @@ async function managePosition() {
     }
 
     const pos = positions[0];
-    const price = await connection.getSymbolPrice(config.symbol);
+    const price = await connection.getSymbolPrice(openTrade.symbol);
     if (!price) return;
 
     const curPrice = openTrade.direction === 'buy' ? price.bid : price.ask;

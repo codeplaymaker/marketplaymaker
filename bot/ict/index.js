@@ -20,7 +20,7 @@ const log = require('../utils/logger');
 
 let scanTimer = null;
 let running = false;
-let lastBarTime = 0;
+let lastBarTimes = {};  // per-symbol
 let startTime = Date.now();
 let scanCount = 0;
 
@@ -40,63 +40,78 @@ async function scan() {
       return;
     }
 
-    // 3. Get candles
-    const [m5Candles, h4Candles, dailyCandles] = await Promise.all([
-      executor.getCandles(config.symbol, config.timeframe, 200),
-      executor.getCandles(config.symbol, config.htfTimeframe, 100),
-      executor.getCandles(config.symbol, '1d', 30),
-    ]);
-
-    if (!m5Candles.length) return;
-
-    // 4. Check for new bar (skip duplicate analysis)
-    const curBarTime = m5Candles[m5Candles.length - 1].time;
-    if (curBarTime === lastBarTime) return;
-    lastBarTime = curBarTime;
-
-    // 5. Session check
+    // 3. Session check (same for all symbols)
     const sessionCheck = sessions.isSessionAllowed(adaptive);
     if (!sessionCheck.allowed) {
-      if (scanCount % 60 === 0) { // Log every ~60 scans
+      if (scanCount % 60 === 0) {
         log.info(`[ICT Bot] Off-session: ${sessionCheck.reason}`);
       }
       return;
     }
 
-    // 6. ADR check
-    if (!ictAnalysis.isADROK(dailyCandles)) {
-      log.info('[ICT Bot] ADR exhausted — skipping');
-      return;
-    }
-
-    // 7. Run ICT analysis
-    const analysis = ictAnalysis.analyze(m5Candles, h4Candles, dailyCandles);
-    if (!analysis) return;
-
-    // 8. Check for signals
-    const signal = analysis.signals.long || analysis.signals.short;
-    if (!signal) return;
-
-    // 9. Apply adaptive weight to confluence
-    const weight = adaptive.getWeight(signal.entryType);
-    const adaptedConf = signal.confluence * weight;
-    if (adaptedConf < config.minConfluence) {
-      log.info(`[ICT Bot] Signal rejected — adapted confluence ${adaptedConf.toFixed(1)} < ${config.minConfluence} (${signal.entryType} weight: ${weight.toFixed(2)})`);
-      return;
-    }
-
-    // 10. Execute trade
-    log.info(`[ICT Bot] SIGNAL: ${signal.direction.toUpperCase()} | ${signal.entryType} | Conf: ${signal.confluence} (adapted: ${adaptedConf.toFixed(1)}) | Session: ${sessionCheck.session}`);
-
-    const trade = await executor.executeTrade(signal);
-
-    if (trade) {
-      // Send Telegram alert
-      await sendTelegramAlert(signal, trade);
+    // 4. Scan each symbol
+    for (const symbol of config.symbols) {
+      await scanSymbol(symbol, sessionCheck);
     }
 
   } catch (e) {
     log.error('[ICT Bot] Scan error:', e.message);
+  }
+}
+
+/**
+ * Scan a single symbol for ICT setups
+ */
+async function scanSymbol(symbol, sessionCheck) {
+  try {
+    // Get candles
+    const [m5Candles, h4Candles, dailyCandles] = await Promise.all([
+      executor.getCandles(symbol, config.timeframe, 200),
+      executor.getCandles(symbol, config.htfTimeframe, 100),
+      executor.getCandles(symbol, '1d', 30),
+    ]);
+
+    if (!m5Candles.length) return;
+
+    // Check for new bar
+    const curBarTime = m5Candles[m5Candles.length - 1].time;
+    if (curBarTime === lastBarTimes[symbol]) return;
+    lastBarTimes[symbol] = curBarTime;
+
+    // ADR check
+    if (!ictAnalysis.isADROK(dailyCandles)) {
+      return;
+    }
+
+    // Run ICT analysis (pass symbol for per-symbol state)
+    const analysis = ictAnalysis.analyze(m5Candles, h4Candles, dailyCandles, symbol);
+    if (!analysis) return;
+
+    // Check for signals
+    const signal = analysis.signals.long || analysis.signals.short;
+    if (!signal) return;
+
+    // Tag signal with symbol
+    signal.symbol = symbol;
+
+    // Apply adaptive weight
+    const weight = adaptive.getWeight(signal.entryType);
+    const adaptedConf = signal.confluence * weight;
+    if (adaptedConf < config.minConfluence) {
+      log.info(`[ICT Bot] ${symbol} signal rejected — adapted confluence ${adaptedConf.toFixed(1)} < ${config.minConfluence} (${signal.entryType} weight: ${weight.toFixed(2)})`);
+      return;
+    }
+
+    // Execute trade
+    log.info(`[ICT Bot] ${symbol} SIGNAL: ${signal.direction.toUpperCase()} | ${signal.entryType} | Conf: ${signal.confluence} (adapted: ${adaptedConf.toFixed(1)}) | Session: ${sessionCheck.session}`);
+
+    const trade = await executor.executeTrade(signal);
+
+    if (trade) {
+      await sendTelegramAlert(signal, trade);
+    }
+  } catch (e) {
+    log.error(`[ICT Bot] ${symbol} scan error:`, e.message);
   }
 }
 
@@ -108,7 +123,7 @@ async function sendTelegramAlert(signal, trade) {
 
   const emoji = signal.direction === 'buy' ? '🟢' : '🔴';
   const text = [
-    `${emoji} *ICT Gold ${signal.direction.toUpperCase()}*`,
+    `${emoji} *ICT ${signal.symbol} ${signal.direction.toUpperCase()}*`,
     ``,
     `Entry: ${signal.entryType} | Conf: ${signal.confluence}`,
     `Price: $${signal.entryPrice.toFixed(2)}`,
@@ -172,7 +187,7 @@ async function start() {
   running = true;
   scanTimer = setInterval(scan, config.scanIntervalMs);
   log.info(`[ICT Bot] Scanner started — checking every ${config.scanIntervalMs / 1000}s`);
-  log.info(`[ICT Bot] Symbol: ${config.symbol} | TF: ${config.timeframe} | HTF: ${config.htfTimeframe}`);
+  log.info(`[ICT Bot] Symbols: ${config.symbols.join(', ')} | TF: ${config.timeframe} | HTF: ${config.htfTimeframe}`);
   log.info(`[ICT Bot] Risk: ${config.riskPercent}% | MaxDaily: ${config.maxDailyTrades} | MinConf: ${config.minConfluence}`);
 
   // Run first scan immediately
@@ -192,14 +207,29 @@ function stop() {
  */
 function getStatus() {
   const adaptSummary = adaptive.getSummary();
-  const ictState = ictAnalysis.getState();
   const sessionCheck = sessions.isSessionAllowed(adaptive);
+
+  // Per-symbol state
+  const symbolStates = {};
+  for (const symbol of config.symbols) {
+    const s = ictAnalysis.getState(symbol);
+    symbolStates[symbol] = {
+      structure: s.structureBias === 1 ? 'BULLISH' : s.structureBias === -1 ? 'BEARISH' : 'NEUTRAL',
+      htfBias: s.htfBias === 1 ? 'BULL' : s.htfBias === -1 ? 'BEAR' : 'FLAT',
+      activeFVGs: s.fvgs?.filter(f => f.active).length || 0,
+      activeOBs: s.obs?.filter(o => o.active).length || 0,
+    };
+  }
+
+  // Backward-compat: pick first symbol for top-level fields
+  const firstState = symbolStates[config.symbols[0]] || {};
 
   return {
     running,
     uptime: Math.floor((Date.now() - startTime) / 1000),
     connected: executor.isConnected(),
-    symbol: config.symbol,
+    symbols: config.symbols,
+    symbol: config.symbols.join(', '),
     timeframe: config.timeframe,
     scanCount,
     dailyTrades: executor.getDailyTrades(),
@@ -207,10 +237,11 @@ function getStatus() {
     openTrade: executor.getOpenTrade(),
     session: sessionCheck.session || 'off-hours',
     sessionAllowed: sessionCheck.allowed,
-    structure: ictState.structureBias === 1 ? 'BULLISH' : ictState.structureBias === -1 ? 'BEARISH' : 'NEUTRAL',
-    htfBias: ictState.htfBias === 1 ? 'BULL' : ictState.htfBias === -1 ? 'BEAR' : 'FLAT',
-    activeFVGs: ictState.fvgs?.filter(f => f.active).length || 0,
-    activeOBs: ictState.obs?.filter(o => o.active).length || 0,
+    structure: firstState.structure || 'NEUTRAL',
+    htfBias: firstState.htfBias || 'FLAT',
+    activeFVGs: Object.values(symbolStates).reduce((s, v) => s + v.activeFVGs, 0),
+    activeOBs: Object.values(symbolStates).reduce((s, v) => s + v.activeOBs, 0),
+    symbolStates,
     adaptive: adaptSummary,
   };
 }

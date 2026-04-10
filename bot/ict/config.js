@@ -9,8 +9,8 @@ module.exports = {
     accountId: process.env.META_API_ACCOUNT_ID,  // Your MT4 account ID in MetaAPI
   },
 
-  // Instrument
-  symbol: process.env.ICT_SYMBOL || 'XAUUSD',
+  // Instruments (comma-separated, or single)
+  symbols: (process.env.ICT_SYMBOLS || process.env.ICT_SYMBOL || 'XAUUSD').split(',').map(s => s.trim()),
   timeframe: process.env.ICT_TIMEFRAME || '5m',   // Entry timeframe
   htfTimeframe: process.env.ICT_HTF || '4h',       // HTF bias timeframe
 
