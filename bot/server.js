@@ -38,6 +38,8 @@ const btcSniper = require('./btcSniper');
 // ─── Optional Modules (graceful degradation) ─────────────────────────
 function optionalRequire(mod) { try { return require(mod); } catch { return null; } }
 
+const ictGoldBot = optionalRequire('./ict');
+
 let database = null;
 try {
   database = require('./engine/database');
@@ -612,6 +614,7 @@ app.get('/api/health', (req, res) => {
     ensemble: probabilityEnsemble ? { report: probabilityEnsemble.getReport() } : null,
     newsStream: newsStream ? newsStream.getStatus() : null,
     logCleanup: logCleanup ? { diskUsage: logCleanup.getDiskUsage() } : null,
+    ictGoldBot: ictGoldBot ? ictGoldBot.getStatus() : null,
   });
 });
 
@@ -642,6 +645,16 @@ app.get('/api/btc/status', (req, res) => {
       stats: btcBot.getStats(),
       tradeHistory: btcBot.getTradeHistory().slice(-20),
     });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ICT Gold Bot endpoints
+app.get('/api/ict/status', (req, res) => {
+  try {
+    if (!ictGoldBot) return res.json({ enabled: false, reason: 'ICT module not loaded' });
+    res.json(ictGoldBot.getStatus());
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -947,6 +960,14 @@ server = app.listen(PORT, () => {
     log.info('SERVER', '⚡ BTC Sniper auto-started');
   } catch (e) { log.warn('SERVER', `BTC Sniper auto-start failed: ${e.message}`); }
 
+  // Initialize ICT Gold Bot (MetaAPI → IC Markets)
+  if (ictGoldBot && process.env.META_API_TOKEN && process.env.META_API_ACCOUNT_ID) {
+    ictGoldBot.start().then(ok => {
+      if (ok) log.info('SERVER', '🥇 ICT Gold Bot auto-started');
+      else log.warn('SERVER', 'ICT Gold Bot failed to start');
+    }).catch(e => log.warn('SERVER', `ICT Gold Bot auto-start failed: ${e.message}`));
+  }
+
   // Auto-fetch markets
   const mktStart = Date.now();
   markets.refreshMarkets()
@@ -1221,6 +1242,9 @@ function gracefulShutdown(signal) {
 
   // Stop BTC Sniper
   try { btcSniper.stop(); } catch { /* ignore */ }
+
+  // Stop ICT Gold Bot
+  try { if (ictGoldBot) ictGoldBot.stop(); } catch { /* ignore */ }
 
   // Stop new alpha engines
   try { if (newMarketDetector) newMarketDetector.stop(); } catch { /* ignore */ }

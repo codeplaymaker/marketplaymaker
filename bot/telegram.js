@@ -207,6 +207,11 @@ async function handleCommand(userId, chatId, command, args, isGroup, username) {
     case '/sniperstop':  return requireAdmin(userId, chatId, () => handleSniperStop(chatId));
     case '/sniperset':   return requireAdmin(userId, chatId, () => handleSniperSet(chatId, args));
 
+    // ICT Gold Bot
+    case '/gold':      return handleGold(chatId);
+    case '/goldstart': return requireAdmin(userId, chatId, () => handleGoldStart(chatId));
+    case '/goldstop':  return requireAdmin(userId, chatId, () => handleGoldStop(chatId));
+
     // Admin only (userId for auth, chatId for reply)
     case '/scan':      return requireAdmin(userId, chatId, () => handleScan(chatId));
     case '/startbot':  return requireAdmin(userId, chatId, () => handleStartBot(chatId));
@@ -256,6 +261,10 @@ async function handleStart(userId, chatId) {
     `/sniperstart — Start sniper (admin)\n` +
     `/sniperstop — Stop sniper (admin)\n` +
     `/sniperset — Sniper config (admin)\n\n` +
+    `🥇 *ICT Gold Bot*\n` +
+    `/gold — Gold bot status & adaptive stats\n` +
+    `/goldstart — Start gold bot (admin)\n` +
+    `/goldstop — Stop gold bot (admin)\n\n` +
     `📊 *Market Info*\n` +
     `/status — Bot health & scanner state\n` +
     `/edges — Latest edge scan results\n` +
@@ -1172,6 +1181,83 @@ async function handleSniperSet(chatId, args) {
   const value = rest.join(' ');
   const result = btcSniper.updateConfig(key, value);
   return sendTo(chatId, result);
+}
+
+// ─── ICT Gold Bot Commands ───────────────────────────────────────────
+
+async function handleGold(chatId) {
+  try {
+    const ictGoldBot = require('./ict');
+    const status = ictGoldBot.getStatus();
+
+    if (!status.running) {
+      return sendTo(chatId, '🥇 *ICT Gold Bot*\n\nStatus: ⏸ *Not running*\n\nStart with /goldstart');
+    }
+
+    const adapt = status.adaptive || {};
+    let entryLines = '';
+    if (adapt.entries) {
+      for (const [name, data] of Object.entries(adapt.entries)) {
+        const icon = parseFloat(data.winRate) >= 50 ? '🟢' : data.total < 5 ? '⚪' : '🔴';
+        entryLines += `${icon} ${name}: ${data.winRate} (${data.total} trades) w:${data.weight}\n`;
+      }
+    }
+
+    let sessLines = '';
+    if (adapt.sessions) {
+      for (const [name, data] of Object.entries(adapt.sessions)) {
+        const icon = data.enabled ? '✅' : '❌';
+        sessLines += `${icon} ${name}: ${data.winRate} (${data.total})\n`;
+      }
+    }
+
+    const trade = status.openTrade;
+    const tradeStr = trade
+      ? `\n📍 *Open Trade*\n${trade.direction.toUpperCase()} ${trade.lots} lots | ${trade.entryType} | SL: $${trade.sl?.toFixed(2)} | TP1: $${trade.tp1?.toFixed(2)}`
+      : '\n📍 No open trade';
+
+    const msg = `🥇 *ICT Gold Bot v1.0*\n\n` +
+      `Status: ${status.connected ? '🟢 Connected' : '🔴 Disconnected'}\n` +
+      `Symbol: ${status.symbol} | TF: ${status.timeframe}\n` +
+      `Structure: *${status.structure}* | HTF: *${status.htfBias}*\n` +
+      `Session: ${status.session} ${status.sessionAllowed ? '✅' : '❌'}\n` +
+      `Trades today: ${status.dailyTrades}/${status.maxDailyTrades}\n` +
+      `Active FVGs: ${status.activeFVGs} | OBs: ${status.activeOBs}\n` +
+      `Scans: ${status.scanCount}\n` +
+      tradeStr +
+      `\n\n📊 *Adaptive Stats* (${adapt.totalTrades || 0} trades)\n` +
+      `Lot multiplier: ${adapt.lotMultiplier || 1.0}x\n` +
+      `Consec losses: ${adapt.consecLosses || 0}\n\n` +
+      `*Entry Types:*\n${entryLines || 'No data yet'}\n` +
+      `*Sessions:*\n${sessLines || 'No data yet'}`;
+
+    return sendTo(chatId, msg);
+  } catch (e) {
+    return sendTo(chatId, `🥇 ICT Gold Bot not loaded: ${e.message}`);
+  }
+}
+
+async function handleGoldStart(chatId) {
+  try {
+    const ictGoldBot = require('./ict');
+    const status = ictGoldBot.getStatus();
+    if (status.running) return sendTo(chatId, '🥇 Gold bot is already running.');
+
+    const ok = await ictGoldBot.start();
+    return sendTo(chatId, ok ? '🥇 ICT Gold Bot started! Scanning XAUUSD.' : '🥇 Failed to start — check MetaAPI credentials.');
+  } catch (e) {
+    return sendTo(chatId, `🥇 Failed: ${e.message}`);
+  }
+}
+
+async function handleGoldStop(chatId) {
+  try {
+    const ictGoldBot = require('./ict');
+    ictGoldBot.stop();
+    return sendTo(chatId, '🥇 ICT Gold Bot stopped.');
+  } catch (e) {
+    return sendTo(chatId, `🥇 Failed: ${e.message}`);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
