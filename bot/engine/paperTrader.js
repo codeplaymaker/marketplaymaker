@@ -496,13 +496,15 @@ function recordScanResults(opportunities, maxRecord = 20) {
     // Shadow live: mirror eligible paper trades with tiny real money
     try {
       if (!shadowLive) shadowLive = require('./shadowLive');
-      const shadowConfig = shadowLive.shouldMirror({ ...trade, ...opp });
+      const mergedTrade = { ...trade, ...opp };
+      log.info('PAPER_TRADER', `Shadow check: ${opp.strategy} ${opp.side} score:${opp.score} liq:${opp.liquidity || 'none'} tokens:${!!(opp.yesTokenId || opp.noTokenId)}`);
+      const shadowConfig = shadowLive.shouldMirror(mergedTrade);
       if (shadowConfig) {
         shadowLive.executeShadow(shadowConfig).catch(err => {
-          log.debug('PAPER_TRADER', `Shadow live mirror failed: ${err.message}`);
+          log.warn('PAPER_TRADER', `Shadow live mirror failed: ${err.message}`);
         });
       }
-    } catch { /* shadowLive not available */ }
+    } catch (err) { log.debug('PAPER_TRADER', `shadowLive error: ${err.message}`); }
   }
 
   if (recorded > 0) {

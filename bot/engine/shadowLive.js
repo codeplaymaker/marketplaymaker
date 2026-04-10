@@ -86,7 +86,10 @@ function resetDailyIfNeeded() {
  * Returns the shadow trade config if yes, null if no.
  */
 function shouldMirror(paperTrade) {
-  if (!SHADOW_CONFIG.enabled) return null;
+  if (!SHADOW_CONFIG.enabled) {
+    log.debug('SHADOW_LIVE', 'Skipped: not enabled');
+    return null;
+  }
   resetDailyIfNeeded();
 
   const maxBankroll = SHADOW_CONFIG.maxBankroll || 50;
@@ -98,18 +101,19 @@ function shouldMirror(paperTrade) {
   const allowedStrategies = SHADOW_CONFIG.strategies || ['autoScan', 'ARBITRAGE', 'MOMENTUM'];
 
   // Hard stops
-  if (state.dailyLoss >= maxDailyLoss) return null;
-  if (state.openPositions.length >= maxOpen) return null;
-  if (state.totalDeployed - state.totalReturned >= maxBankroll) return null;
+  if (state.dailyLoss >= maxDailyLoss) { log.debug('SHADOW_LIVE', 'Skipped: daily loss limit'); return null; }
+  if (state.openPositions.length >= maxOpen) { log.debug('SHADOW_LIVE', 'Skipped: max open positions'); return null; }
+  if (state.totalDeployed - state.totalReturned >= maxBankroll) { log.debug('SHADOW_LIVE', 'Skipped: max bankroll deployed'); return null; }
 
   // Quality gates
-  if ((paperTrade.score || 0) < minScore) return null;
-  if (!allowedStrategies.includes(paperTrade.strategy)) return null;
-  if ((paperTrade.liquidity || 0) < minLiquidity) return null;
+  if ((paperTrade.score || 0) < minScore) { log.debug('SHADOW_LIVE', `Skipped: score ${paperTrade.score} < ${minScore}`); return null; }
+  if (!allowedStrategies.includes(paperTrade.strategy)) { log.debug('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not allowed`); return null; }
+  if ((paperTrade.liquidity || 0) < minLiquidity) { log.debug('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity || 0} < ${minLiquidity}`); return null; }
 
   // Need token IDs for real execution
-  if (!paperTrade.yesTokenId && !paperTrade.noTokenId) return null;
+  if (!paperTrade.yesTokenId && !paperTrade.noTokenId) { log.debug('SHADOW_LIVE', 'Skipped: no token IDs'); return null; }
 
+  log.info('SHADOW_LIVE', `✅ MIRROR: ${paperTrade.strategy} ${paperTrade.side} "${paperTrade.market?.slice(0,40)}" score:${paperTrade.score} liq:${paperTrade.liquidity}`);
   const size = Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade);
 
   return {
