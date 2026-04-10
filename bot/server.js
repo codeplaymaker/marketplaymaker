@@ -604,6 +604,8 @@ app.get('/api/health', (req, res) => {
     memory: { heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB', rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB' },
     markets: markets.getCachedMarkets().length,
     scanner: { running: scanRunning, cachedEdges: cachedScanResults.length },
+    clobExecutor: (() => { try { return require('./polymarket/clobExecutor').getStatus(); } catch { return 'not loaded'; } })(),
+    shadowLive: (() => { try { return require('./engine/shadowLive').getStatus(); } catch { return 'not loaded'; } })(),
     components: healthMonitor ? healthMonitor.getStatus() : null,
     ws: wsServer ? wsServer.getStats() : null,
     optimizer: strategyOptimizer ? { report: strategyOptimizer.getReport() } : null,
