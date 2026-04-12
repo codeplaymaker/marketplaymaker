@@ -164,8 +164,8 @@ function updateCLVSignals(markets) {
         clvTracker.stats.confirmed++;
         clvTracker.stats.pending--;
         log.info('PROVEN_EDGE', `CLV CONFIRMED: ${signal.question?.slice(0, 50)} moved ${(favorableMove * 100).toFixed(1)}% in our direction`);
-      } else if (age > 8 * 60 * 60 * 1000) {
-        // 8+ hours and no favorable move — deny
+      } else if (age > 4 * 60 * 60 * 1000) {
+        // 4+ hours and no favorable move — deny
         signal.confirmed = false;
         signal.clv = r4(favorableMove);
         clvTracker.stats.denied++;

@@ -604,6 +604,7 @@ async function findOpportunities(markets, bankroll) {
 
       // Use probability model for edge estimation
       const modelResult = probabilityModel.estimateProbability(market, orderbook, priceHistory);
+      if (!modelResult || modelResult.estimatedProb === undefined) continue;
       const trueProb = side === 'YES' ? modelResult.estimatedProb : (1 - modelResult.estimatedProb);
 
       // Fee-adjusted EV

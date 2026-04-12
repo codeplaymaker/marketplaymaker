@@ -704,6 +704,8 @@ app.post('/api/admin/seed-state', (req, res) => {
     if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
     let seeded = [];
+    const bodyKeys = Object.keys(req.body || {});
+    log.info('SERVER', `seed-state called, body keys: ${bodyKeys.join(',')}, sizes: ${bodyKeys.map(k => k+':'+JSON.stringify(req.body[k]).length).join(',')}`);
     if (paperTrades) {
       fs.writeFileSync(path.join(logsDir, 'paper-trades.json'), JSON.stringify(paperTrades, null, 2));
       paperTrader.load();
@@ -718,7 +720,7 @@ app.post('/api/admin/seed-state', (req, res) => {
       seeded.push('shadow-live-state');
     }
     log.info('SERVER', `State seeded from admin upload: ${seeded.join(', ')}`);
-    res.json({ ok: true, seeded });
+    res.json({ ok: true, seeded, bodyKeys });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

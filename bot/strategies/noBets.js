@@ -155,7 +155,7 @@ async function findOpportunities(markets, bankroll) {
         }
       } catch { /* optional */ }
     }
-    const finalNoProb = Math.max(0.01, Math.min(0.99, adjustedTrueNoProb + newsAdj));
+    const finalNoProb = Math.max(0.01, Math.min(0.99, adjustedTrueNoProb + (newsAdj * 0.1)));
 
     // Edge = our NO estimate - market NO price
     // Positive edge = we think NO is more likely than market says
