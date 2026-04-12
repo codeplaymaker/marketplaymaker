@@ -1085,6 +1085,13 @@ server = app.listen(PORT, () => {
       .catch(err => { if (healthMonitor) healthMonitor.recordError('polymarket-api', err.message); });
   }, 15 * 60 * 1000);
 
+  // Auto-fetch Kalshi markets on startup (same cadence as Polymarket)
+  if (kalshiMarkets) {
+    kalshiMarkets.refreshMarkets()
+      .then(list => log.info('SERVER', `Fetched ${list.length} Kalshi markets`))
+      .catch(err => log.warn('SERVER', `Kalshi market fetch failed: ${err.message}`));
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // NEW ALPHA ENGINES — Start after market cache warms
   // ═══════════════════════════════════════════════════════════════════

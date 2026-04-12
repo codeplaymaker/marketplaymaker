@@ -101,7 +101,7 @@ const OverviewTab = React.memo(({ ctx }) => {
   // Source health
   const sources = useMemo(() => [
     { name: 'GPT-4o', icon: '🧠', ok: llmConfigured, detail: `${indSourcesStatus?.llm?.totalCalls || 0} calls` },
-    { name: 'Metaculus', icon: '📊', ok: (indSourcesStatus?.polling?.sources || []).find(s => s.name === 'Metaculus')?.stats?.successes > 0, detail: 'Superforecasters' },
+    { name: 'Metaculus', icon: '📊', ok: (indSourcesStatus?.polling?.sources || []).find(s => s.name === 'Metaculus')?.status === 'active', detail: 'Superforecasters' },
     { name: 'Manifold', icon: '🎯', ok: (indSourcesStatus?.expert?.sources || []).find(s => s.name === 'Manifold Markets')?.stats?.successes > 0, detail: 'Cross-platform' },
     { name: 'Polymarket', icon: '🟣', ok: connected, detail: `${status?.scanner?.platforms?.polymarket?.markets || 0} mkts` },
     { name: 'Kalshi', icon: '🔵', ok: (status?.scanner?.platforms?.kalshi?.markets || 0) > 0, detail: `${status?.scanner?.platforms?.kalshi?.markets || 0} mkts` },

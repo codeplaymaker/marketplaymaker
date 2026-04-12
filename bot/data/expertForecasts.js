@@ -113,14 +113,21 @@ async function fetchManifoldEstimate(searchTerm, originalQuestion = null) {
       return null;
     }
 
-    if (allMarkets.length > 0) {
+    // Only use binary markets — others have no probability field
+    const binaryMarkets = allMarkets.filter(m => m.outcomeType === 'BINARY' && m.probability != null);
+    if (binaryMarkets.length === 0) {
+      sourceStats.manifold.lastError = 'No binary markets found for search term';
+      return null;
+    }
+
+    if (binaryMarkets.length > 0) {
       // Score matches by keyword overlap
       const effectiveSearch = originalQuestion || searchTerm;
       const searchWords = effectiveSearch.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
-      let bestMatch = allMarkets[0];
+      let bestMatch = binaryMarkets[0];
       let bestScore = 0;
 
-      for (const m of allMarkets) {
+      for (const m of binaryMarkets) {
         const q = (m.question || '').toLowerCase();
         const score = searchWords.filter(w => q.includes(w)).length;
         // Prefer higher liquidity among similar matches

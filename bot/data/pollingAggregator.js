@@ -70,9 +70,19 @@ function saveCache() {
  * public forecasting platforms. Their crowd median is often more accurate
  * than individual experts or even prediction markets.
  *
+ * Requires METACULUS_TOKEN env var (free token from metaculus.com/accounts/register).
+ * Without a token, Metaculus returns 403 and is skipped automatically.
+ *
  * Returns: { source, type, question, communityMedian, forecasterCount, url }
  */
 async function fetchMetaculusForecast(searchTerm, originalQuestion = null) {
+  // Skip entirely if no API token — Metaculus now requires auth (2025+)
+  const metaculusToken = process.env.METACULUS_TOKEN;
+  if (!metaculusToken) {
+    sourceStats.metaculus.lastError = 'No METACULUS_TOKEN configured (free token required since 2025)';
+    return null;
+  }
+
   sourceStats.metaculus.attempts++;
   try {
     // Try multiple search strategies — short entity-based first, then broader
@@ -87,12 +97,18 @@ async function fetchMetaculusForecast(searchTerm, originalQuestion = null) {
         const resp = await fetch(
           `https://www.metaculus.com/api2/questions/?search=${encodeURIComponent(term)}&limit=20&status=open&order_by=-forecasters_count`,
           {
-            headers: { 'User-Agent': 'MarketPlayMaker/2.0' },
+            headers: { 'User-Agent': 'MarketPlayMaker/2.0', 'Authorization': `Token ${metaculusToken}` },
             signal: AbortSignal.timeout(10000),
           }
         );
 
-        if (!resp.ok) continue;
+        if (!resp.ok) {
+          if (resp.status === 403 || resp.status === 401) {
+            sourceStats.metaculus.lastError = `Auth failed (${resp.status}) — check METACULUS_TOKEN`;
+            return null;
+          }
+          continue;
+        }
         const data = await resp.json();
 
         if (data?.results?.length > 0) {
@@ -368,7 +384,7 @@ function getStatus() {
     cachedEntries: cache.size,
     totalFetches: fetchCount,
     sources: [
-      { name: 'Metaculus', status: 'active', description: 'Superforecaster crowd medians — best calibrated public source', stats: sourceStats.metaculus },
+      { name: 'Metaculus', status: process.env.METACULUS_TOKEN ? 'active' : 'needs_token', description: 'Superforecaster crowd medians — best calibrated public source', stats: sourceStats.metaculus },
       { name: 'Wikipedia', status: 'active', description: 'Factual context & reality grounding', stats: sourceStats.wikipedia },
     ],
     retired: [
