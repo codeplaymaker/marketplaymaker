@@ -696,6 +696,34 @@ app.get('/api/shadow-diag', (req, res) => {
   }
 });
 
+// Seed persistent state from uploaded JSON files (admin only)
+app.post('/api/admin/seed-state', authMiddleware, express.json({ limit: '50mb' }), (req, res) => {
+  try {
+    const { paperTrades, learningState, shadowLive: shadowState } = req.body;
+    const logsDir = path.join(__dirname, 'logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+    let seeded = [];
+    if (paperTrades) {
+      fs.writeFileSync(path.join(logsDir, 'paper-trades.json'), JSON.stringify(paperTrades, null, 2));
+      paperTrader.load();
+      seeded.push('paper-trades');
+    }
+    if (learningState) {
+      fs.writeFileSync(path.join(logsDir, 'learning-state.json'), JSON.stringify(learningState, null, 2));
+      seeded.push('learning-state');
+    }
+    if (shadowState) {
+      fs.writeFileSync(path.join(logsDir, 'shadow-live-state.json'), JSON.stringify(shadowState, null, 2));
+      seeded.push('shadow-live-state');
+    }
+    log.info('SERVER', `State seeded from admin upload: ${seeded.join(', ')}`);
+    res.json({ ok: true, seeded });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Retroactively mirror eligible active paper trades into shadow live
 app.post('/api/shadow-diag/execute-pending', async (req, res) => {
   try {
