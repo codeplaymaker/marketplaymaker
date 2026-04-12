@@ -21,6 +21,13 @@ const { feeAdjustedEV } = require('../engine/fees');
 
 const STRATEGY_NAME = 'WHALE_DETECTION';
 
+// Lazy-load paperTrader to avoid circular deps
+let _paperTrader = null;
+function getPaperTrader() {
+  if (!_paperTrader) { try { _paperTrader = require('../engine/paperTrader'); } catch { _paperTrader = null; } }
+  return _paperTrader;
+}
+
 // ─── Volume Tracking ─────────────────────────────────────────────────
 const volumeHistory = new Map(); // conditionId → [{volume, price, timestamp}]
 const MAX_HISTORY = 100;
@@ -120,13 +127,12 @@ function findOpportunities(allMarkets, bankroll = 1000) {
     if (volume24h < 5000 || liquidity < 3000) continue;
     if (yesPrice < 0.05 || yesPrice > 0.95) continue;
 
-    // ─── CRITICAL: Skip markets closing very soon (< 12 hours) ────────
-    // Short-expiry markets expire before resolution checks can update stats,
-    // leading to high EXPIRED-without-resolving rates. Minimum 12 hours.
+    // ─── Skip markets closing very soon (< 2 hours) ────────
+    // Whale signals need time to play out; skip extremely short-expiry markets.
     if (market.endDate) {
       const msUntilClose = new Date(market.endDate).getTime() - Date.now();
       const hoursLeft = msUntilClose / 3600000;
-      if (hoursLeft < 12) continue; // Skip — will expire before learning cycle
+      if (hoursLeft < 2) continue; // Skip — not enough time for whale thesis
     }
 
     // Record volume
@@ -134,7 +140,13 @@ function findOpportunities(allMarkets, bankroll = 1000) {
 
     // Detect whale activity
     const whale = detectWhaleActivity(market.conditionId, volume24h, yesPrice, liquidity);
-    if (!whale || whale.whaleScore < 40) continue;
+    if (!whale) continue;
+
+    // Self-learning: use learned threshold if enough data, else default 40
+    const pt = getPaperTrader();
+    const learned = pt?.getLearnedThreshold?.(STRATEGY_NAME);
+    const effectiveMinScore = learned ? Math.max(20, learned.profitCutoff) : 40;
+    if (whale.whaleScore < effectiveMinScore) continue;
     if (whale.direction === 'NEUTRAL') continue;
 
     // Follow the whale: buy in their direction

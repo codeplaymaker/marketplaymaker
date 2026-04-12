@@ -272,17 +272,7 @@ describe('Strategies', () => {
     }
   });
 
-  it('relativeValue strategy should export findOpportunities', () => {
-    try {
-      const rv = require('../strategies/relativeValue');
-      assert.ok(
-        typeof rv.findOpportunities === 'function' || typeof rv.evaluate === 'function',
-        'Should have findOpportunities or evaluate'
-      );
-    } catch {
-      // Optional strategy, skip
-    }
-  });
+  // relativeValue permanently removed — 0W/99L audit 2026-03-11
 });
 
 // ─── Edge Resolver Tests ─────────────────────────────────────────────

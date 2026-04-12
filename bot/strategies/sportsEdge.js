@@ -533,6 +533,9 @@ async function findOpportunities(markets, bankroll) {
     log.info('SPORTS_EDGE', `⚡ High news volatility detected (${newsVol.breakingCount} breaking, avg impact ${newsVol.avgImpact}) — filtering mean-reversion/overreaction signals`);
   }
 
+  // Check API key once before loop (avoid redundant checks per market)
+  const hasOddsApiKey = oddsApi.hasApiKey();
+
   for (const market of candidates) {
     try {
       // Fetch enrichment data
@@ -570,7 +573,7 @@ async function findOpportunities(markets, bankroll) {
 
       // 5. Bookmaker consensus divergence (highest alpha signal)
       let bookmakerMatch = null;
-      if (oddsApi.hasApiKey()) {
+      if (hasOddsApiKey) {
         bookmakerMatch = oddsApi.getBookmakerOdds(market);
         if (bookmakerMatch && Math.abs(bookmakerMatch.divergence) >= 0.03) {
           // Polymarket diverges from bookmaker consensus by 3%+
@@ -644,7 +647,7 @@ async function findOpportunities(markets, bankroll) {
       // Self-learning: use learned threshold if enough data, else default 35
       const pt = getPaperTrader();
       const learned = pt?.getLearnedThreshold?.('SPORTS_EDGE');
-      const effectiveMinScore = learned ? learned.profitCutoff : 35;
+      const effectiveMinScore = learned ? Math.max(20, learned.profitCutoff) : 35;
       if (finalScore < effectiveMinScore) continue;
 
       opportunities.push({

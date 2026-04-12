@@ -454,8 +454,8 @@ function buildLegs() {
         }
       }
 
-      // FILTER: True probability between 15% and 85%
-      if (trueProb < 0.15 || trueProb > 0.85) continue;
+      // FILTER: True probability between 10% and 90%
+      if (trueProb < 0.10 || trueProb > 0.90) continue;
 
       const impliedByBest = 1 / best.odds;
       let legEV = (trueProb * best.odds) - 1;

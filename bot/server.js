@@ -675,7 +675,7 @@ app.get('/api/shadow-diag', (req, res) => {
         enabled: !!shadowConfig.enabled,
         scorePass: (t.score || 0) >= (shadowConfig.minScore || 70),
         strategyAllowed: (shadowConfig.strategies || ['autoScan']).includes(t.strategy),
-        hasTokenIds: !!(t.yesTokenId || t.noTokenId),
+        hasTokenIds: !!(t.yesTokenId || t.noTokenId) || !!t.conditionId, // conditionId allows on-the-fly lookup
         liquidityOk: (t.liquidity || 50000) >= (shadowConfig.minLiquidity || 5000),
       };
       return {

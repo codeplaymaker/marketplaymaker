@@ -59,11 +59,11 @@ async function getNoOrderbook(market) {
       // Swap bids/asks perspective for NO side
       return {
         bids: ob.asks ? ob.asks.map(a => ({
-          price: (1 - parseFloat(a.price)).toFixed(4),
+          price: Math.round((1 - parseFloat(a.price)) * 10000) / 10000,
           size: a.size,
         })) : [],
         asks: ob.bids ? ob.bids.map(b => ({
-          price: (1 - parseFloat(b.price)).toFixed(4),
+          price: Math.round((1 - parseFloat(b.price)) * 10000) / 10000,
           size: b.size,
         })) : [],
       };

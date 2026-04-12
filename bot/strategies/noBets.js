@@ -196,8 +196,8 @@ async function findOpportunities(markets, bankroll) {
     // Confidence gating: only output if we have real conviction
     const confidence = modelResult.confidence;
     // Require minimum score thresholds per confidence level
-    if (confidence === 'LOW' && score < 45) continue;      // Filter out weak LOW signals
-    if (confidence === 'MEDIUM' && score < 35) continue;
+    if (confidence === 'LOW' && score < 50) continue;      // LOW confidence needs strongest score
+    if (confidence === 'MEDIUM' && score < 40) continue;    // MEDIUM needs moderate score
 
     opportunities.push({
       strategy: 'NO_BETS',

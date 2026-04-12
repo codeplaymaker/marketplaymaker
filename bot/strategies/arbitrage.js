@@ -251,8 +251,8 @@ async function findGroupArbitrage(markets) {
 
     // Minimum group size
     if (group.markets.length < 2) continue;
-    // Incomplete groups need at least 40% of outcomes to be meaningful
-    if (!isComplete && completeness.totalInEvent > 4 && (group.markets.length / completeness.totalInEvent) < 0.4) continue;
+    // Block incomplete groups entirely — if outcome lands in a missing bracket, 100% loss
+    if (!isComplete) continue;
 
     const totalYes = group.markets.reduce((sum, m) => sum + m.yesPrice, 0);
     const rawEdge = Math.abs(totalYes - 1.0);
@@ -271,32 +271,15 @@ async function findGroupArbitrage(markets) {
     const type = totalYes > 1 ? 'OVERROUND' : 'UNDERROUND';
     const minLiq = Math.min(...group.markets.map(m => m.liquidity));
 
-    // ─── Risk assessment ───
-    let riskLevel, riskNote;
-    if (isComplete) {
-      riskLevel = 'LOW';
-      riskNote = `Complete group: all ${completeness.totalInEvent} outcomes covered. One MUST win. Near risk-free after fees.`;
-    } else {
-      // Incomplete group = NOT a true arb
-      riskLevel = 'HIGH';
-      riskNote = `INCOMPLETE: only ${completeness.weHave} of ${completeness.totalInEvent} outcomes. If result lands in a missing bracket, ALL legs lose (100% loss). Full event sum is ${((completeness.fullEventSum || 0) * 100).toFixed(1)}%.`;
-    }
+    // ─── Risk assessment (only complete groups reach here) ───
+    const riskLevel = 'LOW';
+    const riskNote = `Complete group: all ${completeness.totalInEvent} outcomes covered. One MUST win. Near risk-free after fees.`;
 
-    // Downgrade confidence for incomplete sets
-    const confidence = !isComplete ? 'LOW'
-      : netEdge >= 0.03 ? 'HIGH'
+    const confidence = netEdge >= 0.03 ? 'HIGH'
       : netEdge >= 0.01 ? 'MEDIUM'
       : 'LOW';
 
-    // Score: proportional penalty for incomplete groups
-    const rawScore = Math.round(Math.min(netEdge * 2000, 100));
-    let score;
-    if (isComplete) {
-      score = rawScore;
-    } else {
-      const coverageRatio = completeness.totalInEvent > 0 ? group.markets.length / completeness.totalInEvent : 0.5;
-      score = Math.round(rawScore * Math.max(coverageRatio * 0.6, 0.1));
-    }
+    const score = Math.round(Math.min(netEdge * 2000, 100));
 
     opportunities.push({
       strategy: 'ARBITRAGE',

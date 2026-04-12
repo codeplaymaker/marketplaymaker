@@ -110,16 +110,13 @@ function shouldMirror(paperTrade) {
   if (!allowedStrategies.includes(paperTrade.strategy)) { log.info('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not in [${allowedStrategies}]`); return null; }
   if ((paperTrade.liquidity || 0) < minLiquidity) { log.info('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity || 0} < ${minLiquidity}`); return null; }
 
-  // Need token IDs for real execution
-  if (!paperTrade.yesTokenId && !paperTrade.noTokenId) { log.debug('SHADOW_LIVE', 'Skipped: no token IDs'); return null; }
-
   log.info('SHADOW_LIVE', `✅ MIRROR: ${paperTrade.strategy} ${paperTrade.side} "${paperTrade.market?.slice(0,40)}" score:${paperTrade.score} liq:${paperTrade.liquidity}`);
   const size = Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade);
 
   return {
     size,
     side: paperTrade.side,
-    tokenId: paperTrade.side === 'YES' ? paperTrade.yesTokenId : paperTrade.noTokenId,
+    tokenId: paperTrade.side === 'YES' ? (paperTrade.yesTokenId || null) : (paperTrade.noTokenId || null),
     price: paperTrade.entryPrice || paperTrade.rawEntryPrice,
     paperEntryPrice: paperTrade.entryPrice,
     paperSlippage: paperTrade.slippage || 0,
@@ -148,6 +145,27 @@ async function executeShadow(shadowConfig) {
   const balance = await clobExecutor.getUSDCBalance();
   if (balance < shadowConfig.size) {
     log.warn('SHADOW_LIVE', `Insufficient USDC for shadow trade: $${balance.toFixed(2)} < $${shadowConfig.size}`);
+    return null;
+  }
+
+  // Resolve token ID on-the-fly if not pre-stored (using conditionId → CLOB markets API)
+  if (!shadowConfig.tokenId && shadowConfig.conditionId) {
+    try {
+      const mktRes = await fetch(`https://clob.polymarket.com/markets/${shadowConfig.conditionId}`);
+      if (mktRes.ok) {
+        const mktData = await mktRes.json();
+        const tokens = mktData.tokens || [];
+        const yesToken = tokens.find(t => t.outcome === 'Yes')?.token_id;
+        const noToken = tokens.find(t => t.outcome === 'No')?.token_id;
+        shadowConfig.tokenId = shadowConfig.side === 'YES' ? yesToken : noToken;
+        if (shadowConfig.tokenId) {
+          log.info('SHADOW_LIVE', `Resolved tokenId for ${shadowConfig.conditionId?.slice(0,12)}: ${shadowConfig.tokenId?.slice(0,20)}`);
+        }
+      }
+    } catch (e) { log.info('SHADOW_LIVE', `Token ID lookup failed: ${e.message}`); }
+  }
+  if (!shadowConfig.tokenId) {
+    log.info('SHADOW_LIVE', `Skipped: could not resolve token ID for conditionId ${shadowConfig.conditionId?.slice(0,20)}`);
     return null;
   }
 
