@@ -461,6 +461,7 @@ function recordScanResults(opportunities, maxRecord = 20) {
       daysLeft: daysLeft !== null ? Math.round(daysLeft) : null,
       yesTokenId: opp.yesTokenId || null,
       noTokenId: opp.noTokenId || null,
+      liquidity: opp.liquidity || liquidity,
       costDeducted: true,
       source: 'BOT',
       recordedAt: new Date().toISOString(),
@@ -504,7 +505,7 @@ function recordScanResults(opportunities, maxRecord = 20) {
           log.warn('PAPER_TRADER', `Shadow live mirror failed: ${err.message}`);
         });
       }
-    } catch (err) { log.debug('PAPER_TRADER', `shadowLive error: ${err.message}`); }
+    } catch (err) { log.info('PAPER_TRADER', `shadowLive error: ${err.message}`); }
   }
 
   if (recorded > 0) {

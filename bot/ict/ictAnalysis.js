@@ -452,8 +452,11 @@ function buildDirectionalSignal(dir, cur, atr14) {
     if (!bestEntry) bestEntry = 'LiqSweep';
   }
 
-  // HTF alignment bonus
-  if (config.useHTFBias && state.htfBias === dir) confluence++;
+  // HTF alignment bonus — aligned gives +1, flat (neutral) gives +0.5 rounded
+  if (config.useHTFBias) {
+    if (state.htfBias === dir) confluence++;
+    else if (state.htfBias === 0) confluence++; // FLAT = no opposing bias, treat as permissive
+  }
 
   if (confluence < config.minConfluence || !bestEntry) return null;
 

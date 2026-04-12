@@ -17,7 +17,7 @@ module.exports = {
   // General
   riskPercent: parseFloat(process.env.ICT_RISK_PCT || '1.0'),
   maxDailyTrades: parseInt(process.env.ICT_MAX_DAILY || '3'),
-  minConfluence: parseInt(process.env.ICT_MIN_CONFLUENCE || '2'),
+  minConfluence: parseInt(process.env.ICT_MIN_CONFLUENCE || '1'),
   maxSpreadPips: parseFloat(process.env.ICT_MAX_SPREAD || '5.0'),  // Max spread in pips
 
   // Direction: 'both', 'long', 'short'

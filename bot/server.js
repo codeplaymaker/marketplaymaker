@@ -660,6 +660,42 @@ app.get('/api/ict/status', (req, res) => {
   }
 });
 
+// Shadow live diagnostics
+app.get('/api/shadow-diag', (req, res) => {
+  try {
+    const shadowLive = require('./engine/shadowLive');
+    const shadowStatus = shadowLive.getStatus();
+    const activeTrades = (paperTrader.getHistory ? paperTrader.getHistory(50) : []).filter(t => !t.resolved);
+    const shadowConfig = config.shadowLive || {};
+
+    // Test each active paper trade against shouldMirror gates
+    const tests = activeTrades.slice(0, 5).map(t => {
+      const gates = {
+        enabled: !!shadowConfig.enabled,
+        scorePass: (t.score || 0) >= (shadowConfig.minScore || 70),
+        strategyAllowed: (shadowConfig.strategies || ['autoScan']).includes(t.strategy),
+        hasTokenIds: !!(t.yesTokenId || t.noTokenId),
+        liquidityOk: (t.liquidity || 50000) >= (shadowConfig.minLiquidity || 5000),
+      };
+      return {
+        market: t.market?.slice(0, 50),
+        score: t.score,
+        strategy: t.strategy,
+        side: t.side,
+        yesTokenId: !!t.yesTokenId,
+        noTokenId: !!t.noTokenId,
+        liquidity: t.liquidity || 'NOT_SET (defaults 50k in merge)',
+        gates,
+        wouldPass: Object.values(gates).every(v => v),
+      };
+    });
+
+    res.json({ shadowStatus, shadowConfig, activePaperTrades: activeTrades.length, tests });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // MOUNT ALL ROUTE MODULES
 // ═══════════════════════════════════════════════════════════════════════

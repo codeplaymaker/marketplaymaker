@@ -87,7 +87,7 @@ function resetDailyIfNeeded() {
  */
 function shouldMirror(paperTrade) {
   if (!SHADOW_CONFIG.enabled) {
-    log.debug('SHADOW_LIVE', 'Skipped: not enabled');
+    log.info('SHADOW_LIVE', 'Skipped: not enabled (set SHADOW_LIVE_ENABLED=true)');
     return null;
   }
   resetDailyIfNeeded();
@@ -101,14 +101,14 @@ function shouldMirror(paperTrade) {
   const allowedStrategies = SHADOW_CONFIG.strategies || ['autoScan', 'ARBITRAGE', 'MOMENTUM'];
 
   // Hard stops
-  if (state.dailyLoss >= maxDailyLoss) { log.debug('SHADOW_LIVE', 'Skipped: daily loss limit'); return null; }
-  if (state.openPositions.length >= maxOpen) { log.debug('SHADOW_LIVE', 'Skipped: max open positions'); return null; }
-  if (state.totalDeployed - state.totalReturned >= maxBankroll) { log.debug('SHADOW_LIVE', 'Skipped: max bankroll deployed'); return null; }
+  if (state.dailyLoss >= maxDailyLoss) { log.info('SHADOW_LIVE', `Skipped: daily loss $${state.dailyLoss} >= limit $${maxDailyLoss}`); return null; }
+  if (state.openPositions.length >= maxOpen) { log.info('SHADOW_LIVE', `Skipped: ${state.openPositions.length} open >= max ${maxOpen}`); return null; }
+  if (state.totalDeployed - state.totalReturned >= maxBankroll) { log.info('SHADOW_LIVE', `Skipped: deployed $${state.totalDeployed - state.totalReturned} >= max $${maxBankroll}`); return null; }
 
   // Quality gates
-  if ((paperTrade.score || 0) < minScore) { log.debug('SHADOW_LIVE', `Skipped: score ${paperTrade.score} < ${minScore}`); return null; }
-  if (!allowedStrategies.includes(paperTrade.strategy)) { log.debug('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not allowed`); return null; }
-  if ((paperTrade.liquidity || 0) < minLiquidity) { log.debug('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity || 0} < ${minLiquidity}`); return null; }
+  if ((paperTrade.score || 0) < minScore) { log.info('SHADOW_LIVE', `Skipped: score ${paperTrade.score} < ${minScore}`); return null; }
+  if (!allowedStrategies.includes(paperTrade.strategy)) { log.info('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not in [${allowedStrategies}]`); return null; }
+  if ((paperTrade.liquidity || 0) < minLiquidity) { log.info('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity || 0} < ${minLiquidity}`); return null; }
 
   // Need token IDs for real execution
   if (!paperTrade.yesTokenId && !paperTrade.noTokenId) { log.debug('SHADOW_LIVE', 'Skipped: no token IDs'); return null; }
@@ -136,28 +136,41 @@ function shouldMirror(paperTrade) {
  */
 async function executeShadow(shadowConfig) {
   let clobExecutor;
-  try { clobExecutor = require('../polymarket/clobExecutor'); } catch { return null; }
+  try { clobExecutor = require('../polymarket/clobExecutor'); } catch { log.info('SHADOW_LIVE', 'CLOB executor module not found'); return null; }
 
   const execStatus = clobExecutor.getStatus();
   if (!execStatus.initialized || execStatus.dryRun) {
-    log.debug('SHADOW_LIVE', 'CLOB executor not ready for shadow trades');
+    log.info('SHADOW_LIVE', `CLOB executor not ready: initialized=${execStatus.initialized} dryRun=${execStatus.dryRun}`);
     return null;
   }
 
   // Final balance check
   const balance = await clobExecutor.getUSDCBalance();
   if (balance < shadowConfig.size) {
-    log.warn('SHADOW_LIVE', `Insufficient USDC for shadow trade: $${balance.toFixed(2)}`);
+    log.warn('SHADOW_LIVE', `Insufficient USDC for shadow trade: $${balance.toFixed(2)} < $${shadowConfig.size}`);
     return null;
   }
 
+  // Fetch current market price instead of using stale paper entry price
+  let tradePrice = shadowConfig.price;
   try {
+    const midRes = await fetch(`https://clob.polymarket.com/midpoint?token_id=${shadowConfig.tokenId}`);
+    if (midRes.ok) {
+      const midData = await midRes.json();
+      const marketMid = parseFloat(midData.mid || 0);
+      if (marketMid > 0) tradePrice = marketMid;
+    }
+  } catch { /* use original price */ }
+
+  try {
+    log.info('SHADOW_LIVE', `Executing: ${shadowConfig.side} $${shadowConfig.size} at ${tradePrice.toFixed(3)} (paper: ${shadowConfig.paperEntryPrice?.toFixed(3)}) "${shadowConfig.market?.slice(0, 40)}"`);
+
     const result = await clobExecutor.placeTrade({
       tokenId: shadowConfig.tokenId,
       side: 'BUY',
-      price: shadowConfig.price,
+      price: tradePrice,
       size: shadowConfig.size,
-      maxSlippage: 0.03, // 3% max slippage for shadow trades
+      maxSlippage: 0.05, // 5% max slippage for shadow trades (was 3%)
     });
 
     if (result.status === 'SLIPPAGE_EXCEEDED' || result.status === 'INSUFFICIENT_FUNDS' || result.status === 'NOT_INITIALIZED') {
