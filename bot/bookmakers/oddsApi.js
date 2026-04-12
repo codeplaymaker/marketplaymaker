@@ -227,6 +227,13 @@ async function fetchAllOdds() {
     return [];
   }
 
+  // Guard: if critically low on free credits, serve from cache to preserve the rest
+  const remaining = parseInt(requestsRemaining, 10);
+  if (!isNaN(remaining) && remaining <= 10) {
+    log.warn('ODDS_API', `Only ${remaining} credits left — serving from cache to preserve free tier`);
+    return cachedOdds;
+  }
+
   log.info('ODDS_API', 'Fetching bookmaker odds...');
   const allEvents = [];
 
