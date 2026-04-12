@@ -243,6 +243,7 @@ function getStatus() {
     activeOBs: Object.values(symbolStates).reduce((s, v) => s + v.activeOBs, 0),
     symbolStates,
     adaptive: adaptSummary,
+    config: { minConfluence: config.minConfluence, useHTFBias: config.useHTFBias, riskPercent: config.riskPercent },
   };
 }
 
