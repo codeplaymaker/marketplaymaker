@@ -110,6 +110,15 @@ function shouldMirror(paperTrade) {
   if (!allowedStrategies.includes(paperTrade.strategy)) { log.info('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not in [${allowedStrategies}]`); return null; }
   if ((paperTrade.liquidity ?? 50000) < minLiquidity) { log.info('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity ?? 50000} < ${minLiquidity}`); return null; }
 
+  // Pattern memory gate — honour the same blocks as paper trader
+  try {
+    const paperTrader = require('./paperTrader');
+    if (paperTrader.isPatternBlocked && paperTrader.isPatternBlocked(paperTrade.strategy, paperTrade.side || 'YES')) {
+      log.info('SHADOW_LIVE', `Skipped: pattern ${paperTrade.strategy}:${paperTrade.side} is blocked by learning system`);
+      return null;
+    }
+  } catch { /* paperTrader not available, skip gate */ }
+
   log.info('SHADOW_LIVE', `✅ MIRROR: ${paperTrade.strategy} ${paperTrade.side} "${paperTrade.market?.slice(0,40)}" score:${paperTrade.score} liq:${paperTrade.liquidity}`);
   const size = Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade);
 

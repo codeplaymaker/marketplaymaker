@@ -30,21 +30,48 @@
  *   /broadcast    — Send message to all users
  */
 
+const fs = require('fs');
+const path = require('path');
 const log = require('./utils/logger');
 const userStore = require('./userStore');
 const btcBot = require('./btcBot');
 const btcSniper = require('./btcSniper');
 
 const TELEGRAM_API = 'https://api.telegram.org/bot';
+const STATE_FILE = path.join(__dirname, 'logs', 'telegram-state.json');
 let botToken = null;
 let pollingTimer = null;
 let lastUpdateId = 0;
 
+function loadState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    lastUpdateId = state.lastUpdateId || 0;
+    if (lastUpdateId) log.info('TELEGRAM', `Resumed from update #${lastUpdateId}`);
+  } catch { /* first start */ }
+}
+
+function saveState() {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ lastUpdateId, savedAt: new Date().toISOString() }));
+  } catch (err) {
+    log.debug('TELEGRAM', `State save failed: ${err.message}`);
+  }
+}
+
 // Module references (injected at init)
 let deps = {};
 
-// Track pending key input sessions: chatId → { step, data }
+// Track pending key input sessions: chatId → { step, data, createdAt }
 const keySessions = new Map();
+const KEY_SESSION_TTL = 15 * 60 * 1000; // 15 minutes
+// Clean up abandoned key sessions every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, sess] of keySessions) {
+    if (now - (sess.createdAt || 0) > KEY_SESSION_TTL) keySessions.delete(uid);
+  }
+}, 5 * 60 * 1000);
 
 // ─── Core Telegram API ──────────────────────────────────────────────
 
@@ -155,6 +182,7 @@ async function pollUpdates() {
       await sendTo(chatId, `❌ Error: ${err.message}`);
     }
   }
+  if (data.result.length > 0) saveState();
 }
 
 // ─── Command Router ──────────────────────────────────────────────────
@@ -190,6 +218,8 @@ async function handleCommand(userId, chatId, command, args, isGroup, username) {
     case '/settings':  return handleSettings(userId, chatId, args);
     case '/signals':   return handleSignals(userId, chatId, args);
     case '/mytrades':  return handleMyTrades(userId, chatId);
+    case '/mystats':   return handleMyStats(userId, chatId);
+    case '/search':    return handleSearch(chatId, args);
 
     // BTC Bot (read-only commands just need chatId for reply)
     case '/btc':       return handleBtc(chatId);
@@ -273,7 +303,8 @@ async function handleStart(userId, chatId) {
     `/paper — Paper trading P&L\n` +
     `/pnl — Performance summary\n` +
     `/live — Shadow live trading P&L\n` +
-    `/opportunities — Top opportunities\n\n` +
+    `/opportunities — Top opportunities\n` +
+    `/search — Search markets by keyword\n\n` +
     `📐 *ICT Playbook*\n` +
     `/ict — ICT analysis (all markets)\n` +
     `/ict BTCUSDT — Single market deep dive\n` +
@@ -285,7 +316,8 @@ async function handleStart(userId, chatId) {
     `/disable — Disable trading\n` +
     `/settings — Your trading preferences\n` +
     `/signals — Configure signal alerts\n` +
-    `/mytrades — Your trade history\n\n` +
+    `/mytrades — Your trade history\n` +
+    `/mystats — Strategy performance breakdown\n\n` +
     (admin ?
       `🛡 *Admin*\n` +
       `/scan — Trigger scan\n` +
@@ -304,7 +336,7 @@ async function handleHelp(userId, chatId) {
 // ─── Key Management ──────────────────────────────────────────────────
 
 async function handleSetKeys(userId, chatId) {
-  keySessions.set(userId, { step: 'apiKey', data: {} });
+  keySessions.set(userId, { step: 'apiKey', data: {}, createdAt: Date.now() });
   await sendTo(chatId,
     `🔑 *Set Polymarket API Keys*\n\n` +
     `I'll walk you through adding your keys one at a time.\n` +
@@ -322,6 +354,10 @@ async function handleKeyInput(userId, chatId, text) {
   }
 
   const session = keySessions.get(userId);
+  if (Date.now() - (session.createdAt || 0) > KEY_SESSION_TTL) {
+    keySessions.delete(userId);
+    return sendTo(chatId, `⏰ Key session expired (15 min timeout). Start again with /setkeys`);
+  }
 
   switch (session.step) {
     case 'apiKey':
@@ -423,6 +459,7 @@ async function handleSettings(userId, chatId, args) {
       'alerts': { key: 'alerts', parse: v => v === 'on' || v === 'true', validate: () => true },
       'dryrun': { key: 'dryRun', parse: v => v === 'on' || v === 'true', validate: () => true },
       'copy': { key: 'copyTrading', parse: v => v === 'on' || v === 'true', validate: () => true },
+      'stoploss': { key: 'stopLoss', parse: v => Math.max(0, Number(v)), validate: v => !isNaN(Number(v)) && Number(v) >= 0 },
     };
 
     const setting = settingsMap[key?.toLowerCase()];
@@ -437,7 +474,7 @@ async function handleSettings(userId, chatId, args) {
 
     return sendTo(chatId,
       `Usage: /settings <key> <value>\n\n` +
-      `Keys: maxsize, quality, autotrade, alerts, dryrun, copy\n` +
+      `Keys: maxsize, quality, autotrade, alerts, dryrun, copy, stoploss\n` +
       `Example: \`/settings maxsize 100\``
     );
   }
@@ -452,9 +489,10 @@ async function handleSettings(userId, chatId, args) {
     `Min edge quality: ${s.minEdgeQuality}\n` +
     `Auto-trade: ${s.autoTrade ? 'ON' : 'OFF'}\n` +
     `Copy trading: ${s.copyTrading ? 'ON' : 'OFF'}\n` +
-    `Alerts: ${s.alerts ? 'ON' : 'OFF'}\n\n` +
+    `Alerts: ${s.alerts ? 'ON' : 'OFF'}\n` +
+    `Daily stop-loss: ${s.stopLoss ? `$${s.stopLoss}/day` : 'OFF'}\n\n` +
     `_Change with:_ \`/settings <key> <value>\`\n` +
-    `Keys: maxsize, quality, autotrade, alerts, dryrun, copy`
+    `Keys: maxsize, quality, autotrade, alerts, dryrun, copy, stoploss`
   );
 }
 
@@ -828,6 +866,103 @@ async function handleSignals(userId, chatId, args) {
   );
 }
 
+// ─── Search & Analytics ──────────────────────────────────────────────
+
+async function handleSearch(chatId, query) {
+  if (!query || query.trim().length < 2) {
+    return sendTo(chatId, `🔍 *Market Search*\n\nUsage: \`/search <keyword>\`\nExample: \`/search bitcoin election\``);
+  }
+
+  const allMarkets = deps.markets?.getCachedMarkets?.() || [];
+  const terms = query.toLowerCase().trim().split(/\s+/);
+
+  const matches = allMarkets
+    .filter(m => {
+      const text = (m.question || '').toLowerCase();
+      return terms.every(t => text.includes(t));
+    })
+    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
+    .slice(0, 8);
+
+  if (matches.length === 0) {
+    return sendTo(chatId,
+      `🔍 No markets found for *"${query}"*\n\n` +
+      `Try fewer or different keywords.\n` +
+      `_${allMarkets.length} markets indexed_`
+    );
+  }
+
+  let text = `🔍 *"${query}"* — ${matches.length} result${matches.length !== 1 ? 's' : ''}\n\n`;
+  for (const m of matches) {
+    const yesP = ((m.yesPrice || 0) * 100).toFixed(0);
+    const noP = (100 - parseInt(yesP)).toString();
+    const liqK = m.liquidity >= 1000 ? `$${(m.liquidity / 1000).toFixed(0)}k` : `$${(m.liquidity || 0).toFixed(0)}`;
+    const end = m.endDate
+      ? new Date(m.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+      : '?';
+    const platform = m.platform === 'KALSHI' ? '🟦' : '🟣';
+    text += `${platform} *${truncate(m.question, 55)}*\n`;
+    text += `   YES ${yesP}¢ / NO ${noP}¢ | Liq: ${liqK} | Closes: ${end}\n\n`;
+  }
+  text += `_${allMarkets.length} markets indexed • /search <keyword>_`;
+  await sendTo(chatId, text);
+}
+
+async function handleMyStats(userId, chatId) {
+  const { paperTrader } = deps;
+  const history = paperTrader?.getHistory?.(1000) || [];
+  const resolved = history.filter(t => t.resolved && t.pnl != null);
+
+  if (resolved.length < 5) {
+    return sendTo(chatId,
+      `📊 *Strategy Stats*\n\n` +
+      `Not enough resolved trades yet (${resolved.length} of 5 needed).\n\n` +
+      `Paper trading runs automatically with each scan — check back soon.`
+    );
+  }
+
+  // Group by strategy
+  const byStrategy = {};
+  for (const t of resolved) {
+    const s = t.strategy || 'UNKNOWN';
+    if (!byStrategy[s]) byStrategy[s] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
+    byStrategy[s].trades++;
+    byStrategy[s].pnl += t.pnl || 0;
+    if ((t.pnl || 0) > 0) byStrategy[s].wins++;
+    else byStrategy[s].losses++;
+  }
+
+  const sorted = Object.entries(byStrategy)
+    .filter(([, s]) => s.trades >= 3)
+    .sort((a, b) => b[1].pnl - a[1].pnl);
+
+  if (sorted.length === 0) {
+    return sendTo(chatId, `📊 No strategy has 3+ resolved trades yet.`);
+  }
+
+  const totalPnL = sorted.reduce((s, [, v]) => s + v.pnl, 0);
+  let text = `📊 *Strategy Breakdown* (${resolved.length} resolved)\n\n`;
+  for (const [name, s] of sorted) {
+    const wr = ((s.wins / s.trades) * 100).toFixed(0);
+    const pnlStr = `${s.pnl >= 0 ? '+' : ''}$${s.pnl.toFixed(2)}`;
+    const icon = s.pnl > 5 ? '✅' : s.pnl < -5 ? '❌' : '⚪';
+    text += `${icon} *${name}*\n`;
+    text += `   ${s.wins}W / ${s.losses}L (${wr}% WR) | *${pnlStr}*\n\n`;
+  }
+  text += `─────────────────\n`;
+  text += `Total paper P&L: *${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}*\n\n`;
+
+  const user = userStore.getUser(userId);
+  const myCount = user?.trades?.length || 0;
+  const myVol = user?.stats?.totalVolume || 0;
+  if (myCount > 0) {
+    text += `*Your account:* ${myCount} trades | $${myVol.toFixed(2)} volume`;
+  } else {
+    text += `_Your personal trades: none yet — use /enable to start_`;
+  }
+  await sendTo(chatId, text);
+}
+
 // ─── Per-User Trade Execution ────────────────────────────────────────
 
 /**
@@ -838,6 +973,23 @@ async function executeForUser(user, edge) {
   if (!user.settings.enabled || !user.settings.autoTrade) return null;
   if (!userStore.hasValidKeys(user.chatId)) return null;
   if ((edge.edgeQuality || 0) < user.settings.minEdgeQuality) return null;
+
+  // Daily stop-loss: sum today's deployed size, pause if over limit
+  if (user.settings.stopLoss > 0) {
+    const today = new Date().toDateString();
+    const todayVolume = (user.trades || [])
+      .filter(t => t.timestamp && new Date(t.timestamp).toDateString() === today)
+      .reduce((sum, t) => sum + (t.size || t.amount || 0), 0);
+    if (todayVolume >= user.settings.stopLoss) {
+      userStore.updateSettings(user.chatId, { enabled: false });
+      await sendTo(user.chatId,
+        `🛑 *Daily stop-loss hit* — $${user.settings.stopLoss} deployed today\n\n` +
+        `Auto-trading paused. Re-enable tomorrow with /enable\n` +
+        `Or adjust: \`/settings stoploss <amount>\``
+      );
+      return null;
+    }
+  }
 
   const tokenId = edge.yesTokenId || edge.tokenId;
   if (!tokenId) return null;
@@ -1287,6 +1439,7 @@ function initialize(token, dependencies = {}) {
 
   botToken = token;
   deps = dependencies;
+  loadState();
 
   startPolling();
   log.info('TELEGRAM', `Bot initialized — ${userStore.getUserCount()} users loaded`);
@@ -1311,6 +1464,7 @@ function stop() {
     clearTimeout(pollingTimer);
     pollingTimer = null;
   }
+  saveState();
   userStore.save();
   log.info('TELEGRAM', 'Bot stopped');
 }
