@@ -841,7 +841,7 @@ async function configureEnvironment() {
         oddsApi.fetchAllOdds()
           .then(ev => { if (healthMonitor) healthMonitor.recordSuccess('bookmaker-odds', Date.now() - t, { count: ev.length }); })
           .catch(err => { if (healthMonitor) healthMonitor.recordError('bookmaker-odds', err.message); });
-      }, 6 * 60 * 60 * 1000); // Every 6 hours — keeps usage within 500 free credits/month
+      }, 12 * 60 * 60 * 1000); // Every 12 hours — 5 credits/call × 2/day × 30 = 300/month (free tier = 500)
     } catch (err) { log.warn('SERVER', `Odds API setup failed: ${err.message}`); }
   }
 

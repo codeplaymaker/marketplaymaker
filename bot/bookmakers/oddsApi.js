@@ -261,24 +261,8 @@ async function fetchAllOdds() {
     return cachedOdds; // Return cached on failure
   }
 
-  // Also fetch specific sport pages for more coverage
-  // Only fetch NFL/NBA/MLB as they overlap most with Polymarket
-  const prioritySports = ['americanfootball_nfl', 'basketball_nba', 'baseball_mlb', 'mma_mixed_martial_arts', 'soccer_epl', 'icehockey_nhl'];
-  
-  for (const sport of prioritySports) {
-    try {
-      const events = await fetchSportOdds(sport);
-      // Merge, dedup by event id
-      const existingIds = new Set(allEvents.map(e => e.id));
-      for (const ev of events) {
-        if (!existingIds.has(ev.id)) {
-          allEvents.push(ev);
-          existingIds.add(ev.id);
-        }
-      }
-    } catch { /* skip */ }
-  }
-
+  // NOTE: the upcoming endpoint above already covers all sports, so no per-sport
+  // calls are needed. Removing them saves ~6 credits per fetch cycle.
   cachedOdds = allEvents;
 
   // Fetch championship outrights for futures matching
