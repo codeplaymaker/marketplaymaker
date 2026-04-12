@@ -108,7 +108,7 @@ function shouldMirror(paperTrade) {
   // Quality gates
   if ((paperTrade.score || 0) < minScore) { log.info('SHADOW_LIVE', `Skipped: score ${paperTrade.score} < ${minScore}`); return null; }
   if (!allowedStrategies.includes(paperTrade.strategy)) { log.info('SHADOW_LIVE', `Skipped: strategy ${paperTrade.strategy} not in [${allowedStrategies}]`); return null; }
-  if ((paperTrade.liquidity || 0) < minLiquidity) { log.info('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity || 0} < ${minLiquidity}`); return null; }
+  if ((paperTrade.liquidity ?? 50000) < minLiquidity) { log.info('SHADOW_LIVE', `Skipped: liquidity ${paperTrade.liquidity ?? 50000} < ${minLiquidity}`); return null; }
 
   log.info('SHADOW_LIVE', `✅ MIRROR: ${paperTrade.strategy} ${paperTrade.side} "${paperTrade.market?.slice(0,40)}" score:${paperTrade.score} liq:${paperTrade.liquidity}`);
   const size = Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade);
