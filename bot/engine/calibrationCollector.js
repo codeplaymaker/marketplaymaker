@@ -34,6 +34,11 @@ try { probabilityModel = require('./probabilityModel'); } catch { /* required */
 let resolvedMarketIds = new Set();    // Markets we've already recorded
 let resolutionLog = [];               // Full log of all resolutions
 let calibrationDrift = [];            // Track calibration accuracy over time
+// Pre-resolution price snapshots: conditionId → { yesPrice, snappedAt }
+// Taken from ACTIVE markets so we have the price BEFORE they resolve.
+// This is the only way to get unbiased pre-resolution calibration data —
+// the API's closed markets only show the post-resolution price (~$1 or ~$0).
+let priceSnapshots = new Map();
 let pollInterval = null;
 let isRunning = false;
 
@@ -66,7 +71,12 @@ function loadState() {
       resolutionLog = data.resolutionLog || [];
       calibrationDrift = data.calibrationDrift || [];
       stats = { ...stats, ...(data.stats || {}) };
-      log.info('CAL_COL', `Loaded state: ${resolvedMarketIds.size} resolved markets, ${resolutionLog.length} resolution entries`);
+      // Restore pre-resolution price snapshots (keep only last 14 days)
+      const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      for (const [id, snap] of Object.entries(data.priceSnapshots || {})) {
+        if (snap.snappedAt >= cutoff) priceSnapshots.set(id, snap);
+      }
+      log.info('CAL_COL', `Loaded state: ${resolvedMarketIds.size} resolved markets, ${resolutionLog.length} resolution entries, ${priceSnapshots.size} price snapshots`);
     }
   } catch { /* fresh start */ }
 }
@@ -74,14 +84,80 @@ function loadState() {
 function saveState() {
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    // Prune stale snapshots (older than 14 days) before saving
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const snapshotsToSave = {};
+    for (const [id, snap] of priceSnapshots.entries()) {
+      if (snap.snappedAt >= cutoff) snapshotsToSave[id] = snap;
+    }
+    // Sync pruned snapshot map back
+    priceSnapshots = new Map(Object.entries(snapshotsToSave));
     fs.writeFileSync(STATE_FILE, JSON.stringify({
       resolvedIds: [...resolvedMarketIds].slice(-5000),
       resolutionLog: resolutionLog.slice(-CONFIG.maxHistorySize),
       calibrationDrift: calibrationDrift.slice(-500),
+      priceSnapshots: snapshotsToSave,
       stats,
       savedAt: new Date().toISOString(),
     }, null, 2));
   } catch (err) { log.debug('CAL_COL', `Save failed: ${err.message}`); }
+}
+
+// ─── Active Market Snapshots ─────────────────────────────────────────
+
+/**
+ * Sample current YES prices from ACTIVE markets — unbiased, random sample.
+ * These are stored so that when a market later resolves, we can reconstruct the
+ * pre-resolution probability the market implied (the Gamma API for closed markets
+ * only returns the post-resolution token price, which is useless for calibration).
+ *
+ * Stores up to 500 snapshots at once. Runs before every resolution check.
+ */
+async function snapshotActiveMarkets() {
+  if (!polyClient) return;
+  try {
+    const markets = await polyClient.getMarkets({
+      limit: 100,
+      offset: 0,
+      active: true,
+      closed: false,
+      order: 'volume24hr',
+      ascending: false,
+    });
+
+    const now = Date.now();
+    let newSnapshots = 0;
+    for (const raw of markets) {
+      if (!raw.conditionId) continue;
+      if (resolvedMarketIds.has(raw.conditionId)) continue;
+      // Only snapshot markets closing within 30 days (likely to resolve soon)
+      const endDate = raw.endDate ? new Date(raw.endDate).getTime() : Infinity;
+      if (endDate - now > 30 * 24 * 60 * 60 * 1000) continue;
+
+      const prices = raw.outcomePrices ? JSON.parse(raw.outcomePrices) : [];
+      const yesPrice = parseFloat(prices[0]);
+      if (!yesPrice || yesPrice < 0.03 || yesPrice > 0.97) continue; // Skip near-certain markets
+
+      // Update snapshot — always keep the OLDEST snapshot per market so we have
+      // the longest possible look-ahead horizon for calibration value.
+      if (!priceSnapshots.has(raw.conditionId)) {
+        priceSnapshots.set(raw.conditionId, {
+          yesPrice,
+          snappedAt: now,
+          question: (raw.question || '').slice(0, 120),
+          category: raw.category || 'unknown',
+          liquidity: parseFloat(raw.liquidity || 0),
+          endDate: raw.endDate || null,
+        });
+        newSnapshots++;
+      }
+    }
+    if (newSnapshots > 0) {
+      log.debug('CAL_COL', `Snapped ${newSnapshots} new active market prices (${priceSnapshots.size} total)`);
+    }
+  } catch (err) {
+    log.debug('CAL_COL', `Active market snapshot failed: ${err.message}`);
+  }
 }
 
 // ─── Resolution Collection ───────────────────────────────────────────
@@ -103,7 +179,12 @@ async function collectResolutions() {
   let brierCount = 0;
 
   try {
-    // Fetch recently closed markets
+    // Step 1: Snapshot active market prices (unbiased pre-resolution data source).
+    // We MUST do this before checking closed markets so that newly resolved
+    // markets can still use a snapshot taken in a previous poll cycle.
+    await snapshotActiveMarkets();
+
+    // Step 2: Fetch recently closed/resolved markets and pair with snapshots
     const closedMarkets = await polyClient.getMarkets({
       limit: CONFIG.maxResolutionsPerPoll,
       offset: 0,
@@ -140,16 +221,27 @@ async function collectResolutions() {
       // Record this resolution
       resolvedMarketIds.add(raw.conditionId);
 
-      // The pre-resolution price (what the market priced it at before close)
-      // Try to get from volume-weighted price or last trading price
-      const impliedProb = parseFloat(raw.volumeWeightedPrice || raw.lastTradePrice || 0) || yesPrice;
-      // Use original price if close to extremes — it's already resolved
-      const preResolutionPrice = (impliedProb > 0.05 && impliedProb < 0.95)
-        ? impliedProb
-        : yesPrice; // Fallback
+      // ── Pre-resolution price lookup ──────────────────────────────────
+      // Priority 1: use our own snapshot (taken from active market before it closed).
+      // This is the only reliably unbiased source — the Gamma API for closed markets
+      // returns the post-resolution token price (~$1 or ~$0), not the trading price.
+      // Priority 2: if no snapshot, skip — we cannot reconstruct a meaningful
+      // pre-resolution probability from the closed-market API response.
+      const snap = priceSnapshots.get(raw.conditionId);
+      let preResolutionPrice = null;
 
-      // If the price was already very close to the outcome, this isn't useful for calibration
-      // (Market was already >90% sure of the outcome)
+      if (snap) {
+        const ageSecs = (Date.now() - snap.snappedAt) / 1000;
+        // Must be at least 1 hour old (avoid near-resolution noise) and at most 30 days old
+        if (ageSecs >= 3600 && ageSecs <= 30 * 24 * 3600) {
+          preResolutionPrice = snap.yesPrice;
+        }
+      }
+
+      // No valid snapshot → skip (we can't use the post-resolution price for calibration)
+      if (preResolutionPrice == null) continue;
+
+      // If the price was already very confident, skip (not useful for calibration)
       if (Math.abs(preResolutionPrice - (outcome === 'YES' ? 1 : 0)) < 0.10) continue;
 
       const isYes = outcome === 'YES';
@@ -163,17 +255,20 @@ async function collectResolutions() {
 
       const entry = {
         conditionId: raw.conditionId,
-        question: (raw.question || '').slice(0, 150),
-        category: raw.category || 'unknown',
+        question: (snap?.question || raw.question || '').slice(0, 150),
+        category: snap?.category || raw.category || 'unknown',
         preResolutionPrice: Math.round(preResolutionPrice * 10000) / 10000,
+        snapAge: snap ? Math.round((Date.now() - snap.snappedAt) / 3600000 * 10) / 10 : null,
         outcome,
         brier: Math.round(brier * 10000) / 10000,
         resolvedAt: new Date().toISOString(),
-        liquidity: parseFloat(raw.liquidity || 0),
+        liquidity: snap?.liquidity ?? parseFloat(raw.liquidity || 0),
         volume: parseFloat(raw.volumeNum || 0),
       };
 
       resolutionLog.push(entry);
+      // Remove used snapshot
+      priceSnapshots.delete(raw.conditionId);
       newResolutions++;
 
       // Feed to probability model's calibration system
@@ -327,6 +422,7 @@ function getStatus() {
     recentBrier: stats.recentBrier,
     calibrationImproving: stats.calibrationImproving,
     knownResolutions: resolvedMarketIds.size,
+    priceSnapshotCount: priceSnapshots.size,
     ...stats,
   };
 }

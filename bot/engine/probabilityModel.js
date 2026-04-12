@@ -421,13 +421,13 @@ function recordResolution(marketYesPrice, outcome, signals = {}, isRandomSample 
     if (perf.recentResults.length > 30) perf.recentResults.shift();
   }
 
-  // Retrain isotonic map every 25 resolutions
-  if (calibration.totalRecorded % 25 === 0) {
+  // Retrain isotonic map every 10 resolutions
+  if (calibration.totalRecorded % 10 === 0) {
     trainIsotonicCalibration();
   }
 
-  // Check for performance decay every 10 resolutions
-  if (calibration.totalRecorded % 10 === 0) {
+  // Check for performance decay every 5 resolutions
+  if (calibration.totalRecorded % 5 === 0) {
     detectPerformanceDecay();
   }
 
@@ -467,7 +467,7 @@ function trainIsotonicCalibration() {
       const mid = parseFloat(key.split('-')[0]) + 0.0125;
       return { mid, rate: data.total > 0 ? data.resolvedYes / data.total : mid, n: data.total };
     })
-    .filter(b => b.n >= 5)
+    .filter(b => b.n >= 3)
     .sort((a, b) => a.mid - b.mid);
 
   if (sortedBuckets.length < 3) {
