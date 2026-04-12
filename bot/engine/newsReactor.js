@@ -35,8 +35,10 @@ const STATE_FILE = path.join(__dirname, '..', 'logs', 'news-reactor-state.json')
 // ─── Optional Dependencies ───────────────────────────────────────────
 let polyMarkets = null;
 let oddsApi = null;
+let llmAnalysis = null;
 try { polyMarkets = require('../polymarket/markets'); } catch { /* optional */ }
 try { oddsApi = require('../bookmakers/oddsApi'); } catch { /* optional */ }
+try { llmAnalysis = require('../data/llmAnalysis'); } catch { /* optional */ }
 
 // ─── State ───────────────────────────────────────────────────────────
 let seenHeadlines = new Set();        // Dedup: hash of headline text
@@ -68,6 +70,9 @@ const CONFIG = {
   // Impact thresholds
   minImpactScore: 0.6,               // Minimum headline impact to generate signal
   minMarketMatchScore: 3,             // Minimum relevance score to match market
+  llmMatchThreshold: 0.55,           // LLM match quality needed to confirm a fuzzy keyword match
+  llmPrefilterScore: 1,              // Keyword score >= this triggers LLM validation
+  maxLLMCallsPerPoll: 5,             // Cap LLM usage per poll cycle
   // Reaction parameters
   minEdgeForSignal: 0.03,            // 3% minimum estimated edge to fire
 };
@@ -205,12 +210,13 @@ function scoreHeadlineImpact(headline) {
 
 /**
  * Match a headline against all active Polymarket markets.
- * Returns array of matched markets with relevance scores.
+ * Step 1: fast keyword pre-filter
+ * Step 2: LLM semantic validation for borderline/fuzzy matches
  */
-function matchToMarkets(headline, markets) {
+function matchToMarketsKeyword(headline, markets) {
   if (!markets || markets.length === 0) return [];
 
-  const headlineText = (headline.title + ' ' + headline.description).toLowerCase();
+  const headlineText = (headline.title + ' ' + (headline.description || '')).toLowerCase();
   const headlineWords = new Set(headlineText.split(/\s+/).filter(w => w.length >= 3));
   const matches = [];
 
@@ -218,7 +224,6 @@ function matchToMarkets(headline, markets) {
     if (!market.question) continue;
     const q = market.question.toLowerCase();
 
-    // Extract meaningful words from market question
     const stopWords = new Set(['will', 'the', 'a', 'an', 'is', 'are', 'be', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'or', 'and', 'but', 'if', 'what', 'which', 'who', 'how', 'when', 'where', 'why', 'yes', 'no', 'before', 'after', 'this', 'that', 'more', 'than']);
     const marketWords = q.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
 
@@ -226,11 +231,10 @@ function matchToMarkets(headline, markets) {
     let matchedWords = [];
 
     // Exact entity matching (names, proper nouns)
-    // Extract capitalized entities from market question
     const entities = market.question.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/g) || [];
     for (const entity of entities) {
       if (headlineText.includes(entity.toLowerCase())) {
-        matchScore += 4; // High weight for entity match
+        matchScore += 4;
         matchedWords.push(entity);
       }
     }
@@ -243,16 +247,48 @@ function matchToMarkets(headline, markets) {
       }
     }
 
-    if (matchScore >= CONFIG.minMarketMatchScore) {
-      matches.push({
-        market,
-        matchScore,
-        matchedWords,
-      });
+    if (matchScore >= CONFIG.llmPrefilterScore) {
+      matches.push({ market, matchScore, matchedWords });
     }
   }
 
-  return matches.sort((a, b) => b.matchScore - a.matchScore).slice(0, 5);
+  return matches.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15);
+}
+
+/**
+ * Async version — runs keyword filter then LLM semantic validation on ambiguous matches.
+ */
+async function matchToMarkets(headline, markets) {
+  const candidates = matchToMarketsKeyword(headline, markets);
+  if (candidates.length === 0) return [];
+
+  // Split into strong keyword matches (pass directly) and fuzzy (need LLM)
+  const strong = candidates.filter(c => c.matchScore >= CONFIG.minMarketMatchScore);
+  const fuzzy  = candidates.filter(c => c.matchScore < CONFIG.minMarketMatchScore);
+
+  const confirmed = [...strong];
+
+  // Use LLM to validate fuzzy/borderline matches if configured
+  const llm = llmAnalysis;
+  if (llm && llm.isConfigured() && fuzzy.length > 0) {
+    let llmCalls = 0;
+    for (const c of fuzzy) {
+      if (llmCalls >= CONFIG.maxLLMCallsPerPoll) break;
+      try {
+        const validation = await llm.validateMatch(
+          c.market.question,
+          headline.title + (headline.description ? '. ' + headline.description.slice(0, 120) : ''),
+          'News Headline'
+        );
+        llmCalls++;
+        if (validation.matchQuality >= CONFIG.llmMatchThreshold) {
+          confirmed.push({ ...c, matchScore: c.matchScore + validation.matchQuality * 5, llmValidated: true, matchQuality: validation.matchQuality });
+        }
+      } catch { /* non-critical */ }
+    }
+  }
+
+  return confirmed.sort((a, b) => b.matchScore - a.matchScore).slice(0, 5);
 }
 
 // ─── Directional Impact Estimation ───────────────────────────────────
@@ -309,11 +345,11 @@ function estimateDirection(headline, market) {
 /**
  * Process a new headline: match to markets, estimate impact, generate signals.
  */
-function processHeadline(headline, markets) {
+async function processHeadline(headline, markets) {
   const impact = scoreHeadlineImpact(headline);
   if (impact.score < CONFIG.minImpactScore) return null;
 
-  const matches = matchToMarkets(headline, markets);
+  const matches = await matchToMarkets(headline, markets);
   if (matches.length === 0) return null;
 
   const signals = [];
@@ -343,8 +379,10 @@ function processHeadline(headline, markets) {
       slug: match.market.slug,
       matchScore: match.matchScore,
       matchedWords: match.matchedWords,
+      llmValidated: match.llmValidated || false,
       side,
       currentPrice,
+      endDate: match.market.endDate || match.market.endDateIso,
       expectedMove: Math.round(expectedMove * 10000) / 10000,
       estimatedEdge: Math.round(estimatedEdge * 10000) / 10000,
       liquidity: match.market.liquidity,
@@ -433,10 +471,10 @@ async function pollNews() {
     } catch { /* no markets */ }
   }
 
-  // Process each new headline
+  // Process each new headline (sequential to respect LLM rate limits)
   const allSignals = [];
   for (const headline of newHeadlines) {
-    const signals = processHeadline(headline, markets);
+    const signals = await processHeadline(headline, markets);
     if (signals) {
       allSignals.push(...signals);
       stats.marketsMatched += signals.length;

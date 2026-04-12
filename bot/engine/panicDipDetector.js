@@ -60,8 +60,8 @@ const CONFIG = {
   ],
 
   // Minimum requirements
-  minLiquidity: 2000,                // $2k minimum to avoid illiquid traps
-  minVolume24h: 500,                 // Need some baseline activity
+  minLiquidity: 500,                 // $500 minimum (lowered from $2k to catch more markets)
+  minVolume24h: 200,                 // Need some baseline activity
   minPreDropPrice: 0.10,             // Don't buy dips on already-dead markets
   maxPreDropPrice: 0.90,             // Don't buy dips on near-certainties
 
@@ -226,8 +226,8 @@ function detectDips(markets) {
       // ─── Score the opportunity ───
       let score = threshold.score;
 
-      // News-justified drops are LESS attractive (market is correct)
-      if (newsJustified) score -= 40;
+      // News-justified drops are LESS attractive (market is correct) — but don't kill the signal entirely
+      if (newsJustified) score -= 20;
 
       // Large drops with no news are MORE attractive
       if (!newsJustified && dropPct > 0.25) score += 20;
@@ -254,6 +254,7 @@ function detectDips(markets) {
         conditionId,
         question: market.question?.slice(0, 150),
         slug: market.slug,
+        endDate: market.endDate || market.endDateIso,
         type: threshold.name,
         preDropPrice: maxPriceInWindow,
         currentPrice,

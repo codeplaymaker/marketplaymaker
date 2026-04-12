@@ -57,10 +57,10 @@ let isProcessing = false;
 const DISABLED_STRATEGIES = new Set(['BTC_BOT', 'WHALE_DETECTION', 'PROVEN_EDGE']);
 
 // Time horizon constants — mirrors paper trader
-const MAX_DAYS_HORIZON = 5;
-const MEDIUM_HORIZON_DAYS = 2;
-const MEDIUM_HORIZON_MIN_SCORE = 70;
-const MIN_HOURS_TO_CLOSE = 12;
+const MAX_DAYS_HORIZON = 30;          // Polymarket markets run 14-90 days; 5 was too strict
+const MEDIUM_HORIZON_DAYS = 7;        // Score gate applies only beyond 7 days
+const MEDIUM_HORIZON_MIN_SCORE = 50;  // Relaxed: was 70 (unreachable for news/panic signals)
+const MIN_HOURS_TO_CLOSE = 4;         // Was 12; 4h is sufficient runway for a trade
 
 let stats = {
   signalsReceived: 0,
