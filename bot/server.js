@@ -696,6 +696,37 @@ app.get('/api/shadow-diag', (req, res) => {
   }
 });
 
+// Retroactively mirror eligible active paper trades into shadow live
+app.post('/api/shadow-diag/execute-pending', async (req, res) => {
+  try {
+    const shadowLive = require('./engine/shadowLive');
+    const activeTrades = (paperTrader.getHistory ? paperTrader.getHistory(50) : []).filter(t => !t.resolved);
+
+    const results = [];
+    for (const trade of activeTrades) {
+      const shadowConfig = shadowLive.shouldMirror(trade);
+      if (!shadowConfig) {
+        results.push({ market: trade.market?.slice(0, 50), status: 'SKIPPED' });
+        continue;
+      }
+      const position = await shadowLive.executeShadow(shadowConfig);
+      results.push({
+        market: trade.market?.slice(0, 50),
+        status: position ? 'EXECUTED' : 'FAILED',
+        size: shadowConfig.size,
+        side: trade.side,
+        score: trade.score,
+      });
+    }
+
+    const executed = results.filter(r => r.status === 'EXECUTED').length;
+    log.info('SHADOW_LIVE', `Retroactive mirror: ${executed}/${activeTrades.length} trades executed`);
+    res.json({ executed, total: activeTrades.length, results });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // MOUNT ALL ROUTE MODULES
 // ═══════════════════════════════════════════════════════════════════════
