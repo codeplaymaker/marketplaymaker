@@ -157,19 +157,49 @@ async function executeShadow(shadowConfig) {
     return null;
   }
 
-  // Resolve token ID on-the-fly if not pre-stored (using conditionId → CLOB markets API)
+  // Resolve token ID on-the-fly if not pre-stored
   if (!shadowConfig.tokenId && shadowConfig.conditionId) {
-    try {
-      const mktRes = await fetch(`https://clob.polymarket.com/markets/${shadowConfig.conditionId}`);
-      if (mktRes.ok) {
-        const mktData = await mktRes.json();
-        const tokens = mktData.tokens || [];
-        const yesToken = tokens.find(t => t.outcome === 'Yes')?.token_id;
-        const noToken = tokens.find(t => t.outcome === 'No')?.token_id;
-        shadowConfig.tokenId = shadowConfig.side === 'YES' ? yesToken : noToken;
-        if (shadowConfig.tokenId) {
-          log.info('SHADOW_LIVE', `Resolved tokenId for ${shadowConfig.conditionId?.slice(0,12)}: ${shadowConfig.tokenId?.slice(0,20)}`);
+    const resolveToken = async () => {
+      // Try CLOB API first
+      try {
+        const mktRes = await fetch(`https://clob.polymarket.com/markets/${shadowConfig.conditionId}`);
+        if (mktRes.ok) {
+          const mktData = await mktRes.json();
+          const tokens = mktData.tokens || [];
+          const yesToken = tokens.find(t => /yes/i.test(t.outcome))?.token_id;
+          const noToken = tokens.find(t => /no/i.test(t.outcome))?.token_id;
+          const tokenId = shadowConfig.side === 'YES' ? yesToken : noToken;
+          if (tokenId) return tokenId;
         }
+      } catch (e) { log.debug('SHADOW_LIVE', `CLOB token lookup failed: ${e.message}`); }
+
+      // Fallback: Gamma API
+      try {
+        const gammaRes = await fetch(`https://gamma-api.polymarket.com/markets?conditionId=${shadowConfig.conditionId}`);
+        if (gammaRes.ok) {
+          const gammaData = await gammaRes.json();
+          const market = Array.isArray(gammaData) ? gammaData[0] : gammaData;
+          const tokens = market?.tokens || market?.clobTokenIds || [];
+          // gamma returns [{token_id, outcome}] or just [id1, id2] (index 0=YES, 1=NO)
+          if (Array.isArray(tokens) && tokens.length > 0) {
+            if (typeof tokens[0] === 'object') {
+              const yesToken = tokens.find(t => /yes/i.test(t.outcome))?.token_id;
+              const noToken = tokens.find(t => /no/i.test(t.outcome))?.token_id;
+              return shadowConfig.side === 'YES' ? yesToken : noToken;
+            } else {
+              return shadowConfig.side === 'YES' ? tokens[0] : tokens[1];
+            }
+          }
+        }
+      } catch (e) { log.debug('SHADOW_LIVE', `Gamma token lookup failed: ${e.message}`); }
+
+      return null;
+    };
+
+    try {
+      shadowConfig.tokenId = await resolveToken();
+      if (shadowConfig.tokenId) {
+        log.info('SHADOW_LIVE', `Resolved tokenId for ${shadowConfig.conditionId?.slice(0,12)}: ${shadowConfig.tokenId?.slice(0,20)}`);
       }
     } catch (e) { log.info('SHADOW_LIVE', `Token ID lookup failed: ${e.message}`); }
   }
@@ -268,8 +298,8 @@ async function executeShadow(shadowConfig) {
 
     return position;
   } catch (err) {
-    log.error('SHADOW_LIVE', `Shadow trade failed: ${err.message}`);
-    return null;
+    log.error('SHADOW_LIVE', `Shadow trade failed: ${err.message} | stack: ${err.stack?.split('\n')[1]?.trim()}`);
+    throw err;
   }
 }
 
