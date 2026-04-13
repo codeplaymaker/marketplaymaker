@@ -932,11 +932,12 @@ No POLYGON_PRIVATE_KEY or POLY_API_KEY set. Shadow live cannot place trades.`
     );
   }
 
-  // Get balance
+  // Get balance — prefer exchange balance (deposited into Polymarket) over on-chain ERC-20
   let balance = 0;
   try {
     const clobExecutor = require('./polymarket/clobExecutor');
-    balance = await clobExecutor.getUSDCBalance();
+    const exBal = await clobExecutor.getExchangeBalance().catch(() => null);
+    balance = (exBal != null && exBal > 0) ? exBal : (await clobExecutor.getUSDCBalance().catch(() => 0));
   } catch { /* ignore */ }
 
   if (clobStatus.dryRun) {
@@ -975,7 +976,9 @@ Fund the wallet to enable shadow live trading.`
   }
 
   // Pick most recent trade — prefer ones with token IDs already stored, otherwise executeShadow resolves from conditionId
-  const candidate = history.slice().reverse().find(t => t.yesTokenId || t.noTokenId) || history[history.length - 1];
+  // Try up to 5 most recent candidates in case token ID resolution fails
+  const candidates = history.slice().reverse().slice(0, 5);
+  const candidate = candidates.find(t => t.yesTokenId || t.noTokenId) || candidates[0];
   const testConfig = {
     size: 1.00,
     side: candidate.side || 'YES',
@@ -999,14 +1002,35 @@ Strategy: ${testConfig.strategy}`
 
   try {
     const shadowLive = require('./engine/shadowLive');
-    const position = await shadowLive.executeShadow(testConfig);
+    let position = null;
+    let lastErr = null;
+
+    // Try each candidate until one succeeds
+    for (const c of candidates) {
+      try {
+        const cfg = {
+          size: 1.00,
+          side: c.side || 'YES',
+          tokenId: c.side === 'YES' ? (c.yesTokenId || null) : (c.noTokenId || null),
+          price: c.entryPrice || 0.5,
+          paperEntryPrice: c.entryPrice || 0.5,
+          paperSlippage: c.slippage || 0,
+          conditionId: c.conditionId,
+          market: c.market || 'Test market',
+          strategy: c.strategy || 'TEST',
+          paperTradeId: c.id,
+        };
+        position = await shadowLive.executeShadow(cfg);
+        if (position) break;
+      } catch (e) { lastErr = e; }
+    }
 
     if (!position) {
       return sendTo(chatId,
         `❌ *Trade execution returned null*
 
 Wallet connected ($${balance.toFixed(2)} USDC) but trade was rejected.
-Check Railway logs for details (token ID resolution, slippage, etc.).`
+${lastErr ? 'Error: ' + lastErr.message : 'Check Railway logs for details (token ID resolution, slippage, etc.).'}`
       );
     }
 

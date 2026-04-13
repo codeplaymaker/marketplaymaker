@@ -368,9 +368,10 @@ async function placeTrade({ tokenId, side, price, size, maxSlippage = 0.02 }) {
     return { status: 'NOT_INITIALIZED', message: 'Call initialize() with private key first' };
   }
 
-  // Check USDC balance
+  // Check USDC balance — prefer exchange balance (deposited into Polymarket) over on-chain
   if (!dryRun) {
-    const balance = await getUSDCBalance();
+    const exBal = await getExchangeBalance().catch(() => null);
+    const balance = (exBal != null && exBal > 0) ? exBal : await getUSDCBalance();
     if (side === 'BUY' && balance < size) {
       return { status: 'INSUFFICIENT_FUNDS', balance, required: size };
     }
