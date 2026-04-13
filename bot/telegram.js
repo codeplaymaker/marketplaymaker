@@ -963,9 +963,10 @@ Fund the wallet to enable shadow live trading.`
   }
 
   // Find the best recent paper trade to test with
+  // tokenId can be resolved on-the-fly from conditionId by executeShadow, so only need conditionId
   const { paperTrader } = deps;
   const history = (paperTrader?.getHistory?.(200) || []).filter(t =>
-    t.conditionId && (t.yesTokenId || t.noTokenId) && t.entryPrice > 0
+    t.conditionId && t.entryPrice > 0
   );
 
   if (history.length === 0) {
@@ -980,8 +981,8 @@ No qualifying paper trades in history to mirror. Wait for the next scan.`
     );
   }
 
-  // Pick most recent with a tokenId
-  const candidate = history[history.length - 1];
+  // Pick most recent trade — prefer ones with token IDs already stored, otherwise executeShadow resolves from conditionId
+  const candidate = history.slice().reverse().find(t => t.yesTokenId || t.noTokenId) || history[history.length - 1];
   const testConfig = {
     size: 1.00,
     side: candidate.side || 'YES',
