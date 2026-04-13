@@ -927,8 +927,8 @@ async function handleMyStats(userId, chatId) {
     const s = t.strategy || 'UNKNOWN';
     if (!byStrategy[s]) byStrategy[s] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
     byStrategy[s].trades++;
-    byStrategy[s].pnl += t.pnl || 0;
-    if ((t.pnl || 0) > 0) byStrategy[s].wins++;
+    byStrategy[s].pnl += parseFloat(t.pnl) || 0;
+    if ((parseFloat(t.pnl) || 0) > 0) byStrategy[s].wins++;
     else byStrategy[s].losses++;
   }
 
@@ -944,13 +944,13 @@ async function handleMyStats(userId, chatId) {
   let text = `📊 *Strategy Breakdown* (${resolved.length} resolved)\n\n`;
   for (const [name, s] of sorted) {
     const wr = ((s.wins / s.trades) * 100).toFixed(0);
-    const pnlStr = `${s.pnl >= 0 ? '+' : ''}$${s.pnl.toFixed(2)}`;
+    const pnlStr = `${s.pnl >= 0 ? '+' : ''}$${(parseFloat(s.pnl) || 0).toFixed(2)}`;
     const icon = s.pnl > 5 ? '✅' : s.pnl < -5 ? '❌' : '⚪';
     text += `${icon} *${name}*\n`;
     text += `   ${s.wins}W / ${s.losses}L (${wr}% WR) | *${pnlStr}*\n\n`;
   }
   text += `─────────────────\n`;
-  text += `Total paper P&L: *${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}*\n\n`;
+  text += `Total paper P&L: *${totalPnL >= 0 ? '+' : ''}$${(parseFloat(totalPnL) || 0).toFixed(2)}*\n\n`;
 
   const user = userStore.getUser(userId);
   const myCount = user?.trades?.length || 0;
@@ -1210,7 +1210,7 @@ async function pushShadowResolutionSignal(closed) {
     let text = `${icon} *Shadow Trade Resolved*\n\n`;
     text += `• *${truncate(closed.market || 'Unknown', 50)}*\n`;
     text += `   ${stratTag} ${closed.side} → ${closed.outcome}\n`;
-    text += `   Real P&L: ${closed.pnl >= 0 ? '+' : ''}$${closed.pnl.toFixed(2)}\n`;
+    text += `   Real P&L: ${closed.pnl >= 0 ? '+' : ''}$${(parseFloat(closed.pnl) || 0).toFixed(2)}\n`;
     text += `   Paper P&L: ${closed.paperPnl >= 0 ? '+' : ''}$${closed.paperPnl.toFixed(2)} | Delta: ${closed.pnlDelta >= 0 ? '+' : ''}$${closed.pnlDelta.toFixed(2)}\n`;
     text += `_Shadow live validation_`;
     await sendTo(user.chatId, text);
@@ -1240,7 +1240,7 @@ async function pushResolutionSignal(resolutions) {
       const sideTag = r.side ? ` ${r.side.toUpperCase()}` : '';
       text += `${icon} *${truncate(r.question || r.market || 'Unknown', 45)}*\n`;
       text += `   ${stratTag}${sideTag} → ${r.outcome || r.result || '?'}`;
-      if (r.pnl != null) text += ` | P&L: ${r.pnl >= 0 ? '+' : ''}$${r.pnl.toFixed(2)}`;
+      if (r.pnl != null) text += ` | P&L: ${r.pnl >= 0 ? '+' : ''}$${(parseFloat(r.pnl) || 0).toFixed(2)}`;
       text += `\n\n`;
     }
     await sendTo(user.chatId, text);
