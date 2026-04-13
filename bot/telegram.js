@@ -965,19 +965,12 @@ Fund the wallet to enable shadow live trading.`
   // Find the best recent paper trade to test with
   // tokenId can be resolved on-the-fly from conditionId by executeShadow, so only need conditionId
   const { paperTrader } = deps;
-  const history = (paperTrader?.getHistory?.(200) || []).filter(t =>
-    t.conditionId && t.entryPrice > 0
-  );
+  const rawHistory = paperTrader?.getHistory?.(200) || [];
+  const history = rawHistory.filter(t => t.conditionId && t.entryPrice > 0);
 
   if (history.length === 0) {
     return sendTo(chatId,
-      `⚠️ *Connected but no test trade placed*
-
-Wallet: \`${clobStatus.walletAddress}\`
-Mode: LIVE
-USDC: $${balance.toFixed(2)}
-
-No qualifying paper trades in history to mirror. Wait for the next scan.`
+      `⚠️ *Connected but no test trade placed*\n\nWallet: \`${clobStatus.walletAddress}\`\nMode: LIVE\nUSDC: $${balance.toFixed(2)}\n\nPaper trades in memory: ${rawHistory.length} (${history.length} qualifying)\nNo qualifying paper trades to mirror. Do /scan then try again.`
     );
   }
 
