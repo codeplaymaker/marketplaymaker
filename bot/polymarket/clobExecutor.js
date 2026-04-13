@@ -40,9 +40,10 @@ const CONDITIONAL_TOKENS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 
 // EIP-712 domain for Polymarket CLOB
 const EIP712_DOMAIN = {
-  name: 'Polymarket CTF Exchange',
+  name: 'CTF Exchange',
   version: '1',
   chainId: CHAIN_ID,
+  verifyingContract: CTF_EXCHANGE,
 };
 
 // Order types for EIP-712
@@ -269,26 +270,23 @@ async function submitOrder(signedOrder) {
   }
 
   try {
+    const requestBody = JSON.stringify({
+      order: signedOrder.order,
+      signature: signedOrder.signature,
+      owner: wallet.address,
+      orderType: 'GTC', // Good 'til cancelled
+    });
+
+    const authHeaders = buildL2Headers('POST', '/order', requestBody);
     const headers = {
       'Content-Type': 'application/json',
+      ...(authHeaders || {}),
     };
-
-    // Add API authentication if available
-    if (apiKey) {
-      headers['POLY_API_KEY'] = apiKey;
-      headers['POLY_API_SECRET'] = apiSecret;
-      headers['POLY_PASSPHRASE'] = apiPassphrase;
-    }
 
     const response = await fetch(`${CLOB_API}/order`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        order: signedOrder.order,
-        signature: signedOrder.signature,
-        owner: wallet.address,
-        orderType: 'GTC', // Good 'til cancelled
-      }),
+      body: requestBody,
     });
 
     if (!response.ok) {
