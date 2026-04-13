@@ -242,6 +242,10 @@ async function handleCommand(userId, chatId, command, args, isGroup, username) {
     case '/goldstart': return requireAdmin(userId, chatId, () => handleGoldStart(chatId));
     case '/goldstop':  return requireAdmin(userId, chatId, () => handleGoldStop(chatId));
 
+    // Shadow live
+    case '/testshadow': return requireAdmin(userId, chatId, () => handleTestShadow(chatId));
+    case '/shadowstats': return requireAdmin(userId, chatId, () => handleShadowStats(chatId));
+
     // Admin only (userId for auth, chatId for reply)
     case '/scan':      return requireAdmin(userId, chatId, () => handleScan(chatId));
     case '/startbot':  return requireAdmin(userId, chatId, () => handleStartBot(chatId));
@@ -905,6 +909,159 @@ async function handleSearch(chatId, query) {
     text += `   YES ${yesP}¢ / NO ${noP}¢ | Liq: ${liqK} | Closes: ${end}\n\n`;
   }
   text += `_${allMarkets.length} markets indexed • /search <keyword>_`;
+  await sendTo(chatId, text);
+}
+
+async function handleTestShadow(chatId) {
+  await sendTo(chatId, `🔍 Checking shadow live connection...`);
+
+  // Check CLOB executor status
+  let clobStatus;
+  try {
+    const clobExecutor = require('./polymarket/clobExecutor');
+    clobStatus = clobExecutor.getStatus();
+  } catch (e) {
+    return sendTo(chatId, `❌ CLOB executor failed to load: ${e.message}`);
+  }
+
+  if (!clobStatus.initialized) {
+    return sendTo(chatId,
+      `❌ *CLOB executor not initialized*
+
+No POLYGON_PRIVATE_KEY or POLY_API_KEY set. Shadow live cannot place trades.`
+    );
+  }
+
+  // Get balance
+  let balance = 0;
+  try {
+    const clobExecutor = require('./polymarket/clobExecutor');
+    balance = await clobExecutor.getUSDCBalance();
+  } catch { /* ignore */ }
+
+  if (clobStatus.dryRun) {
+    return sendTo(chatId,
+      `⚠️ *CLOB executor is in DRY-RUN mode*
+
+Wallet: \`${clobStatus.walletAddress || 'none'}\`
+Mode: DRY_RUN (trades simulated, not real)
+USDC balance: $${balance.toFixed(2)}
+
+To go live, ensure POLYGON_PRIVATE_KEY is set in Railway env vars.`
+    );
+  }
+
+  if (balance < 1) {
+    return sendTo(chatId,
+      `❌ *Insufficient USDC balance*
+
+Wallet: \`${clobStatus.walletAddress}\`
+Balance: $${balance.toFixed(2)} (need at least $1)
+
+Fund the wallet to enable shadow live trading.`
+    );
+  }
+
+  // Find the best recent paper trade to test with
+  const { paperTrader } = deps;
+  const history = (paperTrader?.getHistory?.(200) || []).filter(t =>
+    t.conditionId && (t.yesTokenId || t.noTokenId) && t.entryPrice > 0
+  );
+
+  if (history.length === 0) {
+    return sendTo(chatId,
+      `⚠️ *Connected but no test trade placed*
+
+Wallet: \`${clobStatus.walletAddress}\`
+Mode: LIVE
+USDC: $${balance.toFixed(2)}
+
+No qualifying paper trades in history to mirror. Wait for the next scan.`
+    );
+  }
+
+  // Pick most recent with a tokenId
+  const candidate = history[history.length - 1];
+  const testConfig = {
+    size: 1.00,
+    side: candidate.side || 'YES',
+    tokenId: candidate.side === 'YES' ? (candidate.yesTokenId || null) : (candidate.noTokenId || null),
+    price: candidate.entryPrice || 0.5,
+    paperEntryPrice: candidate.entryPrice || 0.5,
+    paperSlippage: candidate.slippage || 0,
+    conditionId: candidate.conditionId,
+    market: candidate.market || 'Test market',
+    strategy: candidate.strategy || 'TEST',
+    paperTradeId: candidate.id,
+  };
+
+  await sendTo(chatId,
+    `🚀 *Placing $1 test shadow trade...*
+
+Market: ${testConfig.market?.slice(0, 60)}
+Side: ${testConfig.side} @ ${testConfig.price?.toFixed(3)}
+Strategy: ${testConfig.strategy}`
+  );
+
+  try {
+    const shadowLive = require('./engine/shadowLive');
+    const position = await shadowLive.executeShadow(testConfig);
+
+    if (!position) {
+      return sendTo(chatId,
+        `❌ *Trade execution returned null*
+
+Wallet connected ($${balance.toFixed(2)} USDC) but trade was rejected.
+Check Railway logs for details (token ID resolution, slippage, etc.).`
+      );
+    }
+
+    return sendTo(chatId,
+      `✅ *Shadow live test SUCCESSFUL*
+
+Order ID: \`${position.orderId || 'n/a'}\`
+Fill: ${position.fillOutcome}
+Entry price: ${position.entryPrice?.toFixed(4)}
+Slippage: ${(position.realSlippage * 100).toFixed(2)}%
+Wallet: \`${clobStatus.walletAddress}\`
+USDC remaining: $${(balance - 1).toFixed(2)}
+
+Shadow live is ✅ operational.`
+    );
+  } catch (err) {
+    return sendTo(chatId, `❌ *executeShadow threw:* ${err.message}`);
+  }
+}
+
+async function handleShadowStats(chatId) {
+  let shadowState;
+  try {
+    shadowState = require('./engine/shadowLive').getStatus();
+  } catch (e) {
+    return sendTo(chatId, `❌ Shadow live module not loaded: ${e.message}`);
+  }
+
+  const s = shadowState;
+  const net = (s.totalReturned || 0) - (s.totalDeployed || 0);
+  const wr = s.stats?.totalTrades > 0
+    ? ((s.closedPositions?.filter(p => p.won).length / s.closedPositions?.length) * 100).toFixed(0)
+    : 'n/a';
+
+  let text = `🔮 *Shadow Live Stats*\n\n`;
+  text += `Mode: ${s.enabled ? '🟢 ACTIVE' : '🔴 DISABLED'} | ${s.dryRun ? 'DRY-RUN' : 'LIVE'}\n`;
+  text += `Deployed: $${(s.totalDeployed || 0).toFixed(2)} / Returned: $${(s.totalReturned || 0).toFixed(2)}\n`;
+  text += `Net P&L: ${net >= 0 ? '+' : ''}$${net.toFixed(2)}\n`;
+  text += `Open positions: ${s.openPositions?.length || 0}\n`;
+  text += `Closed trades: ${s.closedPositions?.length || 0} (${wr}% WR)\n`;
+  text += `Daily loss: $${(s.dailyLoss || 0).toFixed(2)} / $${s.maxDailyLoss || 5}\n\n`;
+
+  if (s.stats?.avgSlippageDelta != null) {
+    const sd = s.stats.avgSlippageDelta * 100;
+    text += `Avg slippage delta: ${sd >= 0 ? '+' : ''}${sd.toFixed(2)}% (real vs paper)\n`;
+    text += `Fill match rate: ${((s.stats.fillMatchRate || 0) * 100).toFixed(0)}%\n`;
+    text += `Paper mirror P&L: ${s.stats.paperMirrorPnL >= 0 ? '+' : ''}$${(s.stats.paperMirrorPnL || 0).toFixed(2)}\n`;
+  }
+
   await sendTo(chatId, text);
 }
 
