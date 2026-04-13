@@ -270,9 +270,10 @@ async function submitOrder(signedOrder) {
   }
 
   try {
+    // Signature must be embedded inside the order object (Polymarket CLOB spec)
+    const orderWithSig = { ...signedOrder.order, signature: signedOrder.signature };
     const requestBody = JSON.stringify({
-      order: signedOrder.order,
-      signature: signedOrder.signature,
+      order: orderWithSig,
       owner: wallet.address,
       orderType: 'GTC', // Good 'til cancelled
     });
