@@ -592,6 +592,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Public health check (must be before authMiddleware)
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 // Authentication
 app.use(authMiddleware);
 

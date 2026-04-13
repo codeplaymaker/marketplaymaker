@@ -4,7 +4,7 @@ module.exports = {
   CLOB_API: 'https://clob.polymarket.com',
   CHAIN_ID: 137,
 
-  // Bot server (Railway injects PORT automatically)
+  // Bot server (Railway/Fly injects PORT automatically; locally must use 4000 to match proxy)
   PORT: process.env.PORT || process.env.BOT_PORT || 4000,
 
   // Market Selection Constraints
@@ -66,7 +66,7 @@ module.exports = {
   shadowLive: {
     enabled: !!process.env.SHADOW_LIVE_ENABLED,       // Opt-in: set SHADOW_LIVE_ENABLED=true in .env
     maxBankroll: 50,                                   // Max real USDC to deploy total
-    maxPerTrade: 2,                                    // Max $2 per shadow trade
+    maxPerTrade: 5,                                    // Max $5 per shadow trade (CLOB minimum)
     maxOpenPositions: 5,                               // Max 5 concurrent real positions
     maxDailyLoss: 5,                                   // Hard stop at $5 daily loss
     minScore: 40,                                      // Mirror trades with meaningful conviction

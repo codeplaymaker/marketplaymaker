@@ -120,7 +120,7 @@ function shouldMirror(paperTrade) {
   } catch { /* paperTrader not available, skip gate */ }
 
   log.info('SHADOW_LIVE', `✅ MIRROR: ${paperTrade.strategy} ${paperTrade.side} "${paperTrade.market?.slice(0,40)}" score:${paperTrade.score} liq:${paperTrade.liquidity}`);
-  const size = Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade);
+  const size = Math.max(5, Math.min(maxPerTrade, paperTrade.kellySize || maxPerTrade)); // floor at $5 (CLOB minimum)
 
   return {
     size,

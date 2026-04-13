@@ -74,6 +74,14 @@ let nonce = 0;
 let apiKey = null;
 let apiSecret = null;
 let apiPassphrase = null;
+let geoBlockToken = null;
+
+// Append geo_block_token query param to bypass Polymarket geoblocking (Builder key)
+function withGeoToken(url) {
+  if (!geoBlockToken) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}geo_block_token=${encodeURIComponent(geoBlockToken)}`;
+}
 
 const ORDERS_FILE = path.join(__dirname, '../logs/live-orders.json');
 let liveOrders = [];
@@ -105,36 +113,59 @@ async function initialize(privateKey, options = {}) {
     apiKey = options.apiKey || null;
     apiSecret = options.apiSecret || null;
     apiPassphrase = options.apiPassphrase || null;
+    geoBlockToken = options.geoBlockToken || process.env.GEO_BLOCK_TOKEN || null;
 
     dryRun = options.dryRun !== false;
+
+    // clob-client signer.js checks isEthersTypedDataSigner via typeof signer._signTypedData.
+    // Ethers v6 removed _signTypedData (renamed to signTypedData), so we must shim it back.
+    // Use Object.defineProperty to guarantee the own-property is set even if prototype blocks assignment.
+    Object.defineProperty(wallet, '_signTypedData', {
+      value: (domain, types, value) => wallet.signTypedData(domain, types, value),
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+
+    // Belt-and-suspenders: also satisfy the viem WalletClient path so that if the SDK
+    // falls through to isWalletClientSigner it can still get the address and sign.
+    wallet.account = { address: wallet.address };
+    const _origSignTypedData = wallet.signTypedData.bind(wallet);
+    wallet.signTypedData = function (domainOrViemParams, types, value) {
+      // Detect viem-style single-object call: signTypedData({ domain, types, message, primaryType })
+      if (domainOrViemParams && typeof domainOrViemParams === 'object' &&
+          'message' in domainOrViemParams && types === undefined) {
+        const { domain, types: t, message } = domainOrViemParams;
+        return _origSignTypedData(domain, t, message);
+      }
+      return _origSignTypedData(domainOrViemParams, types, value);
+    };
+
+    log.info('CLOB_EXEC', `signer shim verified: _signTypedData=${typeof wallet._signTypedData}`);
+
     isInitialized = true;
 
-    // Build official CLOB client if API credentials are available
-    if (apiKey && apiSecret && apiPassphrase && !dryRun) {
-      try {
-        const { ClobClient } = require('@polymarket/clob-client');
-        // ethers v5 Wallet needed by clob-client (v5 API)
-        let v5Wallet;
-        try {
-          const ethers5 = require('@polymarket/clob-client/node_modules/ethers');
-          v5Wallet = new ethers5.Wallet(privateKey);
-        } catch {
-          // fallback: use ethers v6 wallet directly — clob-client may accept it
-          v5Wallet = wallet;
-        }
-        const creds = { key: apiKey, secret: apiSecret, passphrase: apiPassphrase };
-        // signatureType 0 = EOA, funder = EOA address (funds held in proxy but signing is EOA)
-        clobClient = new ClobClient(CLOB_API, CHAIN_ID, v5Wallet, creds, 0);
-        log.info('CLOB_EXEC', 'Official CLOB client initialized');
-      } catch (e) {
-        log.warn('CLOB_EXEC', `ClobClient init failed: ${e.message} — falling back to manual signing`);
-        clobClient = null;
-      }
+    // Load the official SDK via dynamic import() — it's ESM-only and can't be require()'d.
+    try {
+      const { ClobClient } = await import('@polymarket/clob-client');
+      clobClient = new ClobClient(
+        CLOB_API,
+        CHAIN_ID,
+        wallet,
+        { key: apiKey, secret: apiSecret, passphrase: apiPassphrase },
+        2,              // signatureType: POLY_GNOSIS_SAFE (Safe at PROXY_ADDRESS holds USDC)
+        PROXY_ADDRESS,  // funder = Gnosis Safe (0x4bee...) — has $84 USDC + MaxUint256 approvals
+        geoBlockToken || undefined,
+      );
+      log.info('CLOB_EXEC', 'ClobClient SDK initialized (POLY_GNOSIS_SAFE, funder=Safe)');
+    } catch (e) {
+      log.warn('CLOB_EXEC', `ClobClient SDK unavailable (${e.message}), using manual EIP-712`);
+      clobClient = null;
     }
 
     loadOrders();
     const balance = await getUSDCBalance();
-    log.info('CLOB_EXEC', `Initialized: wallet=${wallet.address}, USDC=${balance}, mode=${dryRun ? 'DRY-RUN' : 'LIVE'}`);
+    log.info('CLOB_EXEC', `Initialized: wallet=${wallet.address}, USDC=${balance}, mode=${dryRun ? 'DRY-RUN' : 'LIVE'}, sdk=${!!clobClient}`);
     return true;
   } catch (err) {
     log.error('CLOB_EXEC', `Initialization failed: ${err.message}`);
@@ -191,19 +222,16 @@ async function createOrder({ tokenId, side, price, size, expiration }) {
   if (!isInitialized) throw new Error('CLOB executor not initialized');
   if (!tokenId || !side || !price || !size) throw new Error('Missing required order params');
   if (price <= 0 || price >= 1) throw new Error(`Invalid price: ${price}`);
-  if (size <= 0) throw new Error(`Invalid size: ${size}`);
+  if (size < 5) throw new Error(`Order too small: $${size} (min $5)`);
   if (size > 1000) throw new Error(`Order too large: $${size} (max $1000)`);
 
   if (clobClient) {
-    // Use official SDK — handles EIP-712, signatureType, funder correctly
+    // Use SDK to create+sign the order only; submitOrder will call postOrder.
     const orderArgs = { tokenID: tokenId, price, size, side };
-    const marketInfo = { tickSize: '0.01', negRisk: false };
-    const signedOrder = await clobClient.createOrder(orderArgs, marketInfo);
+    const sdkOrder = await clobClient.createOrder(orderArgs);
     return {
-      order: signedOrder,
-      signature: null, // embedded by SDK
+      _sdkOrder: sdkOrder,
       metadata: { side, price, size, tokenId, dryRun },
-      _sdkOrder: signedOrder,
     };
   }
 
@@ -258,12 +286,13 @@ async function submitOrder(signedOrder) {
     return dryResult;
   }
 
-  // Use SDK if available
+  // SDK path: post the pre-signed order
   if (clobClient && signedOrder._sdkOrder) {
     try {
       const result = await clobClient.postOrder(signedOrder._sdkOrder);
+      const orderId = result?.orderID || result?.id || result?.order_id || result?.hash;
       const orderRecord = {
-        orderId: result.orderID || result.id,
+        orderId,
         status: 'OPEN',
         ...signedOrder.metadata,
         createdAt: new Date().toISOString(),
@@ -271,27 +300,47 @@ async function submitOrder(signedOrder) {
       };
       liveOrders.push(orderRecord);
       saveOrders();
-      log.info('CLOB_EXEC', `Order placed via SDK: ${orderRecord.orderId} | ${signedOrder.metadata.side} ${signedOrder.metadata.size} @ ${signedOrder.metadata.price}`);
+      log.info('CLOB_EXEC', `Order placed via SDK: ${orderId} | ${signedOrder.metadata.side} ${signedOrder.metadata.size} @ ${signedOrder.metadata.price}`);
       return orderRecord;
     } catch (err) {
-      log.error('CLOB_EXEC', `SDK order submission failed: ${err.message}`);
+      log.error('CLOB_EXEC', `SDK postOrder failed: ${err.message}`);
       throw err;
     }
   }
 
+  // Manual fallback (clobClient unavailable)
+
   // Manual fallback
   try {
-    const orderWithSig = { ...signedOrder.order, signature: signedOrder.signature };
+    // Build order body matching the SDK's orderToJson() format exactly:
+    // - salt must be integer (not string)
+    // - side must be "BUY"/"SELL" string (not 0/1)
+    // - owner is the API key (not the wallet address)
+    const orderBody = {
+      salt: Number.parseInt(signedOrder.order.salt, 10),
+      maker: signedOrder.order.maker,
+      signer: signedOrder.order.signer,
+      taker: signedOrder.order.taker,
+      tokenId: signedOrder.order.tokenId,
+      makerAmount: signedOrder.order.makerAmount,
+      takerAmount: signedOrder.order.takerAmount,
+      side: signedOrder.order.side === 0 ? 'BUY' : 'SELL',
+      expiration: signedOrder.order.expiration,
+      nonce: signedOrder.order.nonce,
+      feeRateBps: signedOrder.order.feeRateBps,
+      signatureType: signedOrder.order.signatureType,
+      signature: signedOrder.signature,
+    };
     const requestBody = JSON.stringify({
-      order: orderWithSig,
-      owner: wallet.address,
+      order: orderBody,
+      owner: apiKey,
       orderType: 'GTC',
     });
 
     const authHeaders = buildL2Headers('POST', '/order', requestBody);
     const headers = { 'Content-Type': 'application/json', ...(authHeaders || {}) };
 
-    const response = await fetch(`${CLOB_API}/order`, { method: 'POST', headers, body: requestBody });
+    const response = await fetch(withGeoToken(`${CLOB_API}/order`), { method: 'POST', headers, body: requestBody });
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`CLOB API ${response.status}: ${text}`);
@@ -379,7 +428,7 @@ async function placeTrade({ tokenId, side, price, size, maxSlippage = 0.02 }) {
 
   // Slippage protection: get current market price
   try {
-    const midRes = await fetch(`${CLOB_API}/midpoint?token_id=${tokenId}`);
+    const midRes = await fetch(withGeoToken(`${CLOB_API}/midpoint?token_id=${tokenId}`));
     if (midRes.ok) {
       const midData = await midRes.json();
       const marketMid = parseFloat(midData.mid || 0);
@@ -622,7 +671,7 @@ async function getExchangeBalance() {
       asset_type: 'COLLATERAL',
       signature_type: '0',
     });
-    const res = await fetch(`${CLOB_API}${endpoint}?${params}`, { headers });
+    const res = await fetch(withGeoToken(`${CLOB_API}${endpoint}?${params}`), { headers });
     if (!res.ok) {
       const text = await res.text();
       log.warn('CLOB_EXEC', `Exchange balance ${res.status}: ${text.slice(0, 200)}`);
