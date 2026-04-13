@@ -67,6 +67,7 @@ const ORDER_TYPES_EIP712 = {
 // ─── State ───────────────────────────────────────────────────────────
 let wallet = null;
 let ethers = null;
+let clobClient = null; // Official @polymarket/clob-client instance
 let isInitialized = false;
 let dryRun = true; // Safety: dry-run by default
 let nonce = 0;
@@ -89,7 +90,6 @@ async function initialize(privateKey, options = {}) {
   }
 
   try {
-    // Dynamic import of ethers (only needed for live execution)
     try {
       ethers = require('ethers');
     } catch {
@@ -97,23 +97,42 @@ async function initialize(privateKey, options = {}) {
       return false;
     }
 
-    // Create wallet connected to Polygon RPC
     const provider = new ethers.JsonRpcProvider(
       options.rpcUrl || 'https://polygon-bor-rpc.publicnode.com'
     );
     wallet = new ethers.Wallet(privateKey, provider);
 
-    // Set API credentials if provided
     apiKey = options.apiKey || null;
     apiSecret = options.apiSecret || null;
     apiPassphrase = options.apiPassphrase || null;
 
-    dryRun = options.dryRun !== false; // Default to dry-run
+    dryRun = options.dryRun !== false;
     isInitialized = true;
 
-    // Load persisted orders
-    loadOrders();
+    // Build official CLOB client if API credentials are available
+    if (apiKey && apiSecret && apiPassphrase && !dryRun) {
+      try {
+        const { ClobClient } = require('@polymarket/clob-client');
+        // ethers v5 Wallet needed by clob-client (v5 API)
+        let v5Wallet;
+        try {
+          const ethers5 = require('@polymarket/clob-client/node_modules/ethers');
+          v5Wallet = new ethers5.Wallet(privateKey);
+        } catch {
+          // fallback: use ethers v6 wallet directly — clob-client may accept it
+          v5Wallet = wallet;
+        }
+        const creds = { key: apiKey, secret: apiSecret, passphrase: apiPassphrase };
+        // signatureType 0 = EOA, funder = EOA address (funds held in proxy but signing is EOA)
+        clobClient = new ClobClient(CLOB_API, CHAIN_ID, v5Wallet, creds, 0);
+        log.info('CLOB_EXEC', 'Official CLOB client initialized');
+      } catch (e) {
+        log.warn('CLOB_EXEC', `ClobClient init failed: ${e.message} — falling back to manual signing`);
+        clobClient = null;
+      }
+    }
 
+    loadOrders();
     const balance = await getUSDCBalance();
     log.info('CLOB_EXEC', `Initialized: wallet=${wallet.address}, USDC=${balance}, mode=${dryRun ? 'DRY-RUN' : 'LIVE'}`);
     return true;
@@ -168,45 +187,33 @@ async function approveUSDC(amount = ethers.MaxUint256) {
 }
 
 // ─── Order Creation & Signing ────────────────────────────────────────
-/**
- * Create a signed order for the Polymarket CLOB.
- *
- * @param {Object} params
- * @param {string} params.tokenId - The YES or NO token ID
- * @param {string} params.side - 'BUY' or 'SELL'
- * @param {number} params.price - Price in range (0,1)
- * @param {number} params.size - Size in USDC
- * @param {number} [params.expiration] - Unix timestamp for expiration
- */
 async function createOrder({ tokenId, side, price, size, expiration }) {
   if (!isInitialized) throw new Error('CLOB executor not initialized');
   if (!tokenId || !side || !price || !size) throw new Error('Missing required order params');
-
-  // Validate
   if (price <= 0 || price >= 1) throw new Error(`Invalid price: ${price}`);
   if (size <= 0) throw new Error(`Invalid size: ${size}`);
   if (size > 1000) throw new Error(`Order too large: $${size} (max $1000)`);
 
-  // Calculate amounts (USDC has 6 decimals)
-  const USDC_DECIMALS = 6;
-  const sideNum = side === 'BUY' ? 0 : 1;
-
-  // For BUY: makerAmount = USDC you pay, takerAmount = shares you receive
-  // For SELL: makerAmount = shares you sell, takerAmount = USDC you receive
-  let makerAmount, takerAmount;
-  if (side === 'BUY') {
-    const usdcAmount = size; // how much USDC we're spending
-    const shares = usdcAmount / price; // how many shares we get
-    makerAmount = BigInt(Math.floor(usdcAmount * 10 ** USDC_DECIMALS));
-    takerAmount = BigInt(Math.floor(shares * 10 ** USDC_DECIMALS));
-  } else {
-    const shares = size; // how many shares
-    const usdcAmount = shares * price;
-    makerAmount = BigInt(Math.floor(shares * 10 ** USDC_DECIMALS));
-    takerAmount = BigInt(Math.floor(usdcAmount * 10 ** USDC_DECIMALS));
+  if (clobClient) {
+    // Use official SDK — handles EIP-712, signatureType, funder correctly
+    const orderArgs = { tokenID: tokenId, price, size, side };
+    const marketInfo = { tickSize: '0.01', negRisk: false };
+    const signedOrder = await clobClient.createOrder(orderArgs, marketInfo);
+    return {
+      order: signedOrder,
+      signature: null, // embedded by SDK
+      metadata: { side, price, size, tokenId, dryRun },
+      _sdkOrder: signedOrder,
+    };
   }
 
-  // Default expiration: 1 hour from now
+  // Manual fallback (EOA, signatureType 0)
+  const USDC_DECIMALS = 6;
+  const sideNum = side === 'BUY' ? 0 : 1;
+  const usdcAmount = size;
+  const shares = usdcAmount / price;
+  const makerAmount = BigInt(Math.floor(usdcAmount * 10 ** USDC_DECIMALS));
+  const takerAmount = BigInt(Math.floor(shares * 10 ** USDC_DECIMALS));
   const exp = expiration || Math.floor(Date.now() / 1000) + 3600;
   const salt = BigInt(Math.floor(Math.random() * 2 ** 128));
 
@@ -214,47 +221,29 @@ async function createOrder({ tokenId, side, price, size, expiration }) {
     salt: salt.toString(),
     maker: wallet.address,
     signer: wallet.address,
-    taker: '0x0000000000000000000000000000000000000000', // open taker
+    taker: '0x0000000000000000000000000000000000000000',
     tokenId,
     makerAmount: makerAmount.toString(),
     takerAmount: takerAmount.toString(),
     expiration: exp.toString(),
     nonce: (nonce++).toString(),
-    feeRateBps: '0', // Polymarket sets this
+    feeRateBps: '0',
     side: sideNum,
-    signatureType: 0, // EOA
+    signatureType: 0,
   };
 
-  // Sign with EIP-712
-  let signature;
-  if (!dryRun) {
-    signature = await wallet.signTypedData(
-      EIP712_DOMAIN,
-      ORDER_TYPES_EIP712,
-      order
-    );
-  } else {
-    signature = '0x_DRY_RUN_SIGNATURE';
-  }
+  const signature = dryRun
+    ? '0x_DRY_RUN_SIGNATURE'
+    : await wallet.signTypedData(EIP712_DOMAIN, ORDER_TYPES_EIP712, order);
 
   return {
     order,
     signature,
-    metadata: {
-      side,
-      price,
-      size,
-      tokenId,
-      expiration: new Date(exp * 1000).toISOString(),
-      dryRun,
-    },
+    metadata: { side, price, size, tokenId, expiration: new Date(exp * 1000).toISOString(), dryRun },
   };
 }
 
 // ─── Order Submission ────────────────────────────────────────────────
-/**
- * Submit a signed order to the Polymarket CLOB API.
- */
 async function submitOrder(signedOrder) {
   if (dryRun) {
     const dryResult = {
@@ -269,27 +258,40 @@ async function submitOrder(signedOrder) {
     return dryResult;
   }
 
+  // Use SDK if available
+  if (clobClient && signedOrder._sdkOrder) {
+    try {
+      const result = await clobClient.postOrder(signedOrder._sdkOrder);
+      const orderRecord = {
+        orderId: result.orderID || result.id,
+        status: 'OPEN',
+        ...signedOrder.metadata,
+        createdAt: new Date().toISOString(),
+        clobResponse: result,
+      };
+      liveOrders.push(orderRecord);
+      saveOrders();
+      log.info('CLOB_EXEC', `Order placed via SDK: ${orderRecord.orderId} | ${signedOrder.metadata.side} ${signedOrder.metadata.size} @ ${signedOrder.metadata.price}`);
+      return orderRecord;
+    } catch (err) {
+      log.error('CLOB_EXEC', `SDK order submission failed: ${err.message}`);
+      throw err;
+    }
+  }
+
+  // Manual fallback
   try {
-    // Signature must be embedded inside the order object (Polymarket CLOB spec)
     const orderWithSig = { ...signedOrder.order, signature: signedOrder.signature };
     const requestBody = JSON.stringify({
       order: orderWithSig,
       owner: wallet.address,
-      orderType: 'GTC', // Good 'til cancelled
+      orderType: 'GTC',
     });
 
     const authHeaders = buildL2Headers('POST', '/order', requestBody);
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(authHeaders || {}),
-    };
+    const headers = { 'Content-Type': 'application/json', ...(authHeaders || {}) };
 
-    const response = await fetch(`${CLOB_API}/order`, {
-      method: 'POST',
-      headers,
-      body: requestBody,
-    });
-
+    const response = await fetch(`${CLOB_API}/order`, { method: 'POST', headers, body: requestBody });
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`CLOB API ${response.status}: ${text}`);
@@ -305,7 +307,6 @@ async function submitOrder(signedOrder) {
     };
     liveOrders.push(orderRecord);
     saveOrders();
-
     log.info('CLOB_EXEC', `Order placed: ${result.orderID} | ${signedOrder.metadata.side} ${signedOrder.metadata.size} @ ${signedOrder.metadata.price}`);
     return orderRecord;
   } catch (err) {
@@ -710,6 +711,7 @@ function getStatus() {
     openOrders: liveOrders.filter(o => o.status === 'OPEN').length,
     totalOrders: liveOrders.length,
     mode: dryRun ? 'DRY_RUN' : 'LIVE',
+    sdkClient: !!clobClient,
   };
 }
 
