@@ -922,13 +922,18 @@ async function handleMyStats(userId, chatId) {
   }
 
   // Group by strategy
+  // pnl is an object: { netPnL, grossPnL, won, ... } — must use pnl.netPnL not pnl directly
   const byStrategy = {};
   for (const t of resolved) {
     const s = t.strategy || 'UNKNOWN';
     if (!byStrategy[s]) byStrategy[s] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
+    const netPnL = typeof t.pnl === 'object' ? (t.pnl?.netPnL ?? 0) : (parseFloat(t.pnl) || 0);
+    const won = typeof t.pnl === 'object' ? t.pnl?.won : netPnL > 0;
+    // Exclude expired trades (won === null) from W/L counts
+    if (won === null || won === undefined) continue;
     byStrategy[s].trades++;
-    byStrategy[s].pnl += parseFloat(t.pnl) || 0;
-    if ((parseFloat(t.pnl) || 0) > 0) byStrategy[s].wins++;
+    byStrategy[s].pnl += netPnL;
+    if (won === true) byStrategy[s].wins++;
     else byStrategy[s].losses++;
   }
 
@@ -1240,7 +1245,10 @@ async function pushResolutionSignal(resolutions) {
       const sideTag = r.side ? ` ${r.side.toUpperCase()}` : '';
       text += `${icon} *${truncate(r.question || r.market || 'Unknown', 45)}*\n`;
       text += `   ${stratTag}${sideTag} → ${r.outcome || r.result || '?'}`;
-      if (r.pnl != null) text += ` | P&L: ${r.pnl >= 0 ? '+' : ''}$${(parseFloat(r.pnl) || 0).toFixed(2)}`;
+      if (r.pnl != null) {
+        const rNetPnL = typeof r.pnl === 'object' ? (r.pnl?.netPnL ?? 0) : (parseFloat(r.pnl) || 0);
+        text += ` | P&L: ${rNetPnL >= 0 ? '+' : ''}$${rNetPnL.toFixed(2)}`;
+      }
       text += `\n\n`;
     }
     await sendTo(user.chatId, text);
