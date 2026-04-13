@@ -45,9 +45,8 @@ const path = require('path');
 // ═══════════════════════════════════════════════════════════════════════
 
 const CFG = {
-  // Binance WebSocket
-  binanceWsUrl: 'wss://stream.binance.com:9443/stream',
-  streams: ['btcusdt@aggTrade', 'btcusdt@kline_1m', 'btcusdt@kline_5m'],
+  // Kraken WebSocket v2 (EU-accessible, replaces Binance)
+  krakenWsUrl: 'wss://ws.kraken.com/v2',
 
   // Candle history
   maxCandles1m: 120,     // 2 hours of 1m candles
@@ -98,8 +97,10 @@ const CFG = {
 // ═══════════════════════════════════════════════════════════════════════
 
 let running = false;
-let binanceWs = null;
+let krakenWs = null;
 let reconnectTimer = null;
+// Candle builders (populated from Kraken trade stream)
+let activeCandleBuilders = { '1m': null, '5m': null };
 let reconnectAttempts = 0;
 let marketPollTimer = null;
 
@@ -213,49 +214,105 @@ function loadState() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// BINANCE WEBSOCKET — Real-Time BTC Price & Trades
+// KRAKEN WEBSOCKET v2 — Real-Time BTC Price & Trades (EU-accessible)
 // ═══════════════════════════════════════════════════════════════════════
 
-function connectBinance() {
-  if (binanceWs) {
-    try { binanceWs.close(); } catch {}
-    binanceWs = null;
+// Build 1m and 5m candles from individual trade ticks
+function getCandleKey(intervalMs, ts) {
+  return Math.floor(ts / intervalMs) * intervalMs;
+}
+
+function ingestTradeIntoCandles(price, qty, isBuy, ts) {
+  for (const [label, intervalMs] of [['1m', 60000], ['5m', 300000]]) {
+    const key = getCandleKey(intervalMs, ts);
+    let c = activeCandleBuilders[label];
+
+    if (!c || c.ts !== key) {
+      // Previous candle closed — flush it
+      if (c) {
+        const closed = { ...c, closed: true };
+        if (label === '1m') {
+          candles1m.push(closed);
+          if (candles1m.length > CFG.maxCandles1m) candles1m.shift();
+          onCandleClose1m();
+        } else {
+          candles5m.push(closed);
+          if (candles5m.length > CFG.maxCandles5m) candles5m.shift();
+          onCandleClose5m();
+        }
+      }
+      // Start new candle
+      c = { open: price, high: price, low: price, close: price,
+             volume: 0, buyVol: 0, sellVol: 0, ts: key, closed: false };
+      activeCandleBuilders[label] = c;
+      if (label === '1m') currentCandle1m = c;
+      else currentCandle5m = c;
+    }
+
+    c.high = Math.max(c.high, price);
+    c.low  = Math.min(c.low,  price);
+    c.close = price;
+    c.volume += qty;
+    if (isBuy) c.buyVol += qty; else c.sellVol += qty;
+
+    if (label === '1m') currentCandle1m = c;
+    else currentCandle5m = c;
+  }
+}
+
+function connectKraken() {
+  if (krakenWs) {
+    try { krakenWs.close(); } catch {}
+    krakenWs = null;
   }
 
-  const url = `${CFG.binanceWsUrl}?streams=${CFG.streams.join('/')}`;
-  log.info('SNIPER', `Connecting to Binance WebSocket...`);
+  log.info('SNIPER', `Connecting to Kraken WebSocket...`);
+  krakenWs = new WebSocket(CFG.krakenWsUrl);
 
-  binanceWs = new WebSocket(url);
-
-  binanceWs.on('open', () => {
+  krakenWs.on('open', () => {
     reconnectAttempts = 0;
-    log.info('SNIPER', `🟢 Binance WebSocket connected — live BTC feed active`);
+    log.info('SNIPER', `🟢 Kraken WebSocket connected — live BTC feed active`);
+    // Subscribe to real-time trades for BTC/USD
+    krakenWs.send(JSON.stringify({
+      method: 'subscribe',
+      params: { channel: 'trade', symbol: ['BTC/USD'] },
+    }));
   });
 
-  binanceWs.on('message', (raw) => {
+  krakenWs.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw);
-      const data = msg.data;
-      if (!data) return;
+      if (msg.channel !== 'trade' || !Array.isArray(msg.data)) return;
+      for (const t of msg.data) {
+        const price = parseFloat(t.price);
+        const qty   = parseFloat(t.qty);
+        const isBuy = t.side === 'buy';
+        const ts    = t.timestamp ? new Date(t.timestamp).getTime() : Date.now();
 
-      if (msg.stream === 'btcusdt@aggTrade') {
-        handleAggTrade(data);
-      } else if (msg.stream === 'btcusdt@kline_1m') {
-        handleKline(data, '1m');
-      } else if (msg.stream === 'btcusdt@kline_5m') {
-        handleKline(data, '5m');
+        lastPrice     = price;
+        lastPriceTime = ts;
+
+        // Trade flow (same as Binance aggTrade)
+        tradeFlow.push({ ts, price, qty, isBuy });
+        const cutoff = Date.now() - CFG.flowWindowMs;
+        while (tradeFlow.length > 0 && tradeFlow[0].ts < cutoff) tradeFlow.shift();
+        vwapCumPV += price * qty;
+        vwapCumV  += qty;
+
+        // Feed candle builders
+        ingestTradeIntoCandles(price, qty, isBuy, ts);
       }
     } catch {}
   });
 
-  binanceWs.on('close', () => {
-    log.warn('SNIPER', 'Binance WebSocket closed');
-    binanceWs = null;
+  krakenWs.on('close', () => {
+    log.warn('SNIPER', 'Kraken WebSocket closed');
+    krakenWs = null;
     scheduleReconnect();
   });
 
-  binanceWs.on('error', (err) => {
-    log.warn('SNIPER', `Binance WS error: ${err.message}`);
+  krakenWs.on('error', (err) => {
+    log.warn('SNIPER', `Kraken WS error: ${err.message}`);
   });
 }
 
@@ -266,68 +323,8 @@ function scheduleReconnect() {
   log.info('SNIPER', `Reconnecting in ${(delay / 1000).toFixed(0)}s (attempt ${reconnectAttempts})`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    if (running) connectBinance();
+    if (running) connectKraken();
   }, delay);
-}
-
-// ─── Handle aggregated trades (real-time price + buy/sell flow) ──────
-
-function handleAggTrade(data) {
-  const price = parseFloat(data.p);
-  const qty = parseFloat(data.q);
-  const isBuyerMaker = data.m; // true = seller initiated (buyer was maker)
-  const ts = data.T || Date.now();
-
-  lastPrice = price;
-  lastPriceTime = ts;
-
-  // Track trade flow for buy/sell ratio
-  tradeFlow.push({ ts, price, qty, isBuy: !isBuyerMaker });
-
-  // Prune old flow data
-  const cutoff = Date.now() - CFG.flowWindowMs;
-  while (tradeFlow.length > 0 && tradeFlow[0].ts < cutoff) {
-    tradeFlow.shift();
-  }
-
-  // Update VWAP
-  vwapCumPV += price * qty;
-  vwapCumV += qty;
-}
-
-// ─── Handle kline (candle) updates ───────────────────────────────────
-
-function handleKline(data, interval) {
-  const k = data.k;
-  if (!k) return;
-
-  const candle = {
-    open: parseFloat(k.o),
-    high: parseFloat(k.h),
-    low: parseFloat(k.l),
-    close: parseFloat(k.c),
-    volume: parseFloat(k.v),
-    buyVol: parseFloat(k.V),          // Taker buy volume
-    sellVol: parseFloat(k.v) - parseFloat(k.V),
-    ts: k.t,
-    closed: k.x,                       // Is candle closed?
-  };
-
-  if (interval === '1m') {
-    currentCandle1m = candle;
-    if (candle.closed) {
-      candles1m.push(candle);
-      if (candles1m.length > CFG.maxCandles1m) candles1m.shift();
-      onCandleClose1m();
-    }
-  } else if (interval === '5m') {
-    currentCandle5m = candle;
-    if (candle.closed) {
-      candles5m.push(candle);
-      if (candles5m.length > CFG.maxCandles5m) candles5m.shift();
-      onCandleClose5m();
-    }
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1167,7 +1164,7 @@ function start() {
   log.info('SNIPER', '⚡ ═══════════════════════════════════════════');
 
   // Connect to Binance for real-time price
-  connectBinance();
+  connectKraken();
 
   // Start polling Polymarket for "Up or Down" markets
   pollMarkets();
@@ -1195,9 +1192,9 @@ function start() {
 
 function stop() {
   running = false;
-  if (binanceWs) {
-    try { binanceWs.close(); } catch {}
-    binanceWs = null;
+  if (krakenWs) {
+    try { krakenWs.close(); } catch {}
+    krakenWs = null;
   }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (marketPollTimer) { clearInterval(marketPollTimer); marketPollTimer = null; }
