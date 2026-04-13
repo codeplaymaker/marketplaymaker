@@ -260,6 +260,12 @@ async function executeShadow(shadowConfig) {
 
     log.info('SHADOW_LIVE', `Shadow trade: ${shadowConfig.side} $${shadowConfig.size} "${shadowConfig.market?.slice(0, 50)}" | paper: ${shadowConfig.paperEntryPrice} real: ${fillPrice} | slip diff: ${(slippageDiff * 100).toFixed(2)}%`);
 
+    // Notify Telegram users
+    try {
+      const telegram = require('../telegram');
+      if (telegram.pushShadowTradeSignal) telegram.pushShadowTradeSignal(position).catch(() => {});
+    } catch { /* telegram not loaded */ }
+
     return position;
   } catch (err) {
     log.error('SHADOW_LIVE', `Shadow trade failed: ${err.message}`);
@@ -315,6 +321,12 @@ function resolvePosition(conditionId, outcome) {
   saveState();
 
   log.info('SHADOW_LIVE', `Shadow resolved: ${won ? 'WIN' : 'LOSS'} $${pnl.toFixed(2)} (paper: $${paperPnl.toFixed(2)}, delta: $${closed.pnlDelta.toFixed(2)}) "${pos.market?.slice(0, 40)}"`);
+
+  // Notify Telegram users
+  try {
+    const telegram = require('../telegram');
+    if (telegram.pushShadowResolutionSignal) telegram.pushShadowResolutionSignal(closed).catch(() => {});
+  } catch { /* telegram not loaded */ }
 
   return closed;
 }

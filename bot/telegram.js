@@ -1175,6 +1175,49 @@ async function pushPaperTradeSignal(trades) {
 }
 
 /**
+ * Push shadow live trade notification to all users who have paper signals enabled.
+ * Called by shadowLive.executeShadow after a real trade is placed.
+ */
+async function pushShadowTradeSignal(position) {
+  if (!botToken || !position) return;
+  const allUsers = userStore.getAllUsers();
+  for (const user of allUsers) {
+    const sig = user.signals || {};
+    if (!sig.paper) continue; // Reuse paper signal subscription for shadow alerts
+    const stratTag = (position.strategy || 'AUTO').toUpperCase();
+    const slipDiff = ((position.realSlippage - (position.paperSlippage || 0)) * 100).toFixed(2);
+    let text = `🔴 *Shadow Live Trade Placed*\n\n`;
+    text += `• *${truncate(position.market || 'Unknown', 50)}*\n`;
+    text += `   ${stratTag} ${position.side} @ ${((position.entryPrice || 0) * 100).toFixed(1)}¢\n`;
+    text += `   Size: $${position.size.toFixed(2)} | Slip diff: ${slipDiff}%\n`;
+    text += `   Fill: ${position.fillOutcome || 'SUBMITTED'}\n`;
+    text += `_Real money — shadow validation trade_`;
+    await sendTo(user.chatId, text);
+  }
+}
+
+/**
+ * Push shadow live resolution notification to all users.
+ */
+async function pushShadowResolutionSignal(closed) {
+  if (!botToken || !closed) return;
+  const allUsers = userStore.getAllUsers();
+  for (const user of allUsers) {
+    const sig = user.signals || {};
+    if (!sig.paper) continue;
+    const icon = closed.won ? '✅' : '❌';
+    const stratTag = (closed.strategy || '?').toUpperCase();
+    let text = `${icon} *Shadow Trade Resolved*\n\n`;
+    text += `• *${truncate(closed.market || 'Unknown', 50)}*\n`;
+    text += `   ${stratTag} ${closed.side} → ${closed.outcome}\n`;
+    text += `   Real P&L: ${closed.pnl >= 0 ? '+' : ''}$${closed.pnl.toFixed(2)}\n`;
+    text += `   Paper P&L: ${closed.paperPnl >= 0 ? '+' : ''}$${closed.paperPnl.toFixed(2)} | Delta: ${closed.pnlDelta >= 0 ? '+' : ''}$${closed.pnlDelta.toFixed(2)}\n`;
+    text += `_Shadow live validation_`;
+    await sendTo(user.chatId, text);
+  }
+}
+
+/**
  * Push market resolution signal to users.
  */
 async function pushResolutionSignal(resolutions) {
@@ -1741,4 +1784,4 @@ async function handleICTAlert(chatId) {
   }
 }
 
-module.exports = { initialize, stop, isActive, sendTo, sendToAll, pushEdgeAlert, pushPaperTradeSignal, pushResolutionSignal, pushOpportunitySignal };
+module.exports = { initialize, stop, isActive, sendTo, sendToAll, pushEdgeAlert, pushPaperTradeSignal, pushResolutionSignal, pushOpportunitySignal, pushShadowTradeSignal, pushShadowResolutionSignal };

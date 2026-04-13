@@ -69,9 +69,9 @@ module.exports = {
     maxPerTrade: 2,                                    // Max $2 per shadow trade
     maxOpenPositions: 5,                               // Max 5 concurrent real positions
     maxDailyLoss: 5,                                   // Hard stop at $5 daily loss
-    minScore: 70,                                      // Only mirror high-conviction paper trades
+    minScore: 40,                                      // Mirror trades with meaningful conviction
     minLiquidity: 5000,                                // Only trade markets with $5k+ liquidity
-    strategies: ['autoScan', 'ARBITRAGE', 'MOMENTUM', 'NO_BETS', 'SPORTS_EDGE', 'PROVEN_EDGE'], // All winning strategies
+    strategies: ['ARBITRAGE', 'MOMENTUM', 'WHALE_DETECTION', 'NO_BETS', 'SPORTS_EDGE', 'PROVEN_EDGE'], // All active strategies
   },
 
   // Kalshi API
